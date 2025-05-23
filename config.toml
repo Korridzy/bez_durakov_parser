@@ -1,0 +1,6 @@
+[database]
+url = "sqlite:///./bez_durakov.db"
+
+[application]
+debug = true
+log_level = "INFO"
