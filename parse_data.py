@@ -457,15 +457,6 @@ def parse_xlsm(file_path):
         return None
 
 
-# Main code to get the list of files from the command line
-def parse_xlsm_files(file_paths):
-    all_data = []
-    for file_path in file_paths:
-        parsed_data = parse_xlsm(file_path)
-        all_data.append(parsed_data)
-    return all_data
-
-
 # Function to print parsed data
 def print_parsed_data(data):
     # Iterate over each element in the data list
@@ -483,6 +474,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse all XLSM files in a directory.")
     parser.add_argument('directory', type=str, help='Path to the directory containing XLSM files')
     parser.add_argument('--no-save', action='store_true', help='Do not save data to database')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Display detailed parsing results')
 
     args = parser.parse_args()
 
@@ -498,20 +490,34 @@ if __name__ == "__main__":
     pd.set_option('display.max_colwidth', None)
     pd.set_option('display.width', None)
 
-    # Read and parse all .xlsm files
-    data = parse_xlsm_files(file_paths)
-
-    # Print the parsed data
-    print_parsed_data(data)
-
-    # Сохранение данных в БД, если не указан флаг --no-save
+    # Create database connection if saving is needed
+    db = None
     if not args.no_save:
         db = Database(db_url=DATABASE_URL)
 
-        for parsed_data in data:
-            if parsed_data:  # Проверяем, что парсинг прошел успешно
+    # Process files sequentially
+    for file_path in file_paths:
+        print(f"\nProcessing file: {os.path.basename(file_path)}")
+        print("=" * 80)
+
+        # Parse a single file
+        parsed_data = parse_xlsm(file_path)
+
+        if parsed_data:
+            # Output parsing results only if verbose flag is set
+            if args.verbose:
+                print(f"Game date: {parsed_data['date'].strftime('%d.%m.%Y')}")
+                pprint(parsed_data)
+                print("-" * 80)
+
+            # Save to database if needed
+            if not args.no_save and db:
                 success = db.add_game_data(parsed_data)
                 if success:
-                    print(f"Данные игры от {parsed_data['date'].strftime('%d.%m.%Y')} успешно сохранены в базу")
+                    print(f"✅ Data for game from {parsed_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
                 else:
-                    print(f"Ошибка сохранения игры от {parsed_data['date'].strftime('%d.%m.%Y')} в базу")
+                    print(f"❌ Error saving game from {parsed_data['date'].strftime('%d.%m.%Y')} to database")
+        else:
+            print(f"❌ Failed to process file {file_path}")
+
+        print("\n")
