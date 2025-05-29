@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import argparse
 import os
 import warnings
@@ -84,12 +85,12 @@ def parse_chisla(all_sheets):
                 raise XLSParseError(f"Team '{team}' not found in 'Числа'")
             row_index = team_rows.index[0]
             # Get the values from the specified columns
-            i_value = chisla_table.loc[row_index, 'I']
-            ii_value = chisla_table.loc[row_index, 'II']
-            iii_value = chisla_table.loc[row_index, 'III']
-            iv_value = chisla_table.loc[row_index, 'IV']
-            v_value = chisla_table.loc[row_index, 'V']
-            sum_value = chisla_table.loc[row_index, 'Сумма']
+            i_value = np.nan_to_num(chisla_table.loc[row_index, 'I'])
+            ii_value = np.nan_to_num(chisla_table.loc[row_index, 'II'])
+            iii_value = np.nan_to_num(chisla_table.loc[row_index, 'III'])
+            iv_value = np.nan_to_num(chisla_table.loc[row_index, 'IV'])
+            v_value = np.nan_to_num(chisla_table.loc[row_index, 'V'])
+            sum_value = np.nan_to_num(chisla_table.loc[row_index, 'Сумма'])
             # Check if the sum of I-V equals the value in "Сумма"
             if sum_value != i_value + ii_value + iii_value + iv_value + v_value:
                 raise XLSParseError(f"Sum mismatch for team '{team}' in 'Числа'")
