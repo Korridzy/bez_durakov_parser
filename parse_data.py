@@ -469,6 +469,39 @@ def print_parsed_data(data):
         # Print a separator for better readability
         print('-' * 40)
 
+def save_game_to_database(parsed_data, db):
+    """
+    Saves game data to the database.
+
+    Args:
+        parsed_data (dict): Parsed game data
+        db: Database object for saving data
+
+    Returns:
+        bool: True if data is successfully saved, False otherwise
+    """
+    try:
+        # Check if an identical game already exists in the database
+        identical_game = db.find_identical_game(parsed_data)
+
+        if identical_game:
+            print(f"ℹ️ Identical game from {parsed_data['date'].strftime('%d.%m.%Y')} already exists in the database. "
+                  f"Id: {identical_game['game_id']}. Skipping.")
+            return True
+
+        # Save the data
+        success = db.add_game_data(parsed_data)
+
+        # Display success/error message
+        if success:
+            print(f"✅ Data for game from {parsed_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
+            return True
+        else:
+            print(f"❌ Error saving game from {parsed_data['date'].strftime('%d.%m.%Y')} to database")
+            return False
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        return False
 
 # Main code to get the list of files from the command line
 if __name__ == "__main__":
@@ -513,11 +546,7 @@ if __name__ == "__main__":
 
             # Save to database if needed
             if not args.no_save and db:
-                success = db.add_game_data(parsed_data)
-                if success:
-                    print(f"✅ Data for game from {parsed_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
-                else:
-                    print(f"❌ Error saving game from {parsed_data['date'].strftime('%d.%m.%Y')} to database")
+                save_game_to_database(parsed_data, db)
         else:
             print(f"❌ Failed to process file {file_path}")
 
