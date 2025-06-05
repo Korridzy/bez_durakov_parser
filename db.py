@@ -483,7 +483,7 @@ class Database:
                     # Game is identical, return the result
                     game = session.query(Game).filter_by(game_id=game_id).first()
                     return {
-                        'game_id': game.game_id,  # Добавлен game_id
+                        'game_id': game.game_id,
                         'date': game.game_date,
                         'teams': db_team_names
                         # Additional data can be added here if needed
@@ -495,14 +495,14 @@ class Database:
 # Usage example
 if __name__ == "__main__":
     db = Database()
-# Use Alembic instead
-# db.create_tables()
+    # Use Alembic instead
+    # db.create_tables()
 
-# Example: Add data from parsed XLSM file
-# parsed_data = parse_xlsm("path/to/file.xlsm")
-# db.add_game_data(parsed_data)
+    # Example: Add data from parsed XLSM file
+    # parsed_data = parse_xlsm("path/to/file.xlsm")
+    # db.add_game_data(parsed_data)
 
-# Example: Get all games
-# games = db.get_all_games()
-# for game in games:
-#     print(f"Game ID: {game.game_id}, Date: {game.game_date}")
+    # Example: Get all games
+    # games = db.get_all_games()
+    # for game in games:
+    #     print(f"Game ID: {game.game_id}, Date: {game.game_date}")

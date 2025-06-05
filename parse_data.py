@@ -345,11 +345,11 @@ def parse_auction(all_sheets):
                 raise XLSParseError(f"Team '{team}' not found in 'Общая таблица'")
             row_index = team_rows.index[0]
             total_points[team] = (
-                    general_table.loc[row_index, 'I'] +
-                    general_table.loc[row_index, 'II'] +
-                    general_table.loc[row_index, 'III'] +
-                    general_table.loc[row_index, 'IV'] +
-                    general_table.loc[row_index, 'V']
+                general_table.loc[row_index, 'I'] +
+                general_table.loc[row_index, 'II'] +
+                general_table.loc[row_index, 'III'] +
+                general_table.loc[row_index, 'IV'] +
+                general_table.loc[row_index, 'V']
             )
 
         # Retrieve rate parameters from the specified cells
@@ -384,12 +384,12 @@ def parse_auction(all_sheets):
                 raise XLSParseError(f"Team '{team}' not found in 'Аукцион'")
             row_index = team_rows.index[0]
             expected_total_points = (
-                    general_table.loc[row_index, 'I'] +
-                    general_table.loc[row_index, 'II'] +
-                    general_table.loc[row_index, 'III'] +
-                    general_table.loc[row_index, 'IV'] +
-                    general_table.loc[row_index, 'V'] +
-                    general_table.loc[row_index, 'VI']
+                general_table.loc[row_index, 'I'] +
+                general_table.loc[row_index, 'II'] +
+                general_table.loc[row_index, 'III'] +
+                general_table.loc[row_index, 'IV'] +
+                general_table.loc[row_index, 'V'] +
+                general_table.loc[row_index, 'VI']
             )
             if total_points[team] != expected_total_points:
                 raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points}")
