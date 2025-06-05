@@ -162,6 +162,43 @@ class Mot(Base):
     game = relationship("Game", back_populates="mot_results")
     team = relationship("Team", back_populates="mot_results")
 
+class TeamGameScore(Base):
+    """
+    ORM model for the SQL view team_game_scores.
+
+    This view contains aggregated results of all teams for each game.
+    It combines data from the tables games, teams and individual game categories (vybor, chisla,
+    pref, pairs, razobl, auction, mot) to simplify analysis and comparison of results.
+
+    Main purposes:
+    - Quick access to total points of teams for each category
+    - Convenient comparison of results between teams within a single game
+    - Search and identification of identical games
+    """
+
+    __tablename__ = 'team_game_scores'
+
+    # Indicate that this is a view, not a regular table
+    __table_args__ = {'info': {'is_view': True}}
+
+    # Primary keys are required for ORM
+    game_id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, primary_key=True)
+    game_date = Column(Date)
+    team_name = Column(String)
+
+    # Points by game categories
+    vybor_points = Column(Numeric)    # Points for "Choice"
+    chisla_points = Column(Numeric)   # Points for "Numbers"
+    pref_points = Column(Numeric)     # Points for "Preference"
+    pairs_points = Column(Numeric)    # Points for "Pairs"
+    razobl_points = Column(Numeric)   # Points for "Revelation" ("Razobl")
+    auction_points = Column(Numeric)  # Points for "Auction"
+    mot_points = Column(Numeric)      # Points for "Moment of Truth"
+
+    # Total points from all categories combined
+    total_points = Column(Numeric)    # Sum of all category points
+
 class Database:
     def __init__(self, db_url=None):
         # If no db_url is provided, use SQLite with a default file path
@@ -348,23 +385,124 @@ class Database:
                 if vybor:
                     results['vybor'][team.team_name] = vybor.points
 
-                # Get other results similarly...
+            # Get other results similarly...
 
             return results
         finally:
             session.close()
 
+    def get_game_ids_by_date(self, start_date, end_date=None):
+        """
+        Get game IDs for games that occurred on a specific date or within a date range.
+
+        Args:
+            start_date (datetime.date or datetime.datetime): The specific date or start of the date range
+            end_date (datetime.date or datetime.datetime, optional): The end of the date range
+
+        Returns:
+            list: List of game IDs
+        """
+        with self.Session() as session:
+            # Convert to date if datetime was provided
+            if hasattr(start_date, 'date'):
+                start_date = start_date.date()
+
+            # If end_date is provided, use it as a range
+            if end_date is not None:
+                if hasattr(end_date, 'date'):
+                    end_date = end_date.date()
+
+                games = session.query(Game.game_id).filter(
+                    Game.game_date >= start_date,
+                    Game.game_date <= end_date
+                ).all()
+            else:
+                # If only one date is provided, find games on that specific date
+                games = session.query(Game.game_id).filter(
+                    Game.game_date == start_date
+                ).all()
+
+            # Extract game_ids from the result
+            game_ids = [game.game_id for game in games]
+            return game_ids
+
+    def find_identical_game(self, game_data):
+        """
+        Checks for an identical game in the database using team_game_scores view.
+
+        Args:
+            game_data (dict): The parsed game data to check for duplicates
+
+        Returns:
+            dict or None: Found identical game data or None if not found
+        """
+        # Convert to date object if datetime was provided
+        game_date = game_data['date'].date() if hasattr(game_data['date'], 'date') else game_data['date']
+
+        # Get list of game IDs for the same date
+        game_ids = self.get_game_ids_by_date(game_date)
+
+        if not game_ids:
+            return None
+
+        with self.Session() as session:
+            for game_id in game_ids:
+                # Get records from team_game_scores view for this game
+                team_scores = session.query(TeamGameScore).filter_by(game_id=game_id).all()
+
+                # Compare team lists
+                db_team_names = sorted([ts.team_name for ts in team_scores])
+                if sorted(game_data['teams']) != db_team_names:
+                    continue
+
+                # Check if scores match for each team
+                scores_match = True
+                for team_score in team_scores:
+                    team_name = team_score.team_name
+
+                    # Calculate total points from new game data
+                    new_total = (
+                        float(game_data['vybor'][team_name]) +
+                        float(game_data['chisla'][team_name]['Сумма']) +
+                        float(game_data['pref'][team_name]['Сумма']) +
+                        float(game_data['pairs'][team_name]) +
+                        float(game_data['razobl'][team_name]['Сумма']) +
+                        float(game_data['auction'][team_name]['Сумма']) +
+                        float(game_data['mot'][team_name]['Сумма'])
+                    )
+
+                    # Get total points from database
+                    db_total = float(team_score.total_points)
+
+                    # Compare with small tolerance for floating point precision
+                    if abs(new_total - db_total) > 0.01:
+                        scores_match = False
+                        break
+
+                if scores_match:
+                    # Game is identical, return the result
+                    game = session.query(Game).filter_by(game_id=game_id).first()
+                    return {
+                        'game_id': game.game_id,  # Добавлен game_id
+                        'date': game.game_date,
+                        'teams': db_team_names
+                        # Additional data can be added here if needed
+                    }
+
+            # No match found
+            return None
+
 # Usage example
 if __name__ == "__main__":
     db = Database()
-    # Use Alembic instead
-    # db.create_tables()
+# Use Alembic instead
+# db.create_tables()
 
-    # Example: Add data from parsed XLSM file
-    # parsed_data = parse_xlsm("path/to/file.xlsm")
-    # db.add_game_data(parsed_data)
+# Example: Add data from parsed XLSM file
+# parsed_data = parse_xlsm("path/to/file.xlsm")
+# db.add_game_data(parsed_data)
 
-    # Example: Get all games
-    # games = db.get_all_games()
-    # for game in games:
-    #     print(f"Game ID: {game.game_id}, Date: {game.game_date}")
+# Example: Get all games
+# games = db.get_all_games()
+# for game in games:
+#     print(f"Game ID: {game.game_id}, Date: {game.game_date}")
