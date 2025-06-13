@@ -4,9 +4,9 @@ import argparse
 import os
 import warnings
 from datetime import datetime
-from pprint import pprint
 from config import DATABASE_URL
 from db import Database
+from BdGame import BdGame
 
 
 class XLSParseError(Exception):
@@ -38,14 +38,12 @@ def parse_teams(all_sheets):
         raise XLSParseError(f"Error parsing teams: {e}")
 
 
-def parse_vybor(all_sheets):
+def parse_vybor(all_sheets, vybor_dict):
     try:
         # Get the list of teams
-        teams = parse_teams(all_sheets)
+        teams = list(vybor_dict.keys())
         # Get the "Общая таблица" sheet
         general_table = all_sheets['Общая таблица']
-        # Initialize the dictionary to store the results
-        vybor_dict = {}
 
         # Iterate over each team
         for team in teams:
@@ -58,24 +56,18 @@ def parse_vybor(all_sheets):
             points = general_table.loc[row_index, 'I']
             # Add the team and points to the dictionary
             vybor_dict[team] = points
-
-        return vybor_dict
     except Exception as e:
         raise XLSParseError(f"Error parsing vybor: {e}")
 
 
-def parse_chisla(all_sheets):
+def parse_chisla(all_sheets, chisla_dict):
     try:
-        # print(all_sheets['Числа'])  # Debugging
         # Get the list of teams
-        teams = parse_teams(all_sheets)
+        teams = list(chisla_dict.keys())
         # Get the "Числа" sheet
         chisla_table = all_sheets['Числа']
         chisla_table.columns = chisla_table.iloc[0]
         chisla_table = chisla_table[1:].reset_index(drop=True)
-        # print(chisla_table) # Debugging
-        # Initialize the dictionary to store the results
-        chisla_dict = {}
 
         # Iterate over each team
         for team in teams:
@@ -95,30 +87,22 @@ def parse_chisla(all_sheets):
             if sum_value != i_value + ii_value + iii_value + iv_value + v_value:
                 raise XLSParseError(f"Sum mismatch for team '{team}' in 'Числа'")
             # Store the team data in the dictionary
-            chisla_dict[team] = {
-                "I": i_value,
-                "II": ii_value,
-                "III": iii_value,
-                "IV": iv_value,
-                "V": v_value,
-                "Сумма": sum_value
-            }
-
-        return chisla_dict
+            chisla_dict[team]['I'] = i_value
+            chisla_dict[team]['II'] = ii_value
+            chisla_dict[team]['III'] = iii_value
+            chisla_dict[team]['IV'] = iv_value
+            chisla_dict[team]['V'] = v_value
+            chisla_dict[team]['Сумма'] = sum_value
     except Exception as e:
         raise XLSParseError(f"Error parsing chisla: {e}")
 
 
-def parse_pref(all_sheets):
+def parse_pref(all_sheets, pref_dict):
     try:
         # Get the "Преферанс" sheet
         pref_table = all_sheets['Преферанс']
-
         # Get the list of teams
-        teams = parse_teams(all_sheets)
-
-        # Initialize the dictionary to store the results
-        pref_dict = {}
+        teams = list(pref_dict.keys())
 
         # Iterate over each team
         for team in teams:
@@ -129,33 +113,27 @@ def parse_pref(all_sheets):
             row_index = team_rows.index[0]
 
             # Store the team data in the dictionary directly
-            pref_dict[team] = {
-                "I": pref_table.loc[row_index, 'I'],
-                "II": pref_table.loc[row_index, 'II'],
-                "III": pref_table.loc[row_index, 'III'],
-                "IV": pref_table.loc[row_index, 'IV'],
-                "V": pref_table.loc[row_index, 'V'],
-                "VI": pref_table.loc[row_index, 'VI'],
-                "VII": pref_table.loc[row_index, 'VII'],
-                "Points": pref_table.loc[row_index, 'Points'],
-                "Penalty": pref_table.loc[row_index, 'Penalty'],
-                "Bonus": pref_table.loc[row_index, 'Bonus'],
-                "Сумма": pref_table.loc[row_index, 'Sum']
-            }
-
-        return pref_dict
+            pref_dict[team]['I'] = pref_table.loc[row_index, 'I']
+            pref_dict[team]['II'] = pref_table.loc[row_index, 'II']
+            pref_dict[team]['III'] = pref_table.loc[row_index, 'III']
+            pref_dict[team]['IV'] = pref_table.loc[row_index, 'IV']
+            pref_dict[team]['V'] = pref_table.loc[row_index, 'V']
+            pref_dict[team]['VI'] = pref_table.loc[row_index, 'VI']
+            pref_dict[team]['VII'] = pref_table.loc[row_index, 'VII']
+            pref_dict[team]['Points'] = pref_table.loc[row_index, 'Points']
+            pref_dict[team]['Penalty'] = pref_table.loc[row_index, 'Penalty']
+            pref_dict[team]['Bonus'] = pref_table.loc[row_index, 'Bonus']
+            pref_dict[team]['Сумма'] = pref_table.loc[row_index, 'Sum']
     except Exception as e:
         raise XLSParseError(f"Error parsing pref: {e}")
 
 
-def parse_pairs(all_sheets):
+def parse_pairs(all_sheets, pairs_dict):
     try:
         # Get the list of teams
-        teams = parse_teams(all_sheets)
+        teams = list(pairs_dict.keys())
         # Get the "Общая таблица" sheet
         general_table = all_sheets['Общая таблица']
-        # Initialize the dictionary to store the results
-        pairs_dict = {}
 
         # Iterate over each team
         for team in teams:
@@ -168,22 +146,18 @@ def parse_pairs(all_sheets):
             points = general_table.loc[row_index, 'IV']
             # Add the team and points to the dictionary
             pairs_dict[team] = points
-
-        return pairs_dict
     except Exception as e:
         raise XLSParseError(f"Error parsing pairs: {e}")
 
 
-def parse_razobl(all_sheets):
+def parse_razobl(all_sheets, razobl_dict):
     try:
         # Get the list of teams
-        teams = parse_teams(all_sheets)
+        teams = list(razobl_dict.keys())
         # Get the "Разоблачение" sheet
         razobl_table = all_sheets['Разоблачение']
         razobl_table.columns = razobl_table.iloc[0]
         razobl_table = razobl_table[1:].reset_index(drop=True)
-        # Initialize the dictionary to store the results
-        razobl_dict = {}
 
         # Iterate over each team
         for team in teams:
@@ -202,15 +176,11 @@ def parse_razobl(all_sheets):
             if sum_value != i_value + ii_value + iii_value + iv_value:
                 raise XLSParseError(f"Sum mismatch for team '{team}' in 'Разоблачение'")
             # Store the team data in the dictionary
-            razobl_dict[team] = {
-                "I": i_value,
-                "II": ii_value,
-                "III": iii_value,
-                "IV": iv_value,
-                "Сумма": sum_value
-            }
-
-        return razobl_dict
+            razobl_dict[team]['I'] = i_value
+            razobl_dict[team]['II'] = ii_value
+            razobl_dict[team]['III'] = iii_value
+            razobl_dict[team]['IV'] = iv_value
+            razobl_dict[team]['Сумма'] = sum_value
     except Exception as e:
         raise XLSParseError(f"Error parsing razobl: {e}")
 
@@ -240,8 +210,19 @@ def get_rate_from_user(team_name, column_name, min_value=1.0, max_value=2.5):
             print("Пожалуйста, введите корректное число")
 
 
-def restore_auction_rates(rate_params, auction_data, total_points):
+def restore_auction_rates(rate_params, auction_data, full_game_data):
     try:
+        # Initialize total points based on game data
+        total_points = {}
+        for team in auction_data.keys():
+            total_points[team] = (
+                full_game_data['vybor'][team] +
+                full_game_data['chisla'][team]['Сумма'] +
+                full_game_data['pref'][team]['Сумма'] +
+                full_game_data['pairs'][team] +
+                full_game_data['razobl'][team]['Сумма']
+            )
+
         # Define the columns to process
         columns = ['I', 'II', 'III', 'IV']
         conflict_teams = []  # List to track teams with rate conflicts
@@ -277,7 +258,6 @@ def restore_auction_rates(rate_params, auction_data, total_points):
                     auction_data[team][col]['rate'] = 1.0
 
                 # If there are conflicting teams, print all rates data for this column
-                # Because this information is needed for user to make a decision
                 if conflict_teams:
                     print(f"Команда: {team}, Ставка: {auction_data[team][col]['bid']}, "
                           f"Общие баллы: {total_points[team]}, Присвоенный коэф: {auction_data[team][col]['rate']}")
@@ -285,29 +265,24 @@ def restore_auction_rates(rate_params, auction_data, total_points):
                 # Update total_points
                 total_points[team] += auction_data[team][col]['bid'] + auction_data[team][col]['points']
 
-            # Assign None to the rate of conflicting teams for the current column
+            # Assign user-input rates to conflicting teams for the current column
             for team in conflict_teams:
                 auction_data[team][col]['rate'] = get_rate_from_user(team, col)
 
             # Clear the conflict_teams list for the next column
             conflict_teams.clear()
-
-        return auction_data, total_points
+        return total_points
     except Exception as e:
         raise XLSParseError(f"Error restoring auction rates: {e}")
 
-def parse_auction(all_sheets):
+def parse_auction(all_sheets, auction_dict, full_game_data):
     try:
         # Get the list of teams
-        teams = parse_teams(all_sheets)
+        teams = list(auction_dict.keys())
         # Get the "Аукцион" sheet
         auction_table = all_sheets['Аукцион']
         # Get the "Общая таблица" sheet
         general_table = all_sheets['Общая таблица']
-        # print(auction_table)  # Debugging
-
-        # Initialize the dictionary to store the results
-        auction_dict = {}
 
         # Iterate over each team
         for team in teams:
@@ -329,28 +304,15 @@ def parse_auction(all_sheets):
             sum_value = auction_table.loc[row_index, 'Сумма баллов в конкурсе']
 
             # Store the team data in the dictionary
-            auction_dict[team] = {
-                "I": {"bid": i_value, "points": i_points},
-                "II": {"bid": ii_value, "points": ii_points},
-                "III": {"bid": iii_value, "points": iii_points},
-                "IV": {"bid": iv_value, "points": iv_points},
-                "Сумма": sum_value
-            }
-
-        # Initialize total points with the sum of values from columns I-V on the "Общая таблица" sheet
-        total_points = {}
-        for team in teams:
-            team_rows = general_table[general_table.iloc[:, 0] == team]
-            if team_rows.empty:
-                raise XLSParseError(f"Team '{team}' not found in 'Общая таблица'")
-            row_index = team_rows.index[0]
-            total_points[team] = (
-                general_table.loc[row_index, 'I'] +
-                general_table.loc[row_index, 'II'] +
-                general_table.loc[row_index, 'III'] +
-                general_table.loc[row_index, 'IV'] +
-                general_table.loc[row_index, 'V']
-            )
+            auction_dict[team]['I']['bid'] = i_value
+            auction_dict[team]['I']['points'] = i_points
+            auction_dict[team]['II']['bid'] = ii_value
+            auction_dict[team]['II']['points'] = ii_points
+            auction_dict[team]['III']['bid'] = iii_value
+            auction_dict[team]['III']['points'] = iii_points
+            auction_dict[team]['IV']['bid'] = iv_value
+            auction_dict[team]['IV']['points'] = iv_points
+            auction_dict[team]['Сумма'] = sum_value
 
         # Retrieve rate parameters from the specified cells
         total_rates_quan = auction_table.loc[31, 'Unnamed: 2']
@@ -375,7 +337,7 @@ def parse_auction(all_sheets):
         }
 
         # Call the restore_auction_rates function
-        auction_dict, total_points = restore_auction_rates(rate_params, auction_dict, total_points)
+        total_points = restore_auction_rates(rate_params, auction_dict, full_game_data)
 
         # Validate that total_points matches the values in the "Всего баллов" column
         for team in teams:
@@ -393,22 +355,16 @@ def parse_auction(all_sheets):
             )
             if total_points[team] != expected_total_points:
                 raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points}")
-
-        return auction_dict
     except Exception as e:
         raise XLSParseError(f"Error parsing auction: {e}")
 
 
-def parse_mot(all_sheets):
+def parse_mot(all_sheets, mot_dict):
     try:
         # Get the "Момент истины" sheet
         mot_table = all_sheets['Момент истины']
-
         # Get the list of teams
-        teams = parse_teams(all_sheets)
-
-        # Initialize the dictionary to store the results
-        mot_dict = {}
+        teams = list(mot_dict.keys())
 
         # Iterate over each team
         for team in teams:
@@ -422,16 +378,13 @@ def parse_mot(all_sheets):
             i_value = mot_table.loc[row_index, 'I']
             ii_value = mot_table.loc[row_index, 'II']
             iii_value = mot_table.loc[row_index, 'III']
+            sum_value = i_value + ii_value + iii_value
 
             # Store the team data in the dictionary with calculated sum
-            mot_dict[team] = {
-                "I": i_value,
-                "II": ii_value,
-                "III": iii_value,
-                "Сумма": i_value + ii_value + iii_value
-            }
-
-        return mot_dict
+            mot_dict[team]['I'] = i_value
+            mot_dict[team]['II'] = ii_value
+            mot_dict[team]['III'] = iii_value
+            mot_dict[team]['Сумма'] = sum_value
     except Exception as e:
         raise XLSParseError(f"Error parsing mot: {e}")
 
@@ -441,63 +394,61 @@ def parse_xlsm(file_path):
     try:
         all_sheets = pd.read_excel(file_path, sheet_name=None)
         # print(all_sheets)  # Debugging
-        parsed_data = {
-            'date': parse_date(all_sheets),
-            'teams': parse_teams(all_sheets),
-            'vybor': parse_vybor(all_sheets),
-            'chisla': parse_chisla(all_sheets),
-            'pref': parse_pref(all_sheets),
-            'pairs': parse_pairs(all_sheets),
-            'razobl': parse_razobl(all_sheets),
-            'auction': parse_auction(all_sheets),
-            'mot': parse_mot(all_sheets)
-        }
-        return parsed_data
+
+        # First, get basic information about the game
+        game_date = parse_date(all_sheets)
+        teams = parse_teams(all_sheets)
+
+        # Create a BdGame instance with basic information
+        game = BdGame(teams=teams, date=game_date)
+        # Get access to the data structure
+        game_data = game.get_data()
+
+        # Fill the data structure using parsers
+        parse_vybor(all_sheets, game_data['vybor'])
+        parse_chisla(all_sheets, game_data['chisla'])
+        parse_pref(all_sheets, game_data['pref'])
+        parse_pairs(all_sheets, game_data['pairs'])
+        parse_razobl(all_sheets, game_data['razobl'])
+        parse_auction(all_sheets, game_data['auction'], game_data)
+        parse_mot(all_sheets, game_data['mot'])
+
+        return game
     except XLSParseError as e:
         print(f"Error parsing file {file_path}: {e}")
         return None
 
 
-# Function to print parsed data
-def print_parsed_data(data):
-    # Iterate over each element in the data list
-    for item in data:
-        # Print the date in the desired format
-        print(f"Date: {item['date'].strftime('%d.%m.%Y')}")
-        # Print the item using pprint
-        pprint(item)
-        # Print a separator for better readability
-        print('-' * 40)
-
-def save_game_to_database(parsed_data, db):
+def save_game_to_database(game_instance, db):
     """
     Saves game data to the database.
 
     Args:
-        parsed_data (dict): Parsed game data
+        game_instance (BdGame): BdGame instance containing parsed data
         db: Database object for saving data
 
     Returns:
         bool: True if data is successfully saved, False otherwise
     """
     try:
+        game_data = game_instance.get_data()
         # Check if an identical game already exists in the database
-        identical_game = db.find_identical_game(parsed_data)
+        identical_game = db.find_identical_game(game_instance)
 
         if identical_game:
-            print(f"ℹ️ Identical game from {parsed_data['date'].strftime('%d.%m.%Y')} already exists in the database. "
+            print(f"ℹ️ Identical game from {game_data['date'].strftime('%d.%m.%Y')} already exists in the database. "
                   f"Id: {identical_game['game_id']}. Skipping.")
-            return True
+            return False
 
         # Save the data
-        success = db.add_game_data(parsed_data)
+        success = db.add_game_data(game_instance)
 
         # Display success/error message
         if success:
-            print(f"✅ Data for game from {parsed_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
+            print(f"✅ Data for game from {game_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
             return True
         else:
-            print(f"❌ Error saving game from {parsed_data['date'].strftime('%d.%m.%Y')} to database")
+            print(f"❌ Error saving game from {game_data['date'].strftime('%d.%m.%Y')} to database")
             return False
     except Exception as e:
         print(f"❌ Database error: {e}")
@@ -535,18 +486,16 @@ if __name__ == "__main__":
         print("=" * 80)
 
         # Parse a single file
-        parsed_data = parse_xlsm(file_path)
+        parsed_game = parse_xlsm(file_path)
 
-        if parsed_data:
+        if parsed_game:
             # Output parsing results only if verbose flag is set
             if args.verbose:
-                print(f"Game date: {parsed_data['date'].strftime('%d.%m.%Y')}")
-                pprint(parsed_data)
-                print("-" * 80)
+                parsed_game.print_detailed()
 
             # Save to database if needed
             if not args.no_save and db:
-                save_game_to_database(parsed_data, db)
+                save_game_to_database(parsed_game, db)
         else:
             print(f"❌ Failed to process file {file_path}")
 

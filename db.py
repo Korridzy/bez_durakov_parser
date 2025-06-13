@@ -222,18 +222,28 @@ class Database:
             session.flush()  # To get the team_id
         return team
 
-    def add_game_data(self, parsed_data):
-        """Add game data from the parsed XLSM file structure."""
+    def add_game_data(self, bd_game):
+        """
+        Add game data from BdGame instance to the database.
+
+        Args:
+            bd_game (BdGame): The BdGame instance containing game data
+
+        Returns:
+            bool: True if data was added successfully, False otherwise
+        """
         session = self.Session()
         try:
+            # Get data structure from the BdGame instance
+            game_data = bd_game.get_data()
             # Create a new game entry
-            game_date = parsed_data['date'].date() if hasattr(parsed_data['date'], 'date') else parsed_data['date']
+            game_date = game_data['date'].date() if hasattr(game_data['date'], 'date') else game_data['date']
             game = Game(game_date=game_date)
             session.add(game)
             session.flush()  # To get the game_id
 
             # Process teams
-            for team_name in parsed_data['teams']:
+            for team_name in game_data['teams']:
                 team = self.get_or_create_team(session, team_name)
 
                 # Add game-team relationship
@@ -241,7 +251,7 @@ class Database:
                 session.add(game_team)
 
                 # Add Vybor data
-                vybor_points = parsed_data['vybor'][team_name]
+                vybor_points = game_data['vybor'][team_name]
                 vybor = Vybor(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -250,7 +260,7 @@ class Database:
                 session.add(vybor)
 
                 # Add Chisla data
-                chisla_data = parsed_data['chisla'][team_name]
+                chisla_data = game_data['chisla'][team_name]
                 chisla = Chisla(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -264,7 +274,7 @@ class Database:
                 session.add(chisla)
 
                 # Add Pref data
-                pref_data = parsed_data['pref'][team_name]
+                pref_data = game_data['pref'][team_name]
                 pref = Pref(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -283,7 +293,7 @@ class Database:
                 session.add(pref)
 
                 # Add Pairs data
-                pairs_points = parsed_data['pairs'][team_name]
+                pairs_points = game_data['pairs'][team_name]
                 pairs = Pairs(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -292,7 +302,7 @@ class Database:
                 session.add(pairs)
 
                 # Add Razobl data
-                razobl_data = parsed_data['razobl'][team_name]
+                razobl_data = game_data['razobl'][team_name]
                 razobl = Razobl(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -305,7 +315,7 @@ class Database:
                 session.add(razobl)
 
                 # Add Auction data
-                auction_data = parsed_data['auction'][team_name]
+                auction_data = game_data['auction'][team_name]
                 auction = Auction(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -326,7 +336,7 @@ class Database:
                 session.add(auction)
 
                 # Add Mot data
-                mot_data = parsed_data['mot'][team_name]
+                mot_data = game_data['mot'][team_name]
                 mot = Mot(
                     game_id=game.game_id,
                     team_id=team.team_id,
@@ -426,7 +436,7 @@ class Database:
             game_ids = [game.game_id for game in games]
             return game_ids
 
-    def find_identical_game(self, game_data):
+    def find_identical_game(self, bd_game):
         """
         Checks for an identical game in the database using team_game_scores view.
 
@@ -436,6 +446,8 @@ class Database:
         Returns:
             dict or None: Found identical game data or None if not found
         """
+        # Get data structure from the BdGame instance
+        game_data = bd_game.get_data()
         # Convert to date object if datetime was provided
         game_date = game_data['date'].date() if hasattr(game_data['date'], 'date') else game_data['date']
 
@@ -496,13 +508,3 @@ class Database:
 if __name__ == "__main__":
     db = Database()
     # Use Alembic instead
-    # db.create_tables()
-
-    # Example: Add data from parsed XLSM file
-    # parsed_data = parse_xlsm("path/to/file.xlsm")
-    # db.add_game_data(parsed_data)
-
-    # Example: Get all games
-    # games = db.get_all_games()
-    # for game in games:
-    #     print(f"Game ID: {game.game_id}, Date: {game.game_date}")
