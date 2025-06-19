@@ -6,7 +6,7 @@ import warnings
 from datetime import datetime
 from config import DATABASE_URL
 from db import Database
-from BdGame import BdGame
+from bd_game import BdGame
 
 
 class XLSParseError(Exception):
@@ -437,11 +437,11 @@ def save_game_to_database(game_instance, db):
 
         if identical_game:
             print(f"ℹ️ Identical game from {game_data['date'].strftime('%d.%m.%Y')} already exists in the database. "
-                  f"Id: {identical_game['game_id']}. Skipping.")
+                  f"Id: {identical_game.get_data()['game_id']}. Skipping.")
             return False
 
         # Save the data
-        success = db.add_game_data(game_instance)
+        success = db.add_game(game_instance)
 
         # Display success/error message
         if success:
