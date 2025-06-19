@@ -16,7 +16,7 @@ class BdGame:
             date (datetime.date, optional): Game date
         """
         # Initialize basic data structure
-        self.game_data = {
+        self._game_data = {
             'game_id': game_id,
             'date': date,
             'teams': teams,
@@ -34,31 +34,31 @@ class BdGame:
 
     def _initialize_team_structures(self):
         """Initialize data structure for each team."""
-        for team in self.game_data['teams']:
+        for team in self._game_data['teams']:
             # Vybor - simple points
-            self.game_data['vybor'][team] = 0.0
+            self._game_data['vybor'][team] = 0.0
 
             # Chisla - 5 tasks + sum
-            self.game_data['chisla'][team] = {
+            self._game_data['chisla'][team] = {
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'IV': 0.0, 'V': 0.0, 'Сумма': 0.0
             }
 
             # Preferans - 7 tasks + points, penalties, bonuses, sum
-            self.game_data['pref'][team] = {
+            self._game_data['pref'][team] = {
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'IV': 0.0, 'V': 0.0, 'VI': 0.0, 'VII': 0.0,
                 'Points': 0.0, 'Penalty': 0.0, 'Bonus': 0.0, 'Сумма': 0.0
             }
 
             # Pairs - simple points
-            self.game_data['pairs'][team] = 0.0
+            self._game_data['pairs'][team] = 0.0
 
             # Razoblachenie - 4 tasks + sum
-            self.game_data['razobl'][team] = {
+            self._game_data['razobl'][team] = {
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'IV': 0.0, 'Сумма': 0.0
             }
 
             # Auction - 4 tasks with bid, points, rate + sum
-            self.game_data['auction'][team] = {
+            self._game_data['auction'][team] = {
                 'I': {'bid': 0.0, 'points': 0.0, 'rate': None},
                 'II': {'bid': 0.0, 'points': 0.0, 'rate': None},
                 'III': {'bid': 0.0, 'points': 0.0, 'rate': None},
@@ -67,7 +67,7 @@ class BdGame:
             }
 
             # Moment of truth - 3 tasks + sum
-            self.game_data['mot'][team] = {
+            self._game_data['mot'][team] = {
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'Сумма': 0.0
             }
 
@@ -78,7 +78,7 @@ class BdGame:
         Returns:
             dict: Game data structure
         """
-        return self.game_data
+        return self._game_data
 
     def print_detailed(self):
         """
@@ -88,8 +88,8 @@ class BdGame:
         Returns:
             None
         """
-        print(f"Дата игры: {self.game_data['date'].strftime('%d.%m.%Y')}")
-        print(f"Команды: {', '.join(self.game_data['teams'])}")
+        print(f"Дата игры: {self._game_data['date'].strftime('%d.%m.%Y')}")
+        print(f"Команды: {', '.join(self._game_data['teams'])}")
         print("\nДетальные данные:")
-        pprint(self.game_data)
+        pprint(self._game_data)
         print("-" * 80)

@@ -1,8 +1,16 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, ForeignKey, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, joinedload, selectinload
 import datetime
+import logging
+from config import LOG_LEVEL, SQLALCHEMY_LOGGING
+from bd_game import BdGame
+
+# Set up logging
+logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+if SQLALCHEMY_LOGGING:
+    logging.getLogger("sqlalchemy.engine").setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 
 # Base class for all models
 Base = declarative_base()
@@ -222,7 +230,7 @@ class Database:
             session.flush()  # To get the team_id
         return team
 
-    def add_game_data(self, bd_game):
+    def add_game(self, bd_game):
         """
         Add game data from BdGame instance to the database.
 
@@ -356,6 +364,40 @@ class Database:
         finally:
             session.close()
 
+    def remove_game(self, game_id):
+        """
+        Removes a game and all related records by game_id.
+
+        Args:
+            game_id (int): Game ID
+
+        Raises:
+            ValueError: if the game is not found
+            Exception: for other errors
+        """
+        with self.Session() as session:
+            try:
+                game = session.query(Game).filter_by(game_id=game_id).first()
+                if not game:
+                    raise ValueError(f"Game with game_id={game_id} not found")
+
+                # Remove all related records in all contests
+                session.query(GameTeam).filter_by(game_id=game_id).delete()
+                session.query(Vybor).filter_by(game_id=game_id).delete()
+                session.query(Chisla).filter_by(game_id=game_id).delete()
+                session.query(Pref).filter_by(game_id=game_id).delete()
+                session.query(Pairs).filter_by(game_id=game_id).delete()
+                session.query(Razobl).filter_by(game_id=game_id).delete()
+                session.query(Auction).filter_by(game_id=game_id).delete()
+                session.query(Mot).filter_by(game_id=game_id).delete()
+
+                # Remove the game itself
+                session.delete(game)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
     def get_all_games(self):
         """Get all games from the database."""
         session = self.Session()
@@ -364,42 +406,115 @@ class Database:
         finally:
             session.close()
 
-    def get_game_results(self, game_id):
-        """Get all results for a specific game."""
-        session = self.Session()
-        try:
-            game = session.query(Game).filter_by(game_id=game_id).first()
-            if not game:
-                return None
+    def get_game_data(self, game_id):
+        """
+        Retrieve full game data from the database and return as BdGame.
 
-            results = {
-                'game_date': game.game_date,
-                'teams': [],
-                'vybor': {},
-                'chisla': {},
-                'pref': {},
-                'pairs': {},
-                'razobl': {},
-                'auction': {},
-                'mot': {}
-            }
+        Args:
+            game_id (int): Game ID
 
-            # Get all teams for this game
-            game_teams = session.query(GameTeam).filter_by(game_id=game_id).all()
-            for game_team in game_teams:
-                team = session.query(Team).filter_by(team_id=game_team.team_id).first()
-                results['teams'].append(team.team_name)
+        Returns:
+            BdGame: BdGame instance with all data
 
-                # Get Vybor results
-                vybor = session.query(Vybor).filter_by(game_id=game_id, team_id=team.team_id).first()
-                if vybor:
-                    results['vybor'][team.team_name] = vybor.points
+        Raises:
+            ValueError: if game, teams, or team_id in results not found
+            Exception: for other errors
+        """
 
-            # Get other results similarly...
+        with self.Session() as session:
+            try:
+                game = session.query(Game).options(
+                    selectinload(Game.teams),
+                    selectinload(Game.vybor_results),
+                    selectinload(Game.chisla_results),
+                    selectinload(Game.pref_results),
+                    selectinload(Game.pairs_results),
+                    selectinload(Game.razobl_results),
+                    selectinload(Game.auction_results),
+                    selectinload(Game.mot_results)
+                ).filter_by(game_id=game_id).first()
+                if not game:
+                    raise ValueError(f"Game with game_id={game_id} not found")
 
-            return results
-        finally:
-            session.close()
+                # Getting team names for BdGame initialization
+                teams = [gt.team.team_name for gt in game.teams]
+
+                bd_game = BdGame(teams=teams, game_id=game.game_id, date=game.game_date)
+                game_data = bd_game.get_data()
+
+                # Vybor
+                for vybor in game.vybor_results:
+                    team_name = vybor.team.team_name
+                    game_data['vybor'][team_name] = float(vybor.points)
+
+                # Chisla
+                for chisla in game.chisla_results:
+                    team_name = chisla.team.team_name
+                    game_data['chisla'][team_name]['I'] = float(chisla.task_1)
+                    game_data['chisla'][team_name]['II'] = float(chisla.task_2)
+                    game_data['chisla'][team_name]['III'] = float(chisla.task_3)
+                    game_data['chisla'][team_name]['IV'] = float(chisla.task_4)
+                    game_data['chisla'][team_name]['V'] = float(chisla.task_5)
+                    game_data['chisla'][team_name]['Сумма'] = float(chisla.total_sum)
+
+                # Pref
+                for pref in game.pref_results:
+                    team_name = pref.team.team_name
+                    game_data['pref'][team_name]['I'] = float(pref.task_1)
+                    game_data['pref'][team_name]['II'] = float(pref.task_2)
+                    game_data['pref'][team_name]['III'] = float(pref.task_3)
+                    game_data['pref'][team_name]['IV'] = float(pref.task_4)
+                    game_data['pref'][team_name]['V'] = float(pref.task_5)
+                    game_data['pref'][team_name]['VI'] = float(pref.task_6)
+                    game_data['pref'][team_name]['VII'] = float(pref.task_7)
+                    game_data['pref'][team_name]['Points'] = float(pref.points)
+                    game_data['pref'][team_name]['Penalty'] = float(pref.penalty)
+                    game_data['pref'][team_name]['Bonus'] = float(pref.bonus)
+                    game_data['pref'][team_name]['Сумма'] = float(pref.total_sum)
+
+                # Pairs
+                for pairs in game.pairs_results:
+                    team_name = pairs.team.team_name
+                    game_data['pairs'][team_name] = float(pairs.points)
+
+                # Razobl
+                for razobl in game.razobl_results:
+                    team_name = razobl.team.team_name
+                    game_data['razobl'][team_name]['I'] = float(razobl.task_1)
+                    game_data['razobl'][team_name]['II'] = float(razobl.task_2)
+                    game_data['razobl'][team_name]['III'] = float(razobl.task_3)
+                    game_data['razobl'][team_name]['IV'] = float(razobl.task_4)
+                    game_data['razobl'][team_name]['Сумма'] = float(razobl.total_sum)
+
+                # Auction
+                for auction in game.auction_results:
+                    team_name = auction.team.team_name
+                    game_data['auction'][team_name]['I']['bid'] = float(auction.task_1_bid)
+                    game_data['auction'][team_name]['I']['points'] = float(auction.task_1_points)
+                    game_data['auction'][team_name]['I']['rate'] = auction.task_1_rate
+                    game_data['auction'][team_name]['II']['bid'] = float(auction.task_2_bid)
+                    game_data['auction'][team_name]['II']['points'] = float(auction.task_2_points)
+                    game_data['auction'][team_name]['II']['rate'] = auction.task_2_rate
+                    game_data['auction'][team_name]['III']['bid'] = float(auction.task_3_bid)
+                    game_data['auction'][team_name]['III']['points'] = float(auction.task_3_points)
+                    game_data['auction'][team_name]['III']['rate'] = auction.task_3_rate
+                    game_data['auction'][team_name]['IV']['bid'] = float(auction.task_4_bid)
+                    game_data['auction'][team_name]['IV']['points'] = float(auction.task_4_points)
+                    game_data['auction'][team_name]['IV']['rate'] = auction.task_4_rate
+                    game_data['auction'][team_name]['Сумма'] = float(auction.total_sum)
+
+                # Mot
+                for mot in game.mot_results:
+                    team_name = mot.team.team_name
+                    game_data['mot'][team_name]['I'] = float(mot.task_1)
+                    game_data['mot'][team_name]['II'] = float(mot.task_2)
+                    game_data['mot'][team_name]['III'] = float(mot.task_3)
+                    game_data['mot'][team_name]['Сумма'] = float(mot.total_sum)
+
+                return bd_game
+
+            except Exception:
+                raise
 
     def get_game_ids_by_date(self, start_date, end_date=None):
         """
@@ -436,18 +551,18 @@ class Database:
             game_ids = [game.game_id for game in games]
             return game_ids
 
-    def find_identical_game(self, bd_game):
+    def find_identical_game(self, game_instance):
         """
         Checks for an identical game in the database using team_game_scores view.
 
         Args:
-            game_data (dict): The parsed game data to check for duplicates
+            game_instance (BdGame): The parsed game data to check for duplicates
 
         Returns:
             dict or None: Found identical game data or None if not found
         """
         # Get data structure from the BdGame instance
-        game_data = bd_game.get_data()
+        game_data = game_instance.get_data()
         # Convert to date object if datetime was provided
         game_date = game_data['date'].date() if hasattr(game_data['date'], 'date') else game_data['date']
 
@@ -493,13 +608,7 @@ class Database:
 
                 if scores_match:
                     # Game is identical, return the result
-                    game = session.query(Game).filter_by(game_id=game_id).first()
-                    return {
-                        'game_id': game.game_id,
-                        'date': game.game_date,
-                        'teams': db_team_names
-                        # Additional data can be added here if needed
-                    }
+                    return self.get_game_data(game_id)
 
             # No match found
             return None
