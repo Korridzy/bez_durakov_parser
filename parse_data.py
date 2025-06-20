@@ -259,6 +259,7 @@ def restore_auction_rates(rate_params, auction_data, full_game_data):
 
                 # If there are conflicting teams, print all rates data for this column
                 if conflict_teams:
+                    raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
                     print(f"Команда: {team}, Ставка: {auction_data[team][col]['bid']}, "
                           f"Общие баллы: {total_points[team]}, Присвоенный коэф: {auction_data[team][col]['rate']}")
 
