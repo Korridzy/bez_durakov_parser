@@ -1,5 +1,6 @@
 [database]
 url = "sqlite:///./bez_durakov.db"
+sqlalchemy_logging = false
 
 [application]
 debug = true

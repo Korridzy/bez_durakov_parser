@@ -19,7 +19,8 @@ with open(config_file_path, "rb") as f:
 
 # Constants for convenient access
 DATABASE_URL = config["database"]["url"]
-DEBUG = config["application"].get("debug", False)
+SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
+DEBUG = bool(config["application"].get("debug", False))
 LOG_LEVEL = config["application"].get("log_level", "INFO")
 
 # Function for getting the configuration (optional)
