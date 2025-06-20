@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, ForeignKey, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, joinedload, selectinload
+from sqlalchemy.orm import sessionmaker, relationship, selectinload
 import datetime
 import logging
 from config import LOG_LEVEL, SQLALCHEMY_LOGGING
@@ -559,7 +559,7 @@ class Database:
             game_instance (BdGame): The parsed game data to check for duplicates
 
         Returns:
-            dict or None: Found identical game data or None if not found
+            BdGame or None: Found identical game data or None if not found
         """
         # Get data structure from the BdGame instance
         game_data = game_instance.get_data()
