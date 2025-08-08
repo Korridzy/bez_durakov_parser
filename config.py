@@ -18,10 +18,20 @@ with open(config_file_path, "rb") as f:
     config = tomllib.load(f)
 
 # Constants for convenient access
-DATABASE_URL = config["database"]["url"]
 SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
 DEBUG = bool(config["application"].get("debug", False))
 LOG_LEVEL = config["application"].get("log_level", "INFO")
+
+DATABASE_URL = config["database"]["url"]
+# Check if connection string contains a relative path to database
+sqlite_prefix = "sqlite:///"
+if DATABASE_URL.startswith(sqlite_prefix):
+    # Split string by prefix
+    _, db_path = DATABASE_URL.split(sqlite_prefix, 1)
+    if not os.path.isabs(db_path):
+        # Convert to absolute path
+        abs_db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), db_path)
+        DATABASE_URL = f"{sqlite_prefix}{abs_db_path}"
 
 # Function for getting the configuration (optional)
 def get_config():
