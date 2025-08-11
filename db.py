@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker, relationship, selectinload
 import datetime
 import logging
 from config import LOG_LEVEL, SQLALCHEMY_LOGGING
+from config import DATABASE_URL
 from bd_game import BdGame
 
 # Set up logging
@@ -209,17 +210,12 @@ class TeamGameScore(Base):
 
 class Database:
     def __init__(self, db_url=None):
-        # If no db_url is provided, use SQLite with a default file path
+        # If no db_url is provided, use url from config
         if db_url is None:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bez_durakov.db')
-            db_url = f'sqlite:///{db_path}'
+            db_url = DATABASE_URL
 
         self.engine = create_engine(db_url)
         self.Session = sessionmaker(bind=self.engine)
-
-    def create_tables(self):
-        """Create all tables in the database."""
-        Base.metadata.create_all(self.engine)
 
     def get_or_create_team(self, session, team_name):
         """Get a team by name or create it if it doesn't exist."""
