@@ -39,6 +39,12 @@ url = "sqlite:///./bez_durakov.db"
 sqlalchemy_logging = false
 ```
 
+Также на данный момент поддерживается подключение к MySQL. В конфиге имеется закомментированная строка подключения в качестве примера:
+
+```toml
+url = "mysql+pymysql://username:password@srv_address:port/db_name?ssl=true&ssl_verify_cert=false&ssl_verify_identity=false"
+```
+
 Если вы настраиваете БД с нуля или апгрейдитесь до новой версии схемы, выполните обновление схемы:
 
 ```bash
