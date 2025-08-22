@@ -1,5 +1,6 @@
 [database]
 url = "sqlite:///./bez_durakov.db"
+#url = "mysql+pymysql://username:password@srv_address:port/db_name?ssl_ca=/path/to/ca.pem&ssl_cert=/path/to/client-cert.pem&ssl_key=/path/to/client-key.pem"
 sqlalchemy_logging = false
 
 [application]
