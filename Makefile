@@ -46,3 +46,30 @@ setup:
 
 upgrade-db:
 	@poetry run alembic upgrade head
+
+upgrade-code:
+	@echo "Проверяю статус репозитория..."; \
+	if ! git rev-parse --git-dir > /dev/null 2>&1; then \
+		echo "Ошибка: не находимся в git репозитории"; \
+		exit 1; \
+	fi; \
+	changed_files=$$(git diff --name-only HEAD); \
+	staged_files=$$(git diff --cached --name-only); \
+	untracked_files=$$(git ls-files --others --exclude-standard); \
+	all_changes="$$changed_files$$staged_files$$untracked_files"; \
+	if [ -z "$$all_changes" ]; then \
+		echo "Нет локальных изменений, выполняю обновление..."; \
+		git pull origin main; \
+	elif [ "$$all_changes" = "config.toml" ]; then \
+		echo "Обнаружены изменения только в config.toml, сохраняю и обновляю..."; \
+		git stash push -m "Auto-stash config.toml before update" -- config.toml; \
+		git pull origin main; \
+		git stash pop; \
+		echo "Обновление завершено, config.toml восстановлен"; \
+	else \
+		echo "ВНИМАНИЕ: Обнаружены локальные изменения в следующих файлах:"; \
+		echo "$$all_changes" | tr ' ' '\n' | grep -v '^$$' | sed 's/^/  - /'; \
+		echo "Для безопасности автоматическое обновление отменено."; \
+		echo "Выполните обновление вручную или зафиксируйте изменения."; \
+		exit 1; \
+	fi
