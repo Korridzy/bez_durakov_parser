@@ -61,11 +61,12 @@ upgrade-code:
 		echo "Нет локальных изменений, выполняю обновление..."; \
 		git pull origin main; \
 	elif [ "$$all_changes" = "config.toml" ]; then \
-		echo "Обнаружены изменения только в config.toml, сохраняю и обновляю..."; \
-		git stash push -m "Auto-stash config.toml before update" -- config.toml; \
+		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
+		cp config.toml config.toml.backup; \
 		git pull origin main; \
-		git stash pop; \
-		echo "Обновление завершено, config.toml восстановлен"; \
+		cp config.toml.backup config.toml; \
+		rm config.toml.backup; \
+		echo "Обновление завершено, локальная версия config.toml восстановлена"; \
 	else \
 		echo "ВНИМАНИЕ: Обнаружены локальные изменения в следующих файлах:"; \
 		echo "$$all_changes" | tr ' ' '\n' | grep -v '^$$' | sed 's/^/  - /'; \
