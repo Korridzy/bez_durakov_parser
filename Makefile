@@ -61,12 +61,27 @@ upgrade-code:
 		echo "Нет локальных изменений, выполняю обновление..."; \
 		git pull origin main; \
 	elif [ "$$all_changes" = "config.toml" ]; then \
-		echo "Обнаружены изменения только в config.toml, сохраняю и обновляю..."; \
-		git stash push -m "Auto-stash config.toml before update" -- config.toml; \
-		git pull origin main; \
-		git stash pop; \
-		echo "Обновление завершено, config.toml восстановлен"; \
+		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
+		cp config.toml config.toml.backup; \
+		if git stash push -m "temp config.toml" -- config.toml; then \
+			git pull origin main; \
+			if cp config.toml.backup config.toml; then \
+				rm config.toml.backup; \
+				echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+			else \
+				echo "Ошибка при восстановлении config.toml из backup."; \
+				echo "Ваш конфиг лежит в файле config.toml.backup."; \
+				echo "Попробуйте сами переименовать его в config.toml."; \
+			fi; \
+			git stash drop; \
+		else \
+			echo "Ошибка при создании stash для config.toml"; \
+			echo "Обновление прервано"; \
+			rm -f config.toml.backup; \
+			exit 1; \
+		fi; \
 	else \
+		all_changes="$$changed_files $$staged_files $$untracked_files"; \
 		echo "ВНИМАНИЕ: Обнаружены локальные изменения в следующих файлах:"; \
 		echo "$$all_changes" | tr ' ' '\n' | grep -v '^$$' | sed 's/^/  - /'; \
 		echo "Для безопасности автоматическое обновление отменено."; \
