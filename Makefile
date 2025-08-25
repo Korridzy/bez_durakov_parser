@@ -63,7 +63,7 @@ upgrade-code:
 	elif [ "$$all_changes" = "config.toml" ]; then \
 		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
 		cp config.toml config.toml.backup; \
-		git stash push -m "temp config.toml" config.toml; \
+		git stash push -m "temp config.toml" -- config.toml; \
 		git pull origin main; \
 		if cp config.toml.backup config.toml; then \
 			rm config.toml.backup; \
