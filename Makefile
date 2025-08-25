@@ -63,11 +63,17 @@ upgrade-code:
 	elif [ "$$all_changes" = "config.toml" ]; then \
 		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
 		cp config.toml config.toml.backup; \
+		git stash push -m "temp config.toml" config.toml; \
 		git pull origin main; \
-		cp config.toml.backup config.toml; \
-		rm config.toml.backup; \
-		echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+		if cp config.toml.backup config.toml; then \
+			rm config.toml.backup; \
+			echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+		else \
+			echo "Ошибка при восстановлении config.toml из backup. Ваш конфиг лежит в файле config.toml.backup. Попробуйте сами переименовать его в config.toml."; \
+		fi; \
+		git stash drop; \
 	else \
+		all_changes="$$changed_files $$staged_files $$untracked_files"; \
 		echo "ВНИМАНИЕ: Обнаружены локальные изменения в следующих файлах:"; \
 		echo "$$all_changes" | tr ' ' '\n' | grep -v '^$$' | sed 's/^/  - /'; \
 		echo "Для безопасности автоматическое обновление отменено."; \
