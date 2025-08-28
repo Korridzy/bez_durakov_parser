@@ -62,22 +62,27 @@ upgrade-code:
 		git pull origin main; \
 	elif [ "$$all_changes" = "config.toml" ]; then \
 		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
-		cp config.toml config.toml.backup; \
-		if git stash push -m "temp config.toml" -- config.toml; then \
-			git pull origin main; \
-			if cp config.toml.backup config.toml; then \
-				rm config.toml.backup; \
-				echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+		if cp config.toml config.toml.backup; then \
+			if git stash push -m "temp config.toml" -- config.toml; then \
+				git pull origin main; \
+				if cp config.toml.backup config.toml; then \
+					rm config.toml.backup; \
+					echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+				else \
+					echo "Ошибка при восстановлении config.toml из backup."; \
+					echo "Ваш конфиг лежит в файле config.toml.backup."; \
+					echo "Попробуйте сами переименовать его в config.toml."; \
+				fi; \
+				git stash drop; \
 			else \
-				echo "Ошибка при восстановлении config.toml из backup."; \
-				echo "Ваш конфиг лежит в файле config.toml.backup."; \
-				echo "Попробуйте сами переименовать его в config.toml."; \
+				echo "Ошибка при создании stash для config.toml"; \
+				echo "Обновление прервано"; \
+				rm -f config.toml.backup; \
+				exit 1; \
 			fi; \
-			git stash drop; \
 		else \
-			echo "Ошибка при создании stash для config.toml"; \
+			echo "Ошибка при создании backup файла config.toml.backup"; \
 			echo "Обновление прервано"; \
-			rm -f config.toml.backup; \
 			exit 1; \
 		fi; \
 	else \
