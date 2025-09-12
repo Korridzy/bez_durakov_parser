@@ -1,6 +1,9 @@
 # Secrets
 secret/
 
+# MySQL data directory
+vm/mysql/mysql_data/
+
 # Local debugging catalog
 data_to_parse/
 
