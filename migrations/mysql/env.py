@@ -37,13 +37,12 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
-# For MySQL, we don't exclude views from autogenerate - MySQL handles them well
+# Exclude views (objects marked with info['is_view']=True) from autogenerate
+# so they can be managed manually via raw SQL in migrations.
 def include_object(object, name, type_, reflected, compare_to):
-    """
-    Should you include this object in the autogenerate process?
-
-    For MySQL, we include all objects including views.
-    """
+    if type_ == 'table':
+        if hasattr(object, 'info') and object.info.get('is_view', False):
+            return False
     return True
 
 
