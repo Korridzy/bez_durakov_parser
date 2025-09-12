@@ -38,7 +38,7 @@ class Team(Base):
     __tablename__ = 'teams'
 
     team_id = Column(Integer, primary_key=True)
-    team_name = Column(String(1024), nullable=False, unique=True)
+    team_name = Column(String(256), nullable=False, unique=True)
 
     # Define relationships
     games = relationship("GameTeam", back_populates="team")

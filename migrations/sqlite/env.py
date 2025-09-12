@@ -8,23 +8,26 @@ import sqlalchemy as sa
 
 from alembic import context
 
-from db import Base
-
 # Add the project root directory to sys.path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Import URL from our configuration
+from db import Base
 from config import DATABASE_URL
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
+# Only proceed if this is a SQLite database
+if not DATABASE_URL.startswith('sqlite'):
+    print(f"Skipping sqlite environment - DATABASE_URL is for different database type: {DATABASE_URL}")
+    sys.exit(0)
+
 # Replacing the sqlalchemy.url option with one from project config file
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # setting the render mode to "batch" for SQLite
-render_as_batch = config.get_main_option("sqlalchemy.url", "").startswith("sqlite")
+render_as_batch = True
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -33,22 +36,22 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+def include_object(object, name, type_, reflected, compare_to):
+    """
+    Should you include this object in the autogenerate process?
 
+    Exclude views from autogenerate process.
+    """
+    if type_ == 'table':
+        # Skip tables that are views
+        if hasattr(object, 'info') and object.info.get('is_view', False):
+            return False
+    return True
 
 def process_revision_directives_sqlite(context, revision, directives):
     """Process migration directives to automatically add server_default for NOT NULL columns in SQLite."""
-
-    # Only apply for SQLite database
-    if not context.dialect.name == 'sqlite':
-        return
 
     migration_script = directives[0]
     operations = migration_script.upgrade_ops
@@ -78,17 +81,7 @@ def process_revision_directives_sqlite(context, revision, directives):
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -97,6 +90,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         render_as_batch=render_as_batch,
         process_revision_directives=process_revision_directives_sqlite,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -104,12 +98,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
+    """Run migrations in 'online' mode."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -122,6 +111,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             render_as_batch=render_as_batch,
             process_revision_directives=process_revision_directives_sqlite,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
