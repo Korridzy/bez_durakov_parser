@@ -41,7 +41,7 @@ def load_config() -> dict:
         print(f"ERROR: Invalid JSON in {CONFIG_FILE}: {e}")
         sys.exit(1)
 
-def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None):
+def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True):
     """Create appropriate fetcher based on mode.
 
     If cfg is provided and mode == 'public_api', read 'google_api_key' and
@@ -51,7 +51,7 @@ def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None):
     download_dir = cfg.get('download_dir') if cfg else None
 
     if mode == 'browser_selenium':
-        return SeleniumFetcher(folder_url, download_dir)
+        return SeleniumFetcher(folder_url, download_dir, headless=headless)
     elif mode == 'public_api':
         api_key = cfg.get('google_api_key') if cfg else None
         access_token = cfg.get('google_access_token') if cfg else None
@@ -69,10 +69,14 @@ def main():
         choices=['browser_selenium', 'public_api', 'gdown'],
         help='Force specific fetching mode (overrides config)'
     )
+    parser.add_argument('--no-headless', action='store_true', help='Disable headless mode for browser_selenium')
     args = parser.parse_args()
 
     # Load configuration
     config = load_config()
+
+    # Determine headless preference
+    headless = not args.no_headless
 
     # Determine which modes to try
     if args.mode:
@@ -94,7 +98,7 @@ def main():
         print(f"\nTrying mode: {mode}")
 
         try:
-            fetcher = create_fetcher(mode, folder_url, config)
+            fetcher = create_fetcher(mode, folder_url, config, headless=headless)
             files = fetcher.fetch()
 
             if files:
