@@ -8,12 +8,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
 
 from .base_fetcher import BaseFetcher
-import os
 import shutil
 from pathlib import Path
 import zipfile
@@ -24,9 +20,16 @@ import hashlib
 class SeleniumFetcher(BaseFetcher):
     """Fetcher that uses Selenium browser automation to get files from Google Drive."""
 
-    def __init__(self, folder_url: str, download_dir: Optional[str] = None):
-        """Initialize with Google Drive folder URL and optional download directory."""
+    def __init__(self, folder_url: str, download_dir: Optional[str] = None, headless: bool = True):
+        """Initialize with Google Drive folder URL and optional download directory.
+
+        Args:
+            folder_url: URL of Google Drive folder
+            download_dir: optional download directory
+            headless: whether to run Chrome in headless mode (default True)
+        """
         super().__init__(folder_url, download_dir)
+        self.headless = headless
 
     def fetch(self) -> List[Dict[str, str]]:
         """Fetch list of .xlsm files from Google Drive folder.
@@ -70,6 +73,19 @@ class SeleniumFetcher(BaseFetcher):
         # headless disabled for debugging (was: --headless=new)
         # chrome_options.add_argument("--headless=new")
 
+        # Enable headless mode for CI / unattended runs
+        if self.headless:
+            try:
+                chrome_options.add_argument("--headless=new")
+                chrome_options.add_argument("--hide-scrollbars")
+                chrome_options.add_argument("--single-process")
+            except Exception:
+                # fallback to older headless flag if --headless=new isn't supported
+                try:
+                    chrome_options.add_argument("--headless")
+                except Exception:
+                    pass
+
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
@@ -96,74 +112,23 @@ class SeleniumFetcher(BaseFetcher):
             self._log("Waiting 60 seconds for page to load...")
             time.sleep(60)
 
-            self._log("Starting to scroll down (scrolling container)...")
+            # Step 1: Scroll through files and select all
+            self._scroll_and_select_files(driver)
 
-            # Send ArrowDown directly to the browser window (no element detection)
-            max_presses = 500
-            stagnation_limit = 60
-            presses = 0
-            stagnation = 0
+            # Step 2: Find and click download button
+            download_success = self._find_download_button_by_properties(driver)
+            if not download_success:
+                self._log("❌ Failed to find or click download button")
+                return []
 
-            def count_items():
-                try:
-                    return int(driver.execute_script("return (document.querySelectorAll('[data-id]').length)") or 0)
-                except Exception:
-                    return 0
+            # Step 3: Wait for download to complete
+            zip_path = self._wait_for_download_completion(driver, target_download_dir)
+            if not zip_path:
+                self._log("❌ Download did not complete successfully")
+                return []
 
-            current_count = count_items()
-            self._log(f"Initial item count: {current_count}")
-
-            # Track presses between growths and stagnation levels
-            last_growth_press = 0
-            # presses variable already exists
-            while presses < max_presses and stagnation < stagnation_limit:
-                presses += 1
-                # perform a single down press (no per-press logging to reduce noise)
-                try:
-                    # send key to active window via ActionChains
-                    ActionChains(driver).send_keys(Keys.ARROW_DOWN).perform()
-                except Exception:
-                    try:
-                        # fallback: send to body element
-                        body = driver.find_element(By.TAG_NAME, 'body')
-                        ActionChains(driver).move_to_element(body).send_keys(Keys.ARROW_DOWN).perform()
-                    except Exception:
-                        pass
-
-                time.sleep(0.6)
-
-                new_count = count_items()
-                if new_count > current_count:
-                    # capture stagnation that occurred before this growth
-                    prev_stagnation = stagnation
-                    # compute how many presses happened since last detected growth
-                    presses_since_last_growth = presses - last_growth_press
-                    last_growth_press = presses
-                    stagnation = 0
-                    self._log(f"Detected growth: {current_count} -> {new_count} (after {presses_since_last_growth} presses, previous stagnation={prev_stagnation})")
-                    current_count = new_count
-                else:
-                    stagnation += 1
-
-            self._log(f"Key-scrolling finished after {presses} presses, items={current_count}")
-
-            # Select all files with Ctrl+A
-            try:
-                ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-                self._log('Sent Ctrl+A to select all files')
-            except Exception:
-                try:
-                    # fallback: send via ActionChains without key_down/up
-                    ActionChains(driver).send_keys(Keys.CONTROL, 'a').perform()
-                    self._log('Sent Ctrl+A (fallback)')
-                except Exception:
-                    self._log('Failed to send Ctrl+A')
-
-            # wait for the selection to be registered and toolbar to appear
-            time.sleep(10)
-
-            # Find elements by property combination and download files, get count of new files
-            new_files_count = self._find_download_button_by_properties(driver, target_download_dir)
+            # Step 4: Process downloaded archive
+            new_files_count = self._process_downloaded_archive(zip_path, target_download_dir)
 
             # Create list of file info for the new files (return format expected by caller)
             final_files = []
@@ -188,15 +153,85 @@ class SeleniumFetcher(BaseFetcher):
                 except Exception as cleanup_ex:
                     self._log(f"Warning: Could not cleanup temp profile: {cleanup_ex}")
 
-    def _find_download_button_by_properties(self, driver, target_download_dir) -> int:
-        """Find download button by combination of properties instead of text search.
+    def _scroll_and_select_files(self, driver) -> None:
+        """Scroll through the file list to load all files and select them all.
 
         Args:
             driver: Selenium WebDriver instance
-            target_download_dir: Path to directory where downloaded file should be moved
+        """
+        self._log("Starting to scroll down (scrolling container)...")
+
+        # Send ArrowDown directly to the browser window (no element detection)
+        max_presses = 500
+        stagnation_limit = 60
+        presses = 0
+        stagnation = 0
+
+        def count_items():
+            try:
+                return int(driver.execute_script("return (document.querySelectorAll('[data-id]').length)") or 0)
+            except Exception:
+                return 0
+
+        current_count = count_items()
+        self._log(f"Initial item count: {current_count}")
+
+        # Track presses between growths and stagnation levels
+        last_growth_press = 0
+        while presses < max_presses and stagnation < stagnation_limit:
+            presses += 1
+            # perform a single down press (no per-press logging to reduce noise)
+            try:
+                # send key to active window via ActionChains
+                ActionChains(driver).send_keys(Keys.ARROW_DOWN).perform()
+            except Exception:
+                try:
+                    # fallback: send to body element
+                    body = driver.find_element(By.TAG_NAME, 'body')
+                    ActionChains(driver).move_to_element(body).send_keys(Keys.ARROW_DOWN).perform()
+                except Exception:
+                    pass
+
+            time.sleep(0.6)
+
+            new_count = count_items()
+            if new_count > current_count:
+                # capture stagnation that occurred before this growth
+                prev_stagnation = stagnation
+                # compute how many presses happened since last detected growth
+                presses_since_last_growth = presses - last_growth_press
+                last_growth_press = presses
+                stagnation = 0
+                self._log(f"Detected growth: {current_count} -> {new_count} (after {presses_since_last_growth} presses, previous stagnation={prev_stagnation})")
+                current_count = new_count
+            else:
+                stagnation += 1
+
+        self._log(f"Key-scrolling finished after {presses} presses, items={current_count}")
+
+        # Select all files with Ctrl+A
+        try:
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+            self._log('Sent Ctrl+A to select all files')
+        except Exception:
+            try:
+                # fallback: send via ActionChains without key_down/up
+                ActionChains(driver).send_keys(Keys.CONTROL, 'a').perform()
+                self._log('Sent Ctrl+A (fallback)')
+            except Exception:
+                self._log('Failed to send Ctrl+A')
+
+        # wait for the selection to be registered and toolbar to appear
+        time.sleep(10)
+
+    def _find_download_button_by_properties(self, driver) -> bool:
+        """Find download button by combination of properties and click it.
+
+        Args:
+            driver: Selenium WebDriver instance
 
         Returns:
-            Number of new files added from downloaded archive
+            True if download button was found and clicked successfully, False otherwise
         """
         self._log("=== SEARCHING BY PROPERTY COMBINATION ===")
         self._log("Looking for elements with: role='button', cursor='pointer', blue text, focusable, active, top-right quadrant")
@@ -326,30 +361,18 @@ class SeleniumFetcher(BaseFetcher):
                     download_button.send_keys(Keys.SPACE)
                     self._log("✅ Download button focused and space pressed successfully")
 
-                    # Wait for download to start and complete
-                    zip_path = self._wait_for_download_completion(driver, target_download_dir)
-                    if zip_path:
-                        # Process downloaded archive: unpack, compare and merge into target dir, cleanup
-                        try:
-                            new_files_count = self._process_downloaded_archive(zip_path, target_download_dir)
-                            return new_files_count
-                        except Exception as ex:
-                            self._log(f"❌ Error processing downloaded archive: {ex}")
-                            return 0
-                    else:
-                        self._log("❌ No zip file was downloaded")
-                        return 0
+                    return True  # Download button found and clicked
 
                 except Exception as ex:
                     self._log(f"❌ Error focusing and pressing space on download button: {ex}")
-                    return 0
+                    return False
             else:
                 self._log("❌ No suitable download button found to activate")
-                return 0
+                return False
 
         except Exception as ex:
             self._log(f"❌ Error during property-based search: {ex}")
-            return 0
+            return False
 
     def _wait_for_download_completion(self, driver, target_download_dir):
         """Wait for zip file download to complete."""
