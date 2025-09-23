@@ -15,6 +15,8 @@ dependencies = [
     "sqlalchemy (>=2.0.41,<3.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
     "pymysql[rsa] (>=1.1.1,<2.0.0)",
+    "gdown (>=5.2.0,<6.0.0)",
+    "selenium (>=4.35.0,<5.0.0)",
 ]
 
 [tool.poetry]
