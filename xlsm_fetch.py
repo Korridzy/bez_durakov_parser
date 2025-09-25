@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch .xlsm files from Google Drive using different methods.
 
-This script reads configuration from secret/xlsm_data.json and supports three modes:
+This script reads configuration from config.toml and supports three modes:
 1. 'browser_selenium' - uses browser automation to access files
 2. 'public_api' - uses public Google Drive API (not implemented yet)
 3. 'gdown' - uses gdown library (not implemented yet)
@@ -12,34 +12,21 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from xlsm_fetch import SeleniumFetcher, ApiFetcher, GdownFetcher
+from config import XLSM_FETCH_CONFIG
 
 # Constants
 PROJECT_ROOT = Path(__file__).parent.resolve()
-CONFIG_FILE = PROJECT_ROOT / "secret" / "xlsm_data.json"
 
 def load_config() -> dict:
-    """Load configuration from JSON file."""
-    if not CONFIG_FILE.exists():
-        print(f"ERROR: Configuration file not found: {CONFIG_FILE}")
-        print("Please create the file with Google Drive folder URL and settings.")
+    """Load configuration from config.toml via config module."""
+    if not XLSM_FETCH_CONFIG.get('google_drive_folder_url'):
+        print("ERROR: google_drive_folder_url is required in config.toml [xlsm_fetch] section")
         sys.exit(1)
 
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-
-        if not config.get('google_drive_folder_url'):
-            print("ERROR: google_drive_folder_url is required in config")
-            sys.exit(1)
-
-        return config
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON in {CONFIG_FILE}: {e}")
-        sys.exit(1)
+    return XLSM_FETCH_CONFIG
 
 def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True):
     """Create appropriate fetcher based on mode.
