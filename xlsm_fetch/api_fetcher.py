@@ -60,14 +60,14 @@ class ApiFetcher(BaseFetcher):
 
         return None
 
-    def fetch(self) -> List[Dict[str, str]]:
+    def fetch(self) -> List[str]:
         """Fetch list of .xlsm files using the Google Drive API.
 
         Uses access_token (Bearer) if provided, otherwise api_key if provided, or an unauthenticated
         request as a last resort. Iterates through all pages and returns files matching '.xlsm'.
 
         Returns:
-            List of dictionaries with file info: {'id': str, 'name': str, 'size': int}
+            List[str] - list of file names that were downloaded/added
         """
         self._log(f"Starting API fetch from: {self.folder_url}")
 
@@ -93,7 +93,7 @@ class ApiFetcher(BaseFetcher):
         else:
             self._log("No credentials provided; attempting unauthenticated requests (may fail)")
 
-        files: List[Dict[str, str]] = []
+        files: List[str] = []
         next_token: Optional[str] = None
 
         try:
@@ -118,11 +118,7 @@ class ApiFetcher(BaseFetcher):
                         except Exception:
                             size = 0
 
-                        files.append({
-                            'id': f.get('id'),
-                            'name': name,
-                            'size': size,
-                        })
+                        files.append(name)
 
                 next_token = data.get('nextPageToken')
                 if not next_token:
