@@ -43,7 +43,7 @@ class SeleniumFetcher(BaseFetcher):
         target_download_dir = self.download_dir
 
         # Create custom Chrome profile with download settings
-        # Use project_root, установленный в BaseFetcher
+        # Use project_root, set in BaseFetcher
         project_root = self.project_root
         temp_profile_dir = project_root / "temp_chrome_profile"
         temp_profile_dir.mkdir(exist_ok=True)
@@ -69,9 +69,6 @@ class SeleniumFetcher(BaseFetcher):
         # Setup Chrome options
         chrome_options = ChromeOptions()
         chrome_options.add_argument(f"--user-data-dir={temp_profile_dir}")
-
-        # headless disabled for debugging (was: --headless=new)
-        # chrome_options.add_argument("--headless=new")
 
         # Enable headless mode for CI / unattended runs
         if self.headless:

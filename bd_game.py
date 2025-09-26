@@ -129,7 +129,7 @@ class BdGame:
             return cell_value
         except Exception as e:
             # Raise XLSParseError with the problematic value
-            raise XLSParseError(f"Error parsing date: {e}, problematic value: {getattr(locals(), 'cell_value', 'N/A')}")
+            raise XLSParseError(f"Error parsing date: {e}, problematic value: {locals().get('cell_value', 'N/A')}")
 
     def _parse_teams(self, all_sheets):
         """Parse teams from the XLSM sheets."""

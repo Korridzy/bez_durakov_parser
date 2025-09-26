@@ -21,14 +21,14 @@ class ApiFetcher(BaseFetcher):
 
     DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files"
 
-    def __init__(self, folder_url: str, api_key: Optional[str] = None, access_token: Optional[str] = None, download_dir: Optional[str] = None):
+    def __init__(self, folder_url: str, download_dir: Optional[str] = None, api_key: Optional[str] = None, access_token: Optional[str] = None):
         """Initialize with Google Drive folder URL and optional credentials.
 
         Args:
             folder_url: Google Drive folder URL or a raw folder id.
+            download_dir: optional download directory path.
             api_key: optional API key for public requests.
             access_token: optional OAuth2 access token (Bearer) for authenticated requests.
-            download_dir: optional download directory path.
         """
         super().__init__(folder_url, download_dir)
         self.api_key = api_key
