@@ -31,11 +31,11 @@ class SeleniumFetcher(BaseFetcher):
         super().__init__(folder_url, download_dir)
         self.headless = headless
 
-    def fetch(self) -> List[Dict[str, str]]:
+    def fetch(self) -> List[str]:
         """Fetch list of .xlsm files from Google Drive folder.
 
         Returns:
-            List of dictionaries with file info: {'id': str, 'name': str, 'size': int}
+            List of file names (strings) that were downloaded and added
         """
         self._log(f"Starting Selenium fetch from: {self.folder_url}")
 
@@ -128,15 +128,11 @@ class SeleniumFetcher(BaseFetcher):
                 return []
 
             # Step 4: Process downloaded archive
-            new_files_count = self._process_downloaded_archive(zip_path, target_download_dir)
+            added_files = self._process_downloaded_archive(zip_path, target_download_dir)
 
-            # Create list of file info for the new files (return format expected by caller)
-            final_files = []
-            for i in range(new_files_count):
-                final_files.append(f"new_file_{i+1}.xlsm")
-
-            self._log(f"Fetch completed. Found {new_files_count} new files.")
-            return final_files
+            # Return the actual file names instead of dummy names
+            self._log(f"Fetch completed. Found {len(added_files)} new files.")
+            return added_files
 
         except Exception as e:
             self._log(f"Error during Selenium fetch: {e}")
@@ -442,13 +438,13 @@ class SeleniumFetcher(BaseFetcher):
 
         return None
 
-    def _process_downloaded_archive(self, zip_path: Path, target_download_dir: Path) -> int:
+    def _process_downloaded_archive(self, zip_path: Path, target_download_dir: Path) -> List[str]:
         """Unpack downloaded zip, compare its .xlsm files with target directory and copy new/different ones.
 
         After processing removes the downloaded zip and temporary extraction directory.
 
         Returns:
-            Number of new files added
+            List of new file names added
         """
         self._log(f"📦 Processing downloaded archive: {zip_path}")
 
@@ -462,7 +458,7 @@ class SeleniumFetcher(BaseFetcher):
                 self._log(f"✅ Extracted archive to temporary dir: {tmp_dir}")
             except Exception as ex:
                 self._log(f"❌ Failed to extract archive: {ex}")
-                return 0
+                return []
 
             # Helper to compute SHA256 of a file
             def file_hash(p: Path) -> str:
@@ -514,7 +510,7 @@ class SeleniumFetcher(BaseFetcher):
             else:
                 self._log(f"✅ Total new files added: {len(added_files)}")
 
-            return len(added_files)
+            return added_files
 
         finally:
             # Remove downloaded archive

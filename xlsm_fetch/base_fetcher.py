@@ -30,8 +30,12 @@ class BaseFetcher:
         p.mkdir(parents=True, exist_ok=True)
         self.download_dir = p.resolve()
 
-    def fetch(self) -> List[Dict[str, str]]:
-        """Perform the fetch. Must be implemented by subclasses."""
+    def fetch(self) -> List[str]:
+        """Perform the fetch. Must be implemented by subclasses.
+
+        Returns:
+            List[str] - list of file names that were downloaded/added
+        """
         raise NotImplementedError
 
     def _log(self, msg: str) -> None:
