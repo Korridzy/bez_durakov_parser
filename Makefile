@@ -61,7 +61,7 @@ upgrade-code:
 		echo "Нет локальных изменений, выполняю обновление..."; \
 		git pull origin main; \
 		echo "Устанавливаю зависимости..."; \
-		poetry install || exit 1; \
+		poetry install; \
 	elif [ "$$all_changes" = "config.toml" ]; then \
 		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
 		if cp config.toml config.toml.backup; then \
@@ -71,7 +71,7 @@ upgrade-code:
 					rm config.toml.backup; \
 					echo "Обновление завершено, локальная версия config.toml восстановлена"; \
 					echo "Устанавливаю зависимости..."; \
-					poetry install || exit 1; \
+					poetry install; \
 				else \
 					echo "Ошибка при восстановлении config.toml из backup."; \
 					echo "Ваш конфиг лежит в файле config.toml.backup."; \
