@@ -36,3 +36,6 @@ if DATABASE_URL.startswith(sqlite_prefix):
 # Function for getting the configuration (optional)
 def get_config():
     return config
+
+# XLSM Fetch configuration
+XLSM_FETCH_CONFIG = config.get("xlsm_fetch", {})
