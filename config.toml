@@ -6,3 +6,11 @@ sqlalchemy_logging = false
 [application]
 debug = true
 log_level = "INFO"
+
+[xlsm_fetch]
+google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
+modes = ["browser_selenium"]
+download_dir = "xlsm_archive"
+# Available modes: 'public_api' (no auth), 'browser_selenium' (browser automation), 'gdown' (download entire folder)
+# Can specify single mode or list of modes to try in sequence
+# 'download_dir' is relative to project root or absolute path
