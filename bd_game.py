@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from pprint import pprint
+from datetime import datetime
 
 class XLSParseError(Exception):
     def __init__(self, message):
@@ -125,8 +126,15 @@ class BdGame:
         try:
             # Get the value of cell A1 from the sheet "Общая таблица"
             cell_value = all_sheets['Общая таблица'].columns[0]
+
             # Convert the cell value to a datetime object
-            return cell_value
+            if isinstance(cell_value, datetime):
+                return cell_value
+            elif isinstance(cell_value, pd.Timestamp):
+                return cell_value.to_pydatetime()
+            else:
+                # Try pandas to_datetime for strings and other types
+                return pd.to_datetime(cell_value)
         except Exception as e:
             # Raise XLSParseError with the problematic value
             raise XLSParseError(f"Error parsing date: {e}, problematic value: {locals().get('cell_value', 'N/A')}")
@@ -158,7 +166,7 @@ class BdGame:
                     raise XLSParseError(f"Team '{team}' not found in 'Общая таблица'")
                 row_index = team_rows.index[0]
                 # Get the points from the column named "I"
-                points = general_table.loc[row_index, 'I']
+                points = np.nan_to_num(general_table.loc[row_index, 'I'])
                 # Add the team and points to the dictionary
                 self._game_data['vybor'][team] = points
         except Exception as e:
@@ -218,17 +226,17 @@ class BdGame:
                 row_index = team_rows.index[0]
 
                 # Store the team data in the dictionary directly
-                self._game_data['pref'][team]['I'] = pref_table.loc[row_index, 'I']
-                self._game_data['pref'][team]['II'] = pref_table.loc[row_index, 'II']
-                self._game_data['pref'][team]['III'] = pref_table.loc[row_index, 'III']
-                self._game_data['pref'][team]['IV'] = pref_table.loc[row_index, 'IV']
-                self._game_data['pref'][team]['V'] = pref_table.loc[row_index, 'V']
-                self._game_data['pref'][team]['VI'] = pref_table.loc[row_index, 'VI']
-                self._game_data['pref'][team]['VII'] = pref_table.loc[row_index, 'VII']
-                self._game_data['pref'][team]['Points'] = pref_table.loc[row_index, 'Points']
-                self._game_data['pref'][team]['Penalty'] = pref_table.loc[row_index, 'Penalty']
-                self._game_data['pref'][team]['Bonus'] = pref_table.loc[row_index, 'Bonus']
-                self._game_data['pref'][team]['Сумма'] = pref_table.loc[row_index, 'Sum']
+                self._game_data['pref'][team]['I'] = np.nan_to_num(pref_table.loc[row_index, 'I'])
+                self._game_data['pref'][team]['II'] = np.nan_to_num(pref_table.loc[row_index, 'II'])
+                self._game_data['pref'][team]['III'] = np.nan_to_num(pref_table.loc[row_index, 'III'])
+                self._game_data['pref'][team]['IV'] = np.nan_to_num(pref_table.loc[row_index, 'IV'])
+                self._game_data['pref'][team]['V'] = np.nan_to_num(pref_table.loc[row_index, 'V'])
+                self._game_data['pref'][team]['VI'] = np.nan_to_num(pref_table.loc[row_index, 'VI'])
+                self._game_data['pref'][team]['VII'] = np.nan_to_num(pref_table.loc[row_index, 'VII'])
+                self._game_data['pref'][team]['Points'] = np.nan_to_num(pref_table.loc[row_index, 'Points'])
+                self._game_data['pref'][team]['Penalty'] = np.nan_to_num(pref_table.loc[row_index, 'Penalty'])
+                self._game_data['pref'][team]['Bonus'] = np.nan_to_num(pref_table.loc[row_index, 'Bonus'])
+                self._game_data['pref'][team]['Сумма'] = np.nan_to_num(pref_table.loc[row_index, 'Sum'])
         except Exception as e:
             raise XLSParseError(f"Error parsing pref: {e}")
 
@@ -248,7 +256,7 @@ class BdGame:
                     raise XLSParseError(f"Team '{team}' not found in 'Общая таблица'")
                 row_index = team_rows.index[0]
                 # Get the points from the column named "IV"
-                points = general_table.loc[row_index, 'IV']
+                points = np.nan_to_num(general_table.loc[row_index, 'IV'])
                 # Add the team and points to the dictionary
                 self._game_data['pairs'][team] = points
         except Exception as e:
@@ -272,11 +280,11 @@ class BdGame:
                     raise XLSParseError(f"Team '{team}' not found in 'Разоблачение'")
                 row_index = team_rows.index[0]
                 # Get the values from the specified columns
-                i_value = razobl_table.loc[row_index, 'I']
-                ii_value = razobl_table.loc[row_index, 'II']
-                iii_value = razobl_table.loc[row_index, 'III']
-                iv_value = razobl_table.loc[row_index, 'IV']
-                sum_value = razobl_table.loc[row_index, 'Сумма']
+                i_value = np.nan_to_num(razobl_table.loc[row_index, 'I'])
+                ii_value = np.nan_to_num(razobl_table.loc[row_index, 'II'])
+                iii_value = np.nan_to_num(razobl_table.loc[row_index, 'III'])
+                iv_value = np.nan_to_num(razobl_table.loc[row_index, 'IV'])
+                sum_value = np.nan_to_num(razobl_table.loc[row_index, 'Сумма'])
                 # Check if the sum of I-IV equals the value in "Сумма"
                 if sum_value != i_value + ii_value + iii_value + iv_value:
                     raise XLSParseError(f"Sum mismatch for team '{team}' in 'Разоблачение'")
@@ -401,15 +409,15 @@ class BdGame:
                 row_index = team_rows.index[0]
 
                 # Collect values from columns I-IV and the columns following each of them
-                i_value = auction_table.loc[row_index, 'I']
-                i_points = auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('I') + 1]]
-                ii_value = auction_table.loc[row_index, 'II']
-                ii_points = auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('II') + 1]]
-                iii_value = auction_table.loc[row_index, 'III']
-                iii_points = auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('III') + 1]]
-                iv_value = auction_table.loc[row_index, 'IV']
-                iv_points = auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('IV') + 1]]
-                sum_value = auction_table.loc[row_index, 'Сумма баллов в конкурсе']
+                i_value = np.nan_to_num(auction_table.loc[row_index, 'I'])
+                i_points = np.nan_to_num(auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('I') + 1]])
+                ii_value = np.nan_to_num(auction_table.loc[row_index, 'II'])
+                ii_points = np.nan_to_num(auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('II') + 1]])
+                iii_value = np.nan_to_num(auction_table.loc[row_index, 'III'])
+                iii_points = np.nan_to_num(auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('III') + 1]])
+                iv_value = np.nan_to_num(auction_table.loc[row_index, 'IV'])
+                iv_points = np.nan_to_num(auction_table.loc[row_index, auction_table.columns[auction_table.columns.get_loc('IV') + 1]])
+                sum_value = np.nan_to_num(auction_table.loc[row_index, 'Сумма баллов в конкурсе'])
 
                 # Store the team data in the dictionary
                 self._game_data['auction'][team]['I']['bid'] = i_value
@@ -454,12 +462,12 @@ class BdGame:
                     raise XLSParseError(f"Team '{team}' not found in 'Аукцион'")
                 row_index = team_rows.index[0]
                 expected_total_points = (
-                    general_table.loc[row_index, 'I'] +
-                    general_table.loc[row_index, 'II'] +
-                    general_table.loc[row_index, 'III'] +
-                    general_table.loc[row_index, 'IV'] +
-                    general_table.loc[row_index, 'V'] +
-                    general_table.loc[row_index, 'VI']
+                    np.nan_to_num(general_table.loc[row_index, 'I']) +
+                    np.nan_to_num(general_table.loc[row_index, 'II']) +
+                    np.nan_to_num(general_table.loc[row_index, 'III']) +
+                    np.nan_to_num(general_table.loc[row_index, 'IV']) +
+                    np.nan_to_num(general_table.loc[row_index, 'V']) +
+                    np.nan_to_num(general_table.loc[row_index, 'VI'])
                 )
                 if total_points[team] != expected_total_points:
                     raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points}")
@@ -483,9 +491,9 @@ class BdGame:
                 row_index = team_rows.index[0]
 
                 # Extract values from the specified columns
-                i_value = mot_table.loc[row_index, 'I']
-                ii_value = mot_table.loc[row_index, 'II']
-                iii_value = mot_table.loc[row_index, 'III']
+                i_value = np.nan_to_num(mot_table.loc[row_index, 'I'])
+                ii_value = np.nan_to_num(mot_table.loc[row_index, 'II'])
+                iii_value = np.nan_to_num(mot_table.loc[row_index, 'III'])
                 sum_value = i_value + ii_value + iii_value
 
                 # Store the team data in the dictionary with calculated sum
