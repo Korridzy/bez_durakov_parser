@@ -353,12 +353,45 @@ class BdGame:
                 for i in range(1, len(bids)):
                     if i <= rate_params["total_rates_quan"] and \
                             bids[i][1] == bids[i-1][1] and total_points[bids[i][0]] == total_points[bids[i-1][0]]:
-                        warnings.warn(
-                            f"Conflict detected: Duplicate bids with the same total points for teams '{bids[i][0]}' "
-                            f"and '{bids[i-1][0]}' in column '{col}'. Bid: {bids[i][1]}, Total Points: {total_points[bids[i][0]]}"
-                        )
+                        # warnings.warn(
+                        #     f"Conflict detected: Duplicate bids with the same total points for teams '{bids[i][0]}' "
+                        #     f"and '{bids[i-1][0]}' in column '{col}'. Bid: {bids[i][1]}, Total Points: {total_points[bids[i][0]]}"
+                        # )
                         # Add conflicting teams to the list
                         conflict_teams.extend([bids[i][0], bids[i-1][0]])
+
+                #DEBUG
+                # # If conflicts detected, print detailed table before assigning rates
+                # # Only print table if the first bid is not zero
+                # if conflict_teams and bids[0][1] != 0.0:
+                #     print("\n" + "=" * 120)
+                #     print(f"КОНФЛИКТ КОЭФФИЦИЕНТОВ В КОЛОНКЕ '{col}'")
+                #     print("=" * 120)
+                #     print(f"{'№':<4} {'Команда':<40} {'Ставка':<12} {'Баллы до':<12} {'Конфликт':<10}")
+                #     print("-" * 120)
+                #
+                #     for idx, (t, b) in enumerate(bids, 1):
+                #         # Check if this team is in conflict
+                #         is_conflict = t in conflict_teams
+                #         conflict_mark = "  ***" if is_conflict else ""
+                #
+                #         print(f"{idx:<4} {t:<40} {b:<12.1f} "
+                #               f"{total_points[t]:<12.1f} {conflict_mark:<10}")
+                #
+                #     print("-" * 120)
+                #     print(f"Команды с конфликтом отмечены звёздочками (***)")
+                #     print(f"Параметры распределения коэффициентов:")
+                #     print(f"  - 2.5x: первые {rate_params['dvaipo_quan']} команд(ы)")
+                #     print(f"  - 2.0x: следующие {rate_params['dva_quan']} команд(ы)")
+                #     print(f"  - 1.5x: следующие {rate_params['jedanipo_quan']} команд(ы)")
+                #     print(f"  - 1.0x: остальные команды")
+                #     print(f"Всего учитываются первые {rate_params['total_rates_quan']} команд(ы) для повышенных коэффициентов")
+                #     print("=" * 120 + "\n")
+                #
+                # # Raise error for any conflicts
+                # if conflict_teams:
+                #     # raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
+                #     raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
 
                 # Assign rates based on the sorted list and rate_params
                 for i, (team, bid) in enumerate(bids):
@@ -370,12 +403,6 @@ class BdGame:
                         auction_data[team][col]['rate'] = 1.5
                     else:
                         auction_data[team][col]['rate'] = 1.0
-
-                    # If there are conflicting teams, print all rates data for this column
-                    if conflict_teams:
-                        raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
-                        print(f"Команда: {team}, Ставка: {auction_data[team][col]['bid']}, "
-                              f"Общие баллы: {total_points[team]}, Присвоенный коэф: {auction_data[team][col]['rate']}")
 
                     # Update total_points
                     total_points[team] += auction_data[team][col]['bid'] + auction_data[team][col]['points']
