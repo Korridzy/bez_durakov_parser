@@ -298,29 +298,6 @@ class BdGame:
         except Exception as e:
             raise XLSParseError(f"Error parsing razobl: {e}")
 
-    def _get_rate_from_user(self, team_name, column_name, min_value=1.0, max_value=2.5):
-        """
-        Ask user to input a rate value within specified range.
-
-        Args:
-            team_name (str): Name of the team for which the rate is requested
-            column_name (str): Column identifier (I, II, III, IV)
-            min_value (float): Minimum allowed value (default: 1.0)
-            max_value (float): Maximum allowed value (default: 2.5)
-
-        Returns:
-            float: Rate value input by user
-        """
-        while True:
-            try:
-                rate_value = float(input(f"Введите значение коэффициента ({min_value}-{max_value}) для команды "
-                                       f"'{team_name}' в этапе '{column_name}': "))
-                if min_value <= rate_value <= max_value:
-                    return rate_value
-                else:
-                    print(f"Значение должно быть между {min_value} и {max_value}")
-            except ValueError:
-                print("Пожалуйста, введите корректное число")
 
     def _restore_auction_rates(self, rate_params):
         """Restore auction rates based on game data."""
