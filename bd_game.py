@@ -426,7 +426,7 @@ class BdGame:
                     total_points[team] += auction_data[team][col]['bid'] + auction_data[team][col]['points']
 
                 # Validate that points divided by rate are in the valid range
-                valid_values = {0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500}
+                valid_values = set(range(0, 1600, 100))
                 for team in auction_data:
                     points = auction_data[team][col]['points']
                     rate = auction_data[team][col]['rate']
