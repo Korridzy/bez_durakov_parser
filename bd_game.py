@@ -319,13 +319,8 @@ class BdGame:
             columns = ['I', 'II', 'III', 'IV']
 
             # Define rate distribution based on rate_params
-            rate_distribution = []
-            for _ in range(rate_params['dvaipo_quan']):
-                rate_distribution.append(2.5)
-            for _ in range(rate_params['dva_quan']):
-                rate_distribution.append(2.0)
-            for _ in range(rate_params['jedanipo_quan']):
-                rate_distribution.append(1.5)
+            rate_distribution = [2.5] * rate_params['dvaipo_quan'] + [2.0] * rate_params['dva_quan'] + \
+                                [1.5] * rate_params['jedanipo_quan']
 
             # Iterate over each column
             for col in columns:
@@ -437,8 +432,8 @@ class BdGame:
                     rate = auction_data[team][col]['rate']
 
                     base_points = points / rate
-                    # Round to nearest integer to handle floating point precision issues
-                    base_points_rounded = round(base_points)
+                    # Use int(base_points + 0.5) for consistent rounding without banker's rounding issues
+                    base_points_rounded = int(base_points + 0.5)
 
                     if base_points_rounded not in valid_values:
                         warnings.warn(
