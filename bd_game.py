@@ -80,6 +80,39 @@ class BdGame:
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'Сумма': 0.0
             }
 
+    def _check_game_consistency(self, all_sheets):
+        """
+        Check game data consistency in the "Общая таблица" sheet.
+
+        Args:
+            all_sheets (dict): Dictionary of all sheets from XLSM file
+
+        Raises:
+            XLSParseError: If any column I-VII is empty in "Общая таблица"
+        """
+        try:
+            # Get the "Общая таблица" sheet
+            general_table = all_sheets['Общая таблица']
+
+            # Check each column from I to VII
+            columns_to_check = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
+
+            for col in columns_to_check:
+                if col not in general_table.columns:
+                    raise XLSParseError(f"Column '{col}' not found in 'Общая таблица'")
+
+                # Get the column data, excluding NaN values
+                col_data = general_table[col].dropna()
+
+                # Check if column is empty (no non-NaN values)
+                if len(col_data) == 0:
+                    raise XLSParseError(f"Column '{col}' is empty in 'Общая таблица'")
+
+        except KeyError as e:
+            raise XLSParseError(f"Sheet 'Общая таблица' not found in the file")
+        except Exception as e:
+            raise XLSParseError(f"Error checking game consistency: {e}")
+
     def parse_from_file(self, file_path):
         """
         Parse XLSM file and populate game data.
@@ -92,6 +125,9 @@ class BdGame:
         """
         try:
             all_sheets = pd.read_excel(file_path, sheet_name=None)
+
+            # Check game consistency before parsing
+            self._check_game_consistency(all_sheets)
 
             # First, get basic information about the game
             game_date = self._parse_date(all_sheets)
