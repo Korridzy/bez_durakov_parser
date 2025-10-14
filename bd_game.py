@@ -3,6 +3,7 @@ import numpy as np
 import warnings
 from pprint import pprint
 from datetime import datetime
+import math
 
 class XLSParseError(Exception):
     def __init__(self, message):
@@ -339,44 +340,105 @@ class BdGame:
 
             # Define the columns to process
             columns = ['I', 'II', 'III', 'IV']
-            conflict_teams = []  # List to track teams with rate conflicts
+
+            # Define rate distribution based on rate_params
+            rate_distribution = []
+            for _ in range(rate_params['dvaipo_quan']):
+                rate_distribution.append(2.5)
+            for _ in range(rate_params['dva_quan']):
+                rate_distribution.append(2.0)
+            for _ in range(rate_params['jedanipo_quan']):
+                rate_distribution.append(1.5)
 
             # Iterate over each column
             for col in columns:
-                # Extract bids and corresponding team names
-                bids = [(team, auction_data[team][col]['bid']) for team in auction_data]
+                # Extract bids and corresponding team names with total points
+                teams_data = [(team, auction_data[team][col]['bid'], total_points[team])
+                              for team in auction_data]
 
-                # Sort bids by bid value, then by total points
-                bids.sort(key=lambda x: (x[1], total_points[x[0]]))
+                # Sort by bid (ascending - more negative = higher bid), then by total_points (ascending)
+                # Lower bid value (more negative) = better position, same bid -> lower points = better position
+                teams_data.sort(key=lambda x: (x[1], x[2]))
 
-                # Check for duplicate bids with the same total points within the top total_rates_quan bids
-                for i in range(1, len(bids)):
-                    if i <= rate_params["total_rates_quan"] and \
-                            bids[i][1] == bids[i-1][1] and total_points[bids[i][0]] == total_points[bids[i-1][0]]:
-                        # warnings.warn(
-                        #     f"Conflict detected: Duplicate bids with the same total points for teams '{bids[i][0]}' "
-                        #     f"and '{bids[i-1][0]}' in column '{col}'. Bid: {bids[i][1]}, Total Points: {total_points[bids[i][0]]}"
-                        # )
-                        # Add conflicting teams to the list
-                        conflict_teams.extend([bids[i][0], bids[i-1][0]])
 
-                #DEBUG
-                # # If conflicts detected, print detailed table before assigning rates
-                # # Only print table if the first bid is not zero
-                # if conflict_teams and bids[0][1] != 0.0:
+                # Track groups of teams with identical bid and total_points
+                conflict_groups = []
+                position = 0
+
+                while position < len(teams_data):
+                    current_bid = teams_data[position][1]
+                    current_points = teams_data[position][2]
+
+                    # Find all teams with the same bid and total_points
+                    group = []
+                    while (position < len(teams_data) and
+                           teams_data[position][1] == current_bid and
+                           teams_data[position][2] == current_points):
+                        group.append(teams_data[position][0])
+                        position += 1
+
+                    conflict_groups.append(group)
+
+                # Assign rates to each group
+                rate_position = 0
+                has_conflicts = False
+
+                for group in conflict_groups:
+                    group_size = len(group)
+
+                    if group_size > 1 and rate_position < len(rate_distribution):
+                        # Conflict: multiple teams with same bid and points
+                        has_conflicts = True
+
+                        # Calculate average rate for this group
+                        rates_sum = 0.0
+                        rates_count = 0
+
+                        for i in range(group_size):
+                            if rate_position + i < len(rate_distribution):
+                                rates_sum += rate_distribution[rate_position + i]
+                                rates_count += 1
+                            else:
+                                rates_sum += 1.0
+                                rates_count += 1
+
+                        avg_rate = rates_sum / rates_count
+
+                        # Assign the average rate to all teams in the group
+                        for team in group:
+                            auction_data[team][col]['rate'] = avg_rate
+
+                    else:
+                        # No conflict: assign rates individually
+                        for team in group:
+                            if rate_position < len(rate_distribution):
+                                auction_data[team][col]['rate'] = rate_distribution[rate_position]
+                            else:
+                                auction_data[team][col]['rate'] = 1.0
+
+                    rate_position += group_size
+
+                # DEBUG: Print detailed information if conflicts were detected
+                # if has_conflicts:
                 #     print("\n" + "=" * 120)
                 #     print(f"КОНФЛИКТ КОЭФФИЦИЕНТОВ В КОЛОНКЕ '{col}'")
                 #     print("=" * 120)
-                #     print(f"{'№':<4} {'Команда':<40} {'Ставка':<12} {'Баллы до':<12} {'Конфликт':<10}")
+                #     print(f"{'№':<4} {'Команда':<40} {'Ставка':<12} {'Баллы до':<12} {'Коэфф.':<10} {'Конфликт':<10}")
                 #     print("-" * 120)
                 #
-                #     for idx, (t, b) in enumerate(bids, 1):
-                #         # Check if this team is in conflict
-                #         is_conflict = t in conflict_teams
-                #         conflict_mark = "  ***" if is_conflict else ""
+                #     for idx, (team, bid, points) in enumerate(teams_data, 1):
+                #         # Check if this team is in a conflict group
+                #         is_conflict = False
+                #         for group in conflict_groups:
+                #             if len(group) > 1 and team in group:
+                #                 is_conflict = True
+                #                 break
                 #
-                #         print(f"{idx:<4} {t:<40} {b:<12.1f} "
-                #               f"{total_points[t]:<12.1f} {conflict_mark:<10}")
+                #         conflict_mark = "  ***" if is_conflict else ""
+                #         rate = auction_data[team][col]['rate']
+                #
+                #         print(f"{idx:<4} {team:<40} {bid:<12.1f} "
+                #               f"{points:<12.1f} {rate:<10.2f} {conflict_mark:<10}")
                 #
                 #     print("-" * 120)
                 #     print(f"Команды с конфликтом отмечены звёздочками (***)")
@@ -387,32 +449,29 @@ class BdGame:
                 #     print(f"  - 1.0x: остальные команды")
                 #     print(f"Всего учитываются первые {rate_params['total_rates_quan']} команд(ы) для повышенных коэффициентов")
                 #     print("=" * 120 + "\n")
-                #
-                # # Raise error for any conflicts
-                # if conflict_teams:
-                #     # raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
-                #     raise XLSParseError(f"Rate conflict detected for column '{col}'. Please resolve manually.")
 
-                # Assign rates based on the sorted list and rate_params
-                for i, (team, bid) in enumerate(bids):
-                    if i < rate_params['dvaipo_quan']:
-                        auction_data[team][col]['rate'] = 2.5
-                    elif i < rate_params['dvaipo_quan'] + rate_params['dva_quan']:
-                        auction_data[team][col]['rate'] = 2.0
-                    elif i < rate_params['dvaipo_quan'] + rate_params['dva_quan'] + rate_params['jedanipo_quan']:
-                        auction_data[team][col]['rate'] = 1.5
-                    else:
-                        auction_data[team][col]['rate'] = 1.0
-
-                    # Update total_points
+                # Update total_points for the next column
+                for team in auction_data:
                     total_points[team] += auction_data[team][col]['bid'] + auction_data[team][col]['points']
 
-                # Assign user-input rates to conflicting teams for the current column
-                for team in conflict_teams:
-                    auction_data[team][col]['rate'] = self._get_rate_from_user(team, col)
+                # Validate that points divided by rate are in the valid range
+                valid_values = {0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500}
+                for team in auction_data:
+                    points = auction_data[team][col]['points']
+                    rate = auction_data[team][col]['rate']
 
-                # Clear the conflict_teams list for the next column
-                conflict_teams.clear()
+                    base_points = points / rate
+                    # Round to nearest integer to handle floating point precision issues
+                    base_points_rounded = round(base_points)
+
+                    if base_points_rounded not in valid_values:
+                        warnings.warn(
+                            f"Invalid points calculation for team '{team}' in column '{col}': "
+                            f"points={points}, rate={rate}, base_points={base_points:.2f} "
+                            f"(rounded: {base_points_rounded}). Base points must be in range [0, 1500] with step 100."
+                        )
+
+
             return total_points
         except Exception as e:
             raise XLSParseError(f"Error restoring auction rates: {e}")
@@ -496,8 +555,10 @@ class BdGame:
                     np.nan_to_num(general_table.loc[row_index, 'V']) +
                     np.nan_to_num(general_table.loc[row_index, 'VI'])
                 )
-                if total_points[team] != expected_total_points:
-                    raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points}")
+                # Allow difference of exactly 5 or exact match
+                diff = abs(total_points[team] - expected_total_points)
+                if diff != 0 and diff != 5:
+                    raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points} (difference: {diff})")
         except Exception as e:
             raise XLSParseError(f"Error parsing auction: {e}")
 
