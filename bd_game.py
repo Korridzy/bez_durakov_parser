@@ -3,7 +3,6 @@ import numpy as np
 import warnings
 from pprint import pprint
 from datetime import datetime
-import math
 
 class XLSParseError(Exception):
     def __init__(self, message):
@@ -432,8 +431,8 @@ class BdGame:
                     rate = auction_data[team][col]['rate']
 
                     base_points = points / rate
-                    # Use int(base_points + 0.5) for consistent rounding without banker's rounding issues
-                    base_points_rounded = int(base_points + 0.5)
+                    # Use proper rounding that works for both positive and negative numbers
+                    base_points_rounded = int(base_points + (0.5 if base_points >= 0 else -0.5))
 
                     if base_points_rounded not in valid_values:
                         warnings.warn(
