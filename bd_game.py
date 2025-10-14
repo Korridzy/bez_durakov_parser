@@ -374,10 +374,9 @@ class BdGame:
                         for i in range(group_size):
                             if rate_position + i < len(rate_distribution):
                                 rates_sum += rate_distribution[rate_position + i]
-                                rates_count += 1
                             else:
                                 rates_sum += 1.0
-                                rates_count += 1
+                            rates_count += 1
 
                         avg_rate = rates_sum / rates_count
 
@@ -532,7 +531,8 @@ class BdGame:
                     np.nan_to_num(general_table.loc[row_index, 'V']) +
                     np.nan_to_num(general_table.loc[row_index, 'VI'])
                 )
-                # Allow difference of exactly 5 or exact match
+                # Allow difference of exactly 5 or exact match. +5 or -5 points are possible due to 1,25 and 2,25 rates
+                # with game rounding specifics.
                 diff = abs(total_points[team] - expected_total_points)
                 if diff != 0 and diff != 5:
                     raise XLSParseError(f"Total points mismatch for team '{team}': {total_points[team]} != {expected_total_points} (difference: {diff})")
