@@ -6,6 +6,7 @@ sqlalchemy_logging = false
 [application]
 debug = true
 log_level = "INFO"
+default_game_date = "02.03.2022"
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"

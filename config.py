@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 
 # Using the standard tomllib module for Python 3.11+
 if sys.version_info >= (3, 11):
@@ -21,6 +22,10 @@ with open(config_file_path, "rb") as f:
 SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
 DEBUG = bool(config["application"].get("debug", False))
 LOG_LEVEL = config["application"].get("log_level", "INFO")
+
+# Parse default game date from config
+DEFAULT_GAME_DATE_STR = config["application"].get("default_game_date", "02.03.2022")
+DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
 DATABASE_URL = config["database"]["url"]
 # Check if connection string contains a relative path to database
