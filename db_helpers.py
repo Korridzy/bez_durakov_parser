@@ -39,6 +39,9 @@ def save_game_to_database(game_instance, db):
 
         # Get game date
         game_date = game_data['date']
+        # Normalize game_date to a date object if it's a datetime
+        if hasattr(game_date, 'date'):
+            game_date = game_date.date()
 
         # Check if game date matches the default date
         if game_date == DEFAULT_GAME_DATE:

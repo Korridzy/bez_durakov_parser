@@ -32,13 +32,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Revert team_name column collation to default."""
-    # Revert to default utf8mb4_general_ci collation
+    """Revert team_name column collation to database default (utf8mb4_0900_ai_ci)."""
+    # Revert to utf8mb4_0900_ai_ci collation (MySQL 8+ default)
+    # Note: If using MySQL 5.7 or earlier, the default might be utf8mb4_general_ci
     op.execute("""
         ALTER TABLE teams 
         MODIFY COLUMN team_name VARCHAR(256) 
         CHARACTER SET utf8mb4 
-        COLLATE utf8mb4_general_ci 
+        COLLATE utf8mb4_0900_ai_ci 
         NOT NULL
     """)
-
