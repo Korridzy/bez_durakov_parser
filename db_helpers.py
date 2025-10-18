@@ -1,6 +1,10 @@
 from config import DATABASE_URL, DEFAULT_GAME_DATE
-from db import Database
+from db import Database, normalize_team_name
 import warnings
+
+
+# Re-export normalize_team_name for backwards compatibility
+__all__ = ['Database', 'normalize_team_name', 'initialize_database', 'save_game_to_database']
 
 
 def initialize_database():
