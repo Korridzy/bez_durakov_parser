@@ -20,17 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Change team_name column collation to binary for exact character matching."""
-    # Use Alembic's alter_column for better portability
-    # utf8mb4_bin ensures 'đ' and 'd' are treated as different characters
-    op.alter_column(
-        'teams',
-        'team_name',
-        existing_type=sa.String(256),
-        type_=sa.String(256),
-        nullable=False,
-        mysql_charset='utf8mb4',
-        mysql_collate='utf8mb4_bin'
-    )
+    # For MySQL, change collation to utf8mb4_bin for binary comparison
+    # This ensures 'đ' and 'd' are treated as different characters
+    op.execute("""
+        ALTER TABLE teams 
+        MODIFY COLUMN team_name VARCHAR(256) 
+        CHARACTER SET utf8mb4 
+        COLLATE utf8mb4_bin 
+        NOT NULL
+    """)
 
 
 def downgrade() -> None:
@@ -53,13 +51,11 @@ def downgrade() -> None:
         db_charset = 'utf8mb4'
         db_collation = 'utf8mb4_general_ci'
 
-    # Use Alembic's alter_column with dynamically determined charset and collation
-    op.alter_column(
-        'teams',
-        'team_name',
-        existing_type=sa.String(256),
-        type_=sa.String(256),
-        nullable=False,
-        mysql_charset=db_charset,
-        mysql_collate=db_collation
-    )
+    # Use raw SQL with dynamically determined charset and collation
+    op.execute(f"""
+        ALTER TABLE teams 
+        MODIFY COLUMN team_name VARCHAR(256) 
+        CHARACTER SET {db_charset}
+        COLLATE {db_collation}
+        NOT NULL
+    """)
