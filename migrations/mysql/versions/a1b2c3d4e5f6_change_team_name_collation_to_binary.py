@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -32,13 +33,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Revert team_name column collation to database default (utf8mb4_0900_ai_ci)."""
-    # Revert to utf8mb4_0900_ai_ci collation (MySQL 8+ default)
-    # Note: If using MySQL 5.7 or earlier, the default might be utf8mb4_general_ci
-    op.execute("""
+    """Revert team_name column collation to database default."""
+    # Dynamically determine the database default collation for portability
+    # across MySQL versions (5.7 uses utf8mb4_general_ci, 8+ uses utf8mb4_0900_ai_ci)
+    conn = op.get_bind()
+    result = conn.execute(text("SELECT @@collation_database")).fetchone()
+    db_collation = result[0] if result else 'utf8mb4_general_ci'
+
+    op.execute(f"""
         ALTER TABLE teams 
         MODIFY COLUMN team_name VARCHAR(256) 
         CHARACTER SET utf8mb4 
-        COLLATE utf8mb4_0900_ai_ci 
+        COLLATE {db_collation}
         NOT NULL
     """)
