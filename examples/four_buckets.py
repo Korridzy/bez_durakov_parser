@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from db import Database, TeamGameScore
+from db_helpers import normalize_team_name
 
 
 def evaluate_four_bucket_strategy(team_name):
@@ -13,6 +14,9 @@ def evaluate_four_bucket_strategy(team_name):
 
     # Connect to database
     db = Database()
+
+    # Normalize team name for database comparison
+    normalized_team_name = normalize_team_name(team_name)
 
     # Get games from the last year
     one_year_ago = datetime.now() - timedelta(days=365)
@@ -22,7 +26,7 @@ def evaluate_four_bucket_strategy(team_name):
         games_with_team = session.query(TeamGameScore).filter(
             and_(
                 TeamGameScore.game_date >= one_year_ago,
-                TeamGameScore.team_name == team_name
+                TeamGameScore.team_name == normalized_team_name
             )
         ).order_by(TeamGameScore.game_date).all()
 
@@ -48,12 +52,12 @@ def evaluate_four_bucket_strategy(team_name):
             # Sort by score descending
             teams_with_last.sort(key=lambda x: x[1], reverse=True)
             place_with_last = next(i + 1 for i, (name, _) in enumerate(teams_with_last)
-                                  if name == team_name)
+                                  if name == normalized_team_name)
 
             # Calculate places without last round (mot)
             teams_without_last = []
             for team in all_teams:
-                if team.team_name == team_name:
+                if team.team_name == normalized_team_name:
                     # For target team - exclude mot points
                     total_score = (
                         float(team.vybor_points or 0) +
@@ -72,7 +76,7 @@ def evaluate_four_bucket_strategy(team_name):
             # Sort by score descending
             teams_without_last.sort(key=lambda x: x[1], reverse=True)
             place_without_last = next(i + 1 for i, (name, _) in enumerate(teams_without_last)
-                                     if name == team_name)
+                                     if name == normalized_team_name)
 
             dates.append(game_date)
             places_with_last.append(place_with_last)
