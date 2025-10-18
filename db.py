@@ -256,7 +256,7 @@ class Database:
     def get_or_create_team(self, session, team_name):
         """
         Get a team by name or create it if it doesn't exist.
-        Team names are stored in normalized form (lowercase, trimmed whitespace).
+        Team names are stored in normalized form (lowercase, trimmed whitespace, and collapsed internal spaces).
 
         Args:
             session: SQLAlchemy session
@@ -267,7 +267,6 @@ class Database:
         """
         # Normalize team name for storage and lookup
         normalized_name = normalize_team_name(team_name)
-
         team = session.query(Team).filter_by(team_name=normalized_name).first()
 
         if not team:

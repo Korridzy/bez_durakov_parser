@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -21,29 +20,46 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Change team_name column collation to binary for exact character matching."""
-    # For MySQL, change collation to utf8mb4_bin for binary comparison
-    # This ensures 'đ' and 'd' are treated as different characters
-    op.execute("""
-        ALTER TABLE teams 
-        MODIFY COLUMN team_name VARCHAR(256) 
-        CHARACTER SET utf8mb4 
-        COLLATE utf8mb4_bin 
-        NOT NULL
-    """)
+    # Use Alembic's alter_column for better portability
+    # utf8mb4_bin ensures 'đ' and 'd' are treated as different characters
+    op.alter_column(
+        'teams',
+        'team_name',
+        existing_type=sa.String(256),
+        type_=sa.String(256),
+        nullable=False,
+        mysql_charset='utf8mb4',
+        mysql_collate='utf8mb4_bin'
+    )
 
 
 def downgrade() -> None:
     """Revert team_name column collation to database default."""
-    # Dynamically determine the database default collation for portability
+    # Dynamically determine the database default charset and collation for portability
     # across MySQL versions (5.7 uses utf8mb4_general_ci, 8+ uses utf8mb4_0900_ai_ci)
-    conn = op.get_bind()
-    result = conn.execute(text("SELECT @@collation_database")).fetchone()
-    db_collation = result[0] if result else 'utf8mb4_general_ci'
+    # and different database configurations
+    from sqlalchemy import text
 
-    op.execute(f"""
-        ALTER TABLE teams 
-        MODIFY COLUMN team_name VARCHAR(256) 
-        CHARACTER SET utf8mb4 
-        COLLATE {db_collation}
-        NOT NULL
-    """)
+    conn = op.get_bind()
+
+    # Get both charset and collation to ensure they match
+    result = conn.execute(text("SELECT @@character_set_database, @@collation_database")).fetchone()
+
+    if result:
+        db_charset = result[0]
+        db_collation = result[1]
+    else:
+        # Fallback to utf8mb4 defaults if query fails
+        db_charset = 'utf8mb4'
+        db_collation = 'utf8mb4_general_ci'
+
+    # Use Alembic's alter_column with dynamically determined charset and collation
+    op.alter_column(
+        'teams',
+        'team_name',
+        existing_type=sa.String(256),
+        type_=sa.String(256),
+        nullable=False,
+        mysql_charset=db_charset,
+        mysql_collate=db_collation
+    )
