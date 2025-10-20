@@ -1,4 +1,5 @@
 import os
+import unicodedata
 from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, ForeignKey, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
@@ -15,6 +16,50 @@ if SQLALCHEMY_LOGGING:
 
 # Base class for all models
 Base = declarative_base()
+
+
+def normalize_team_name(team_name):
+    """
+    Normalize team name for consistent storage and comparison with robust Unicode handling.
+
+    This function:
+    - Strips leading and trailing whitespace
+    - Applies Unicode NFC normalization to handle visually identical characters with different code points
+    - Converts to lowercase for case-insensitive comparison
+    - Normalizes internal whitespace (multiple spaces to single space)
+
+    Args:
+        team_name (str): Original team name
+
+    Returns:
+        str: Normalized team name
+
+    Examples:
+        >>> normalize_team_name("  ДЛТ-78  ")
+        'длт-78'
+        >>> normalize_team_name("Тов Слоникян")
+        'тов слоникян'
+        >>> normalize_team_name("Team  Name ")
+        'team name'
+    """
+    if not isinstance(team_name, str):
+        raise TypeError(f"Expected str, got {type(team_name).__name__}")
+
+    # Strip leading/trailing whitespace
+    normalized = team_name.strip()
+
+    # Apply Unicode NFC normalization to handle visually identical characters
+    # with different code point sequences (e.g., composed vs decomposed forms)
+    normalized = unicodedata.normalize('NFC', normalized)
+
+    # Convert to lowercase for case-insensitive comparison
+    normalized = normalized.lower()
+
+    # Normalize internal whitespace (replace multiple spaces with single space)
+    normalized = ' '.join(normalized.split())
+
+    return normalized
+
 
 # Define models corresponding to database tables
 class Game(Base):
@@ -218,12 +263,26 @@ class Database:
         self.Session = sessionmaker(bind=self.engine)
 
     def get_or_create_team(self, session, team_name):
-        """Get a team by name or create it if it doesn't exist."""
-        team = session.query(Team).filter_by(team_name=team_name).first()
+        """
+        Get a team by name or create it if it doesn't exist.
+        Team names are stored in normalized form (lowercase, trimmed whitespace, and collapsed internal spaces).
+
+        Args:
+            session: SQLAlchemy session
+            team_name (str): Original team name from parsed data
+
+        Returns:
+            Team: Team object from database
+        """
+        # Normalize team name for storage and lookup
+        normalized_name = normalize_team_name(team_name)
+        team = session.query(Team).filter_by(team_name=normalized_name).first()
+
         if not team:
-            team = Team(team_name=team_name)
+            team = Team(team_name=normalized_name)
             session.add(team)
             session.flush()  # To get the team_id
+            logging.warning(f"Created new team in database: '{normalized_name}' (original: '{team_name}')")
         return team
 
     def add_game(self, bd_game):
@@ -550,6 +609,7 @@ class Database:
     def find_identical_game(self, game_instance):
         """
         Checks for an identical game in the database using team_game_scores view.
+        Uses normalized team names for comparison.
 
         Args:
             game_instance (BdGame): The parsed game data to check for duplicates
@@ -573,32 +633,47 @@ class Database:
                 # Get records from team_game_scores view for this game
                 team_scores = session.query(TeamGameScore).filter_by(game_id=game_id).all()
 
-                # Compare team lists
+                # Compare team lists using normalized names
+                # DB already has normalized names, so we just need to normalize parsed team names
                 db_team_names = sorted([ts.team_name for ts in team_scores])
-                if sorted(game_data['teams']) != db_team_names:
+                parsed_normalized_team_names = sorted([normalize_team_name(t) for t in game_data['teams']])
+
+                if parsed_normalized_team_names != db_team_names:
                     continue
 
                 # Check if scores match for each team
                 scores_match = True
-                for team_score in team_scores:
-                    team_name = team_score.team_name
 
-                    # Calculate total points from new game data
-                    new_total = (
-                        float(game_data['vybor'][team_name]) +
-                        float(game_data['chisla'][team_name]['Сумма']) +
-                        float(game_data['pref'][team_name]['Сумма']) +
-                        float(game_data['pairs'][team_name]) +
-                        float(game_data['razobl'][team_name]['Сумма']) +
-                        float(game_data['auction'][team_name]['Сумма']) +
-                        float(game_data['mot'][team_name]['Сумма'])
+                # Create a mapping from normalized team names to original names in game_data
+                normalized_to_original_map = {normalize_team_name(t): t for t in game_data['teams']}
+
+                for team_score in team_scores:
+                    # DB team name is already normalized
+                    db_team_name = team_score.team_name
+
+                    # Find corresponding team in parsed game data
+                    if db_team_name not in normalized_to_original_map:
+                        scores_match = False
+                        break
+
+                    original_team_name = normalized_to_original_map[db_team_name]
+
+                    # Calculate total points from parsed game data
+                    parsed_total = (
+                        float(game_data['vybor'][original_team_name]) +
+                        float(game_data['chisla'][original_team_name]['Сумма']) +
+                        float(game_data['pref'][original_team_name]['Сумма']) +
+                        float(game_data['pairs'][original_team_name]) +
+                        float(game_data['razobl'][original_team_name]['Сумма']) +
+                        float(game_data['auction'][original_team_name]['Сумма']) +
+                        float(game_data['mot'][original_team_name]['Сумма'])
                     )
 
                     # Get total points from database
                     db_total = float(team_score.total_points)
 
                     # Compare with small tolerance for floating point precision
-                    if abs(new_total - db_total) > 0.01:
+                    if abs(parsed_total - db_total) > 0.01:
                         scores_match = False
                         break
 
