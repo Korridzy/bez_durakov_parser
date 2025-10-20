@@ -1,4 +1,5 @@
 import os
+import unicodedata
 from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, ForeignKey, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
@@ -19,10 +20,11 @@ Base = declarative_base()
 
 def normalize_team_name(team_name):
     """
-    Normalize team name for consistent storage and comparison.
+    Normalize team name for consistent storage and comparison with robust Unicode handling.
 
     This function:
     - Strips leading and trailing whitespace
+    - Applies Unicode NFC normalization to handle visually identical characters with different code points
     - Converts to lowercase for case-insensitive comparison
     - Normalizes internal whitespace (multiple spaces to single space)
 
@@ -43,8 +45,15 @@ def normalize_team_name(team_name):
     if not isinstance(team_name, str):
         raise TypeError(f"Expected str, got {type(team_name).__name__}")
 
-    # Strip leading/trailing whitespace and convert to lowercase
-    normalized = team_name.strip().lower()
+    # Strip leading/trailing whitespace
+    normalized = team_name.strip()
+
+    # Apply Unicode NFC normalization to handle visually identical characters
+    # with different code point sequences (e.g., composed vs decomposed forms)
+    normalized = unicodedata.normalize('NFC', normalized)
+
+    # Convert to lowercase for case-insensitive comparison
+    normalized = normalized.lower()
 
     # Normalize internal whitespace (replace multiple spaces with single space)
     normalized = ' '.join(normalized.split())
