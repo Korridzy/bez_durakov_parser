@@ -50,7 +50,7 @@ def save_game_to_database(game_instance, db):
                 f"WARNING: Game date matches the default date ({DEFAULT_GAME_DATE.strftime('%d.%m.%Y')})!\n"
                 f"The date was probably not set in the game file.\n"
                 f"Please correct the date in the source file and import the game again.\n"
-                f"The game will still be saved to the database with the specified date.\n"
+                f"The game may still be saved to the database with the specified date, unless it is detected as a duplicate.\n"
                 f"{'='*80}",
                 UserWarning
             )
