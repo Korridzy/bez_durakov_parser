@@ -5,10 +5,11 @@ services:
     image: mysql:8.0
     container_name: bez_durakov_mysql
     restart: unless-stopped
-    env_file:
-      - ./vm/mysql/.env
     environment:
       MYSQL_DATABASE: bez_durakov
+      MYSQL_ROOT_PASSWORD: devpass
+      MYSQL_USER: durak
+      MYSQL_PASSWORD: devpass
     ports:
       - "3306:3306"
     volumes:

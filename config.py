@@ -28,15 +28,6 @@ DEFAULT_GAME_DATE_STR = config["application"].get("default_game_date", "02.03.20
 DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
 DATABASE_URL = config["database"]["url"]
-# Check if connection string contains a relative path to database
-sqlite_prefix = "sqlite:///"
-if DATABASE_URL.startswith(sqlite_prefix):
-    # Split string by prefix
-    _, db_path = DATABASE_URL.split(sqlite_prefix, 1)
-    if not os.path.isabs(db_path):
-        # Convert to absolute path
-        abs_db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), db_path)
-        DATABASE_URL = f"{sqlite_prefix}{abs_db_path}"
 
 # Function for getting the configuration (optional)
 def get_config():
