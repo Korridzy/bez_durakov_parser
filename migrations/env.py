@@ -8,7 +8,7 @@ from sqlalchemy import pool
 from alembic import context
 
 # Add the project root directory to sys.path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import Base
 from config import DATABASE_URL
@@ -17,10 +17,6 @@ from config import DATABASE_URL
 # access to the values within the .ini file in use.
 config = context.config
 
-# Only proceed if this is a MySQL database
-if not DATABASE_URL.startswith('mysql'):
-    print(f"Skipping mysql environment - DATABASE_URL is for different database type: {DATABASE_URL}")
-    sys.exit(0)
 
 # Replacing the sqlalchemy.url option with one from project config file
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

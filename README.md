@@ -33,15 +33,21 @@
 
 На этом этапе будет создана виртуальная среда в каталоге `/your/comfortable/path/bez_durakov_parser/.venv`, и в неё будут установлены все необходимые зависимости.
 
-Далее необходимо прописать в config.toml строку доступа к БД, которую вы собираетесь использовать. По умолчанию это локальная файловая SQLite:
+Далее необходимо прописать в config.toml строку доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить через Docker Compose:
+
+```bash
+$ docker-compose up -d
+```
+
+Строка подключения в config.toml:
 
 ```toml
 [database]
-url = "sqlite:///./bez_durakov.db"
+url = "mysql+pymysql://durak:devpass@localhost:3306/bez_durakov"
 sqlalchemy_logging = false
 ```
 
-Также на данный момент поддерживается подключение к MySQL. В конфиге имеется закомментированная строка подключения в качестве примера:
+В конфиге имеется закомментированная строка подключения в качестве примера для подключения к удалённой базе данных с SSL:
 
 ```toml
 url = "mysql+pymysql://username:password@srv_address:port/db_name?ssl_ca=/path/to/ca.pem&ssl_cert=/path/to/client-cert.pem&ssl_key=/path/to/client-key.pem"
