@@ -45,7 +45,7 @@ setup:
 	fi
 
 upgrade-db:
-	@poetry run python alembic_wrapper.py upgrade head
+	@poetry run alembic upgrade head
 
 upgrade-code:
 	@echo "Проверяю статус репозитория..."; \

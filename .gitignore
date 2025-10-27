@@ -5,8 +5,8 @@ xlsm_archive/*
 # Secrets
 secret/
 
-# MySQL data directory
-vm/mysql/mysql_data/
+# VM directory
+vm/
 
 # Local debugging catalog
 data_to_parse/
@@ -199,3 +199,4 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
