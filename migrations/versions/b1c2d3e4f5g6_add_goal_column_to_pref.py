@@ -20,7 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add goal column to pref table."""
-    # Add goal column
+    # Add goal column with default value 4.0. DEfault value is minimum goal by game rules.
+    # It is needed to reparse all xlm files to set actual goals.
     op.add_column('pref', sa.Column('goal', sa.Numeric(precision=10, scale=2), nullable=False, server_default='4.0'))
 
     # Remove the server default after adding the column (so new inserts require explicit values)
