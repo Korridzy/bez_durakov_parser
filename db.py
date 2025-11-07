@@ -144,6 +144,7 @@ class Pref(Base):
     task_5 = Column(Numeric(10, 2), nullable=False)
     task_6 = Column(Numeric(10, 2), nullable=False)
     task_7 = Column(Numeric(10, 2), nullable=False)
+    goal = Column(Numeric(10, 2), nullable=False)
     points = Column(Numeric(10, 2), nullable=False)
     penalty = Column(Numeric(10, 2), nullable=False)
     bonus = Column(Numeric(10, 2), nullable=False)
@@ -348,6 +349,7 @@ class Database:
                     task_5=pref_data['V'],
                     task_6=pref_data['VI'],
                     task_7=pref_data['VII'],
+                    goal=pref_data['Goal'],
                     points=pref_data['Points'],
                     penalty=pref_data['Penalty'],
                     bonus=pref_data['Bonus'],
@@ -522,6 +524,7 @@ class Database:
                     game_data['pref'][team_name]['V'] = float(pref.task_5)
                     game_data['pref'][team_name]['VI'] = float(pref.task_6)
                     game_data['pref'][team_name]['VII'] = float(pref.task_7)
+                    game_data['pref'][team_name]['Goal'] = float(pref.goal)
                     game_data['pref'][team_name]['Points'] = float(pref.points)
                     game_data['pref'][team_name]['Penalty'] = float(pref.penalty)
                     game_data['pref'][team_name]['Bonus'] = float(pref.bonus)

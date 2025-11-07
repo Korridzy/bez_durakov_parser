@@ -52,10 +52,10 @@ class BdGame:
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'IV': 0.0, 'V': 0.0, 'Сумма': 0.0
             }
 
-            # Preferans - 7 tasks + points, penalties, bonuses, sum
+            # Preferans - 7 tasks + goal, points, penalties, bonuses, sum
             self._game_data['pref'][team] = {
                 'I': 0.0, 'II': 0.0, 'III': 0.0, 'IV': 0.0, 'V': 0.0, 'VI': 0.0, 'VII': 0.0,
-                'Points': 0.0, 'Penalty': 0.0, 'Bonus': 0.0, 'Сумма': 0.0
+                'Goal': 0.0, 'Points': 0.0, 'Penalty': 0.0, 'Bonus': 0.0, 'Сумма': 0.0
             }
 
             # Pairs - simple points
@@ -269,6 +269,7 @@ class BdGame:
                 self._game_data['pref'][team]['V'] = np.nan_to_num(pref_table.loc[row_index, 'V'])
                 self._game_data['pref'][team]['VI'] = np.nan_to_num(pref_table.loc[row_index, 'VI'])
                 self._game_data['pref'][team]['VII'] = np.nan_to_num(pref_table.loc[row_index, 'VII'])
+                self._game_data['pref'][team]['Goal'] = np.nan_to_num(pref_table.loc[row_index, 'ЦЕЛЬ'])
                 self._game_data['pref'][team]['Points'] = np.nan_to_num(pref_table.loc[row_index, 'Points'])
                 self._game_data['pref'][team]['Penalty'] = np.nan_to_num(pref_table.loc[row_index, 'Penalty'])
                 self._game_data['pref'][team]['Bonus'] = np.nan_to_num(pref_table.loc[row_index, 'Bonus'])
