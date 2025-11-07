@@ -74,6 +74,7 @@
 
 - `game_id`, `team_id` (FK, PK)
 - `task_1` до `task_7` (Numeric) - очки за задания
+- `goal` (Numeric) - цель (ставка на количество правильных ответов)
 - `points` (Numeric) - базовые очки
 - `penalty` (Numeric) - штрафные очки
 - `bonus` (Numeric) - бонусные очки
