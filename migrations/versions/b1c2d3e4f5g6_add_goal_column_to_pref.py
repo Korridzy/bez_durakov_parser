@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add goal column to pref table."""
-    # Add goal column after task_7 and before points
+    # Add goal column
     op.add_column('pref', sa.Column('goal', sa.Numeric(precision=10, scale=2), nullable=False, server_default='4.0'))
 
     # Remove the server default after adding the column (so new inserts require explicit values)
