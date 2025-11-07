@@ -269,7 +269,7 @@ class BdGame:
                 self._game_data['pref'][team]['V'] = np.nan_to_num(pref_table.loc[row_index, 'V'])
                 self._game_data['pref'][team]['VI'] = np.nan_to_num(pref_table.loc[row_index, 'VI'])
                 self._game_data['pref'][team]['VII'] = np.nan_to_num(pref_table.loc[row_index, 'VII'])
-                self._game_data['pref'][team]['Goal'] = np.nan_to_num(pref_table.loc[row_index, 'ЦЕЛЬ'])
+                self._game_data['pref'][team]['Goal'] = np.nan_to_num(pref_table.loc[row_index, 'Цель'])
                 self._game_data['pref'][team]['Points'] = np.nan_to_num(pref_table.loc[row_index, 'Points'])
                 self._game_data['pref'][team]['Penalty'] = np.nan_to_num(pref_table.loc[row_index, 'Penalty'])
                 self._game_data['pref'][team]['Bonus'] = np.nan_to_num(pref_table.loc[row_index, 'Bonus'])
