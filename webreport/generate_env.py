@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""
+Generate .env file for WebReport from config.toml
+"""
+import sys
+import os
+
+# Add parent directory to path to import config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from config import WEBREPORT_BACKEND_PORT, WEBREPORT_FRONTEND_PORT, WEBREPORT_DEBUG, WEBREPORT_BACKEND_DEBUG_PORT, WEBREPORT_FRONTEND_DEBUG_PORT
+
+# Generate .env file
+env_content = f"""# Generated from ../config.toml
+WEBREPORT_BACKEND_PORT={WEBREPORT_BACKEND_PORT}
+WEBREPORT_FRONTEND_PORT={WEBREPORT_FRONTEND_PORT}
+WEBREPORT_DEBUG={str(WEBREPORT_DEBUG).lower()}
+WEBREPORT_BACKEND_DEBUG_PORT={WEBREPORT_BACKEND_DEBUG_PORT}
+WEBREPORT_FRONTEND_DEBUG_PORT={WEBREPORT_FRONTEND_DEBUG_PORT}
+"""
+
+with open('.env', 'w') as f:
+    f.write(env_content)
+
+print(f"Generated .env file with ports: backend={WEBREPORT_BACKEND_PORT}, frontend={WEBREPORT_FRONTEND_PORT}, debug={WEBREPORT_DEBUG}")

@@ -35,3 +35,10 @@ def get_config():
 
 # XLSM Fetch configuration
 XLSM_FETCH_CONFIG = config.get("xlsm_fetch", {})
+
+# WebReport configuration
+WEBREPORT_BACKEND_PORT = int(config["webreport"].get("backend_port", 28000))
+WEBREPORT_FRONTEND_PORT = int(config["webreport"].get("frontend_port", 28501))
+WEBREPORT_DEBUG = config["webreport"].get("debug", False)
+WEBREPORT_BACKEND_DEBUG_PORT = int(config["webreport"].get("backend_debug_port", 5678))
+WEBREPORT_FRONTEND_DEBUG_PORT = int(config["webreport"].get("frontend_debug_port", 5679))

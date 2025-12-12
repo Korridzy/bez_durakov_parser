@@ -8,6 +8,13 @@ debug = true
 log_level = "INFO"
 default_game_date = "02.03.2022"
 
+[webreport]
+backend_port = 28000
+frontend_port = 28501
+debug = false
+backend_debug_port = 5678
+frontend_debug_port = 5679
+
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
 modes = ["browser_selenium"]

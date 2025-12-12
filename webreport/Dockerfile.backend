@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies including poetry
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sSL https://install.python-poetry.org | python3 - \
+    && ln -s /root/.local/bin/poetry /usr/local/bin/poetry
+
+# Create pyproject.toml placeholder to install dependencies
+# Code will be mounted as volume at runtime
+RUN mkdir -p /app
+
+# Copy pyproject.toml from build context (will be in mounted volume)
+# We need to pre-install dependencies before mounting
+# Use a minimal pyproject.toml that gets overridden by mount
+COPY webreport/backend/pyproject.toml /tmp/pyproject.toml
+
+# Configure poetry to not create virtual env (we're in container)
+RUN poetry config virtualenvs.create false
+
+# Install dependencies
+RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
+
+# Expose port
+EXPOSE 8000
+EXPOSE 5678
+
+# Run the backend (code will be mounted as volume)
+CMD ["python", "start.py"]

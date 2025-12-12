@@ -1,0 +1,76 @@
+.PHONY: help test clean start stop restart logs build rebuild
+
+help:
+	@echo "🎮 Web Reporting System - Docker Commands"
+	@echo "=========================================="
+	@echo ""
+	@echo "Docker Operations:"
+	@echo "  make start       - Start services with Docker Compose"
+	@echo "  make stop        - Stop Docker containers"
+	@echo "  make restart     - Restart services"
+	@echo "  make logs        - View logs"
+	@echo "  make build       - Build Docker images"
+	@echo "  make rebuild     - Rebuild and restart services"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test        - Run tests (requires running containers)"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  make clean       - Clean temporary files"
+	@echo ""
+
+start:
+	@echo "🐳 Starting services with Docker Compose..."
+	python3 generate_env.py
+	docker-compose up -d
+	@echo ""
+	@echo "✅ Services started!"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🎨 Frontend:  http://localhost:$$(grep WEBREPORT_FRONTEND_PORT .env | cut -d'=' -f2)"
+	@echo "🔌 Backend:   http://localhost:$$(grep WEBREPORT_BACKEND_PORT .env | cut -d'=' -f2)"
+	@echo "📚 API Docs:  http://localhost:$$(grep WEBREPORT_BACKEND_PORT .env | cut -d'=' -f2)/docs"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "View logs:    make logs"
+	@echo "Stop:         make stop"
+
+stop:
+	@echo "🐳 Stopping Docker containers..."
+	docker-compose down
+	@echo "✅ Containers stopped"
+
+restart:
+	@echo "🔄 Restarting services..."
+	docker-compose restart
+	@echo "✅ Services restarted"
+
+logs:
+	@echo "📜 Viewing logs (Ctrl+C to exit)..."
+	docker-compose logs -f
+
+build:
+	@echo "🔨 Building Docker images..."
+	docker-compose build
+	@echo "✅ Build complete"
+
+rebuild:
+	@echo "🔨 Rebuilding and restarting services..."
+	python3 generate_env.py
+	docker-compose down
+	docker-compose build
+	docker-compose up -d
+	@echo "✅ Services rebuilt and started"
+
+test:
+	@echo "🧪 Running tests in Docker..."
+	docker-compose exec backend python /app/webreport/test_system.py
+	@echo ""
+	@echo "Or run locally with: python test_system.py"
+
+clean:
+	@echo "🧹 Cleaning temporary files..."
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✅ Cleanup complete"

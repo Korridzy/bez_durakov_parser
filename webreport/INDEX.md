@@ -1,0 +1,185 @@
+# 🎮 Web-based Game Data Reporting System
+
+## 📋 Оглавление документации
+
+### 🚀 Начало работы
+1. **[README.md](README.md)** - Главная страница
+   - Обзор системы
+   - Быстрый старт
+   - Установка и запуск
+   - Основные возможности
+
+2. **[SUMMARY.md](SUMMARY.md)** - Итоговая сводка
+   - Что было создано
+   - Структура проекта
+   - Технологии
+   - Достижения
+
+### 📖 Для пользователей
+3. **[USER_GUIDE.md](USER_GUIDE.md)** - Руководство пользователя
+   - Работа с интерфейсом
+   - Примеры запросов
+   - Визуализация отчётов
+   - FAQ
+
+### 🏗️ Для разработчиков
+4. **[ARCHITECTURE.md](ARCHITECTURE.md)** - Архитектура системы
+   - Компоненты системы
+   - Потоки данных
+   - Принципы архитектуры
+   - Расширяемость
+
+## 📁 Структура файлов
+
+### Основные компоненты
+```
+webreport/
+├── backend/api.py              - REST API (FastAPI)
+├── frontend/app.py             - UI (Streamlit)
+├── agents/report_agents.py     - Система агентов (AutoGen)
+└── services/game_data_service.py - Сервис данных
+```
+
+### Конфигурация
+```
+webreport/
+├── requirements.txt      - Python зависимости
+├── config.yaml          - Конфигурация системы
+├── .env.example         - Пример переменных окружения
+└── docker-compose.yml   - Docker конфигурация
+```
+
+### Docker и утилиты
+```
+webreport/
+├── docker-compose.yml    - Docker Compose конфигурация
+├── Dockerfile.backend    - Backend образ
+├── Dockerfile.frontend   - Frontend образ
+├── Makefile              - Docker команды
+├── test_system.py        - Тесты
+└── validate_setup.py     - Валидация установки
+```
+
+## 🎯 Быстрые ссылки
+
+### Запуск (Docker только)
+```bash
+make start
+# ИЛИ
+docker-compose up -d
+```
+
+### Остановка
+```bash
+make stop
+# ИЛИ
+docker-compose down
+```
+
+### Логи и проверка
+```bash
+make logs                 # Просмотр логов
+docker-compose ps         # Статус контейнеров
+python3 validate_setup.py # Проверка файлов
+```
+
+### Доступ
+- **Frontend**: http://localhost:28501
+- **Backend API**: http://localhost:28000
+- **API Docs**: http://localhost:28000/docs
+
+## 📊 Схема работы
+
+```
+Пользователь
+    ↓ (вводит требования)
+Frontend (Streamlit)
+    ↓ (HTTP/REST)
+Backend (FastAPI)
+    ↓ (координирует)
+Agents (AutoGen) ← → Services (GameDataService)
+    ↓                      ↓
+    ↓                  db.py & db_helpers.py
+    ↓                      ↓
+    ↓                  Database (MySQL)
+    ↓                      ↑
+    └──────────────────────┘
+            ↓
+        Отчёт
+```
+
+## 🛠️ Технологии
+
+| Слой | Технология |
+|------|------------|
+| Frontend | Streamlit |
+| Backend | FastAPI |
+| Agents | AutoGen |
+| Services | Python + Pandas |
+| ORM | SQLAlchemy |
+| Database | MySQL |
+
+## ✅ Проверка системы
+
+```bash
+# Валидация файлов
+cd /home/homo/git/bez_durakov/parser/webreport
+python3 validate_setup.py
+
+# Проверка контейнеров
+docker-compose ps
+
+# Проверка здоровья API
+curl http://localhost:28000/health
+```
+
+Валидация должна вывести:
+```
+🎉 All checks passed! System is ready to use.
+```
+
+## 📞 Помощь
+
+### Проблемы с установкой?
+См. [README.md](README.md) раздел "Решение проблем"
+
+### Вопросы по использованию?
+См. [USER_GUIDE.md](USER_GUIDE.md) раздел "FAQ"
+
+### Вопросы по архитектуре?
+См. [ARCHITECTURE.md](ARCHITECTURE.md)
+
+## 🎓 Обучающий путь
+
+### Для пользователей
+1. [README.md](README.md) - Обзор
+2. [USER_GUIDE.md](USER_GUIDE.md) - Работа с системой
+3. Практика с примерами
+
+### Для разработчиков
+1. [README.md](README.md) - Обзор
+2. [ARCHITECTURE.md](ARCHITECTURE.md) - Архитектура
+3. [SUMMARY.md](SUMMARY.md) - Детали реализации
+4. Изучение кода
+5. Расширение функциональности
+
+## 🏆 Статус проекта
+
+✅ **Готов к использованию**
+
+Все компоненты реализованы и протестированы:
+- ✅ 28/28 проверок пройдено
+- ✅ Frontend (Streamlit)
+- ✅ Backend (FastAPI)
+- ✅ Agents (AutoGen)
+- ✅ Services
+- ✅ Документация
+- ✅ Тесты
+- ✅ Docker поддержка
+
+---
+
+**Создано: 28.11.2025**
+
+**Проект: Без дураков. Белград.**
+

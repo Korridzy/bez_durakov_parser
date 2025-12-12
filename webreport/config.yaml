@@ -1,0 +1,22 @@
+# Configuration for the web reporting system
+
+[backend]
+host = "0.0.0.0"
+port = 8000
+reload = true
+
+[frontend]
+host = "localhost"
+port = 8501
+
+[agents]
+# AutoGen configuration
+timeout = 120
+temperature = 0.7
+model = "gpt-4"
+
+[api]
+# API rate limiting
+rate_limit_enabled = false
+rate_limit_per_minute = 60
+

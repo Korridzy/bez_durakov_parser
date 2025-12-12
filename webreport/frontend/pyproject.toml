@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "webreport-frontend"
+version = "1.0.0"
+description = "Streamlit frontend for game data reporting system"
+authors = ["Bez Durakov Team"]
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+streamlit = ">=1.28.0"
+httpx = ">=0.25.0"
+pandas = ">=2.0.0"
+python-dotenv = ">=1.0.0"
+pydevd-pycharm = "~=252.27397.106"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

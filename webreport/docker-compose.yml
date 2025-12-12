@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.backend
+    container_name: webreport-backend
+    ports:
+      - "${WEBREPORT_BACKEND_PORT}:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DATABASE_URL=mysql+pymysql://durak:devpass@mysql:3306/bez_durakov
+      - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
+      - WEBREPORT_BACKEND_DEBUG_PORT=${WEBREPORT_BACKEND_DEBUG_PORT}
+    volumes:
+      - ./backend:/app
+      - ..:/bd_shared:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webreport-network
+      - parser_default
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.frontend
+    container_name: webreport-frontend
+    ports:
+      - "${WEBREPORT_FRONTEND_PORT}:8501"
+    environment:
+      - API_BASE_URL=http://backend:8000
+      - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
+      - WEBREPORT_FRONTEND_DEBUG_PORT=${WEBREPORT_FRONTEND_DEBUG_PORT}
+    volumes:
+      - ./frontend:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+    networks:
+      - webreport-network
+    restart: unless-stopped
+
+networks:
+  webreport-network:
+    driver: bridge
+  parser_default:
+    external: true
