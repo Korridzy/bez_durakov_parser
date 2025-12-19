@@ -97,3 +97,32 @@ upgrade-code:
 		echo "Выполните обновление вручную или зафиксируйте изменения."; \
 		exit 1; \
 	fi
+
+# WebReport Docker management
+webreport-start:
+	@echo "🚀 Запуск WebReport (MySQL + Backend + Frontend)..."
+	cd webreport && $(MAKE) start
+	@echo ""
+	@echo "✅ WebReport запущен!"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🎨 Frontend:  http://localhost:28501"
+	@echo "🔌 Backend:   http://localhost:28000"
+	@echo "📚 API Docs:  http://localhost:28000/docs"
+	@echo "🗄️  MySQL:    localhost:3306"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+webreport-stop:
+	@echo "🛑 Остановка WebReport..."
+	cd webreport && $(MAKE) stop
+
+# MySQL only management
+mysql-start:
+	@echo "🗄️  Запуск MySQL..."
+	cd webreport && docker-compose up -d mysql
+	@echo "✅ MySQL запущен на localhost:3306"
+
+mysql-stop:
+	@echo "🛑 Остановка MySQL..."
+	cd webreport && docker-compose stop mysql
+	@echo "✅ MySQL остановлен"
+

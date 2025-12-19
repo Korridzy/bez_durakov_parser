@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: webreport-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: bez_durakov
+      MYSQL_ROOT_PASSWORD: devpass
+      MYSQL_USER: durak
+      MYSQL_PASSWORD: devpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ../vm/mysql/mysql_data:/var/lib/mysql
+    networks:
+      - webreport-network
+    command: --default-authentication-plugin=mysql_native_password
+
   backend:
     build:
       context: ..
@@ -20,7 +37,8 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - webreport-network
-      - parser_default
+    depends_on:
+      - mysql
     restart: unless-stopped
 
   frontend:
@@ -47,5 +65,3 @@ services:
 networks:
   webreport-network:
     driver: bridge
-  parser_default:
-    external: true
