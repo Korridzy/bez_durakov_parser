@@ -2,7 +2,9 @@
 name = "webreport-frontend"
 version = "1.0.0"
 description = "Streamlit frontend for game data reporting system"
-authors = ["Bez Durakov Team"]
+authors = [
+    { name="Korridzy", email="korridzy.pub@gmail.com" }
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11"

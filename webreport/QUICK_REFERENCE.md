@@ -59,8 +59,8 @@ webreport/
 # Проверить БД
 mysql -u durak -p -e "USE bez_durakov; SHOW TABLES;"
 
-# Проверить config.toml
-cat ../config.toml
+# Проверить bd_shared/config.toml
+cat ../bd_shared/config.toml
 
 # Проверить порт
 lsof -i :28000

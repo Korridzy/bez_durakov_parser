@@ -8,11 +8,11 @@ from typing import List, Dict, Optional, Any
 from datetime import date, datetime
 import pandas as pd
 
-# Add db_gear (mounted parser directory) to path
-sys.path.insert(0, '/bd_shared')
+# Add parent of mounted bd_shared directory to path so we can import bd_shared as package
+sys.path.insert(0, '/')
 
-from db import Database, Game, Team, TeamGameScore
-from db_helpers import initialize_database
+from bd_shared.db import Database, Game, Team, TeamGameScore
+from bd_shared.db_helpers import initialize_database
 from sqlalchemy import func, text
 
 

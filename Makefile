@@ -62,30 +62,30 @@ upgrade-code:
 		git pull origin main; \
 		echo "Устанавливаю зависимости..."; \
 		poetry install; \
-	elif [ "$$all_changes" = "config.toml" ]; then \
-		echo "Обнаружены изменения только в config.toml, сохраняю локальную версию..."; \
-		if cp config.toml config.toml.backup; then \
-			if git stash push -m "temp config.toml" -- config.toml; then \
+	elif [ "$$all_changes" = "bd_shared/config.toml" ]; then \
+		echo "Обнаружены изменения только в bd_shared/config.toml, сохраняю локальную версию..."; \
+		if cp bd_shared/config.toml bd_shared/config.toml.backup; then \
+			if git stash push -m "temp bd_shared/config.toml" -- bd_shared/config.toml; then \
 				git pull origin main; \
-				if cp config.toml.backup config.toml; then \
-					rm config.toml.backup; \
-					echo "Обновление завершено, локальная версия config.toml восстановлена"; \
+				if cp bd_shared/config.toml.backup bd_shared/config.toml; then \
+					rm bd_shared/config.toml.backup; \
+					echo "Обновление завершено, локальная версия bd_shared/config.toml восстановлена"; \
 					echo "Устанавливаю зависимости..."; \
 					poetry install; \
 				else \
-					echo "Ошибка при восстановлении config.toml из backup."; \
-					echo "Ваш конфиг лежит в файле config.toml.backup."; \
-					echo "Попробуйте сами переименовать его в config.toml."; \
+					echo "Ошибка при восстановлении bd_shared/config.toml из backup."; \
+					echo "Ваш конфиг лежит в файле bd_shared/config.toml.backup."; \
+					echo "Попробуйте сами переименовать его в bd_shared/config.toml."; \
 				fi; \
 				git stash drop; \
 			else \
-				echo "Ошибка при создании stash для config.toml"; \
+				echo "Ошибка при создании stash для bd_shared/config.toml"; \
 				echo "Обновление прервано"; \
-				rm -f config.toml.backup; \
+				rm -f bd_shared/config.toml.backup; \
 				exit 1; \
 			fi; \
 		else \
-			echo "Ошибка при создании backup файла config.toml.backup"; \
+			echo "Ошибка при создании backup файла bd_shared/config.toml.backup"; \
 			echo "Обновление прервано"; \
 			exit 1; \
 		fi; \

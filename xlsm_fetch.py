@@ -15,9 +15,9 @@ import argparse
 import sys
 from pathlib import Path
 from xlsm_fetch import SeleniumFetcher, ApiFetcher, GdownFetcher
-from config import XLSM_FETCH_CONFIG
-from bd_game import BdGame
-from db_helpers import initialize_database, save_game_to_database
+from bd_shared.config import XLSM_FETCH_CONFIG
+from bd_shared.bd_game import BdGame
+from bd_shared.db_helpers import initialize_database, save_game_to_database
 
 # Constants
 PROJECT_ROOT = Path(__file__).parent.resolve()

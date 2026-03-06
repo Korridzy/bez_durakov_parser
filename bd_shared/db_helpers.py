@@ -1,5 +1,5 @@
-from config import DATABASE_URL, DEFAULT_GAME_DATE
-from db import Database, normalize_team_name
+from .config import DATABASE_URL, DEFAULT_GAME_DATE
+from .db import Database, normalize_team_name
 import warnings
 
 

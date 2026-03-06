@@ -110,7 +110,7 @@ webreport/
 - **AutoGen** - Multi-agent orchestration
 - **SQLAlchemy** - ORM (из основного проекта)
 - **Pandas** - Data processing
-- **MySQL** - Database (из config.toml)
+- **MySQL** - Database (из bd_shared/config.toml)
 
 ---
 
@@ -250,7 +250,7 @@ docker-compose logs -f
 ## ✅ Чеклист перед первым запуском
 
 - [ ] База данных доступна (MySQL)
-- [ ] config.toml настроен правильно
+- [ ] bd_shared/config.toml настроен правильно
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
 - [ ] Запущен `./setup.sh`

@@ -67,7 +67,7 @@ pip install -r webreport/requirements.txt
 
 ### Настройка
 
-1. **База данных**: Убедитесь, что `config.toml` содержит правильные настройки БД
+1. **База данных**: Убедитесь, что `bd_shared/config.toml` содержит правильные настройки БД
 2. **OpenAI API** (опционально): Для полной функциональности AutoGen установите переменную окружения:
    ```bash
    export OPENAI_API_KEY="your-api-key-here"
@@ -180,7 +180,7 @@ chmod +x start_frontend.sh
 
 1. Проверьте логи: `make logs` или `docker-compose logs backend`
 2. Проверьте, что база данных доступна на хосте
-3. Проверьте настройки в `../config.toml`
+3. Проверьте настройки в `../bd_shared/config.toml`
 4. Проверьте подключение к БД из контейнера:
    ```bash
    docker-compose exec backend ping host.docker.internal

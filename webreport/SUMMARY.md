@@ -152,7 +152,7 @@ make stop
 | Agents | AutoGen | >=0.2.0 |
 | Server | Uvicorn | >=0.24.0 |
 | ORM | SQLAlchemy | (из основного проекта) |
-| Database | MySQL | (из config.toml) |
+| Database | MySQL | (из bd_shared/config.toml) |
 | Data | Pandas | >=2.0.0 |
 
 ## 📊 Используемые методы из db.py

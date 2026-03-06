@@ -5,9 +5,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
 import datetime
 import logging
-from config import LOG_LEVEL, SQLALCHEMY_LOGGING
-from config import DATABASE_URL
-from bd_game import BdGame
+from .config import LOG_LEVEL, SQLALCHEMY_LOGGING
+from .config import DATABASE_URL
+from .bd_game import BdGame
 
 # Set up logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))

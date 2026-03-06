@@ -10,3 +10,4 @@ if debug_mode:
 
 # Disable reload in debug mode to prevent worker from also connecting to debugger
 uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=not debug_mode)
+

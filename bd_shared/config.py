@@ -11,7 +11,8 @@ else:
     import tomli as tomllib
 
 # Path to the configuration file (relative to the project root)
-config_file_name = "config.toml"
+# Use BD_CONFIG_FILE environment variable to override config file name
+config_file_name = os.environ.get('BD_CONFIG_FILE', 'config.toml')
 config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), config_file_name)
 
 # Loading the configuration

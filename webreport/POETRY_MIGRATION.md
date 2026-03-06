@@ -46,12 +46,12 @@ backend:
 Backend services import directly from the mounted directory:
 ```python
 # backend/app/services/game_data_service.py
-sys.path.insert(0, '/bd_shared')
-from db import Database, Game, Team, TeamGameScore
-from db_helpers import initialize_database
+sys.path.insert(0, '/')
+from bd_shared.db import Database, Game, Team, TeamGameScore
+from bd_shared.db_helpers import initialize_database
 ```
 
-**No code duplication!** All database modules (db.py, db_helpers.py, config.py, bd_game.py, config.toml) are used directly from the parent parser directory.
+**No code duplication!** All database modules (db.py, db_helpers.py, config.py, bd_game.py, config.toml) are used directly from the parent parser directory via the bd_shared package.
 
 ## Backend Dependencies (pyproject.toml)
 
@@ -159,8 +159,8 @@ make logs
 - **Dependencies**: `webreport/frontend/pyproject.toml`
 
 ## Ports (dynamically configured)
-- Backend: Configured in `../config.toml` [webreport.backend_port] (default: 28000)
-- Frontend: Configured in `../config.toml` [webreport.frontend_port] (default: 28501)
+- Backend: Configured in `../bd_shared/config.toml` [webreport.backend_port] (default: 28000)
+- Frontend: Configured in `../bd_shared/config.toml` [webreport.frontend_port] (default: 28501)
 
 ## Cleanup
 

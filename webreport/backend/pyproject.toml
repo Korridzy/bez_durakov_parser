@@ -6,7 +6,9 @@ build-backend = "poetry.core.masonry.api"
 name = "webreport-backend"
 version = "1.0.0"
 description = "Backend API for game data reporting system"
-authors = ["Bez Durakov Team"]
+authors = [
+    { name="Korridzy", email="korridzy.pub@gmail.com" }
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11"
@@ -19,3 +21,4 @@ sqlalchemy = ">=2.0.0"
 pymysql = {extras = ["rsa"], version = ">=1.1.0"}
 pyautogen = ">=0.2.0"
 pydevd-pycharm = "~=252.27397.106"
+

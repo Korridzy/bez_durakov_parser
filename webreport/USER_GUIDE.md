@@ -255,7 +255,7 @@ A: Проверьте:
 1. Docker контейнеры запущены: `docker-compose ps`
 2. Логи контейнера: `make logs` или `docker-compose logs backend`
 3. База данных доступна на хосте через host.docker.internal:3306
-4. Файл config.toml существует в родительской директории
+4. Файл bd_shared/config.toml существует в родительской директории
 
 **Q: Frontend показывает "API недоступен"**
 
@@ -269,7 +269,7 @@ A:
 
 A:
 1. Проверьте что MySQL запущена на хосте
-2. Проверьте настройки в `../config.toml`
+2. Проверьте настройки в `../bd_shared/config.toml`
 3. Проверьте подключение из контейнера:
    ```bash
    docker-compose exec backend ping host.docker.internal

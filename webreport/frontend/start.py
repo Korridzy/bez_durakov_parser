@@ -7,3 +7,4 @@ if os.getenv('WEBREPORT_DEBUG') == 'true':
     pydevd_pycharm.settrace('host.docker.internal', port=port, stdout_to_server=True, stderr_to_server=True)
 
 subprocess.run(["streamlit", "run", "main.py", "--server.port", "8501", "--server.address", "0.0.0.0"])
+
