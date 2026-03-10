@@ -150,6 +150,26 @@ $ make mysql-start  # Запуск
 $ make mysql-stop   # Остановка
 ```
 
+#### Загрузка XLSM файлов
+
+XLSM файлы загружаются автоматически сервисом `data_collector` в составе WebReport. Для ручного запуска загрузки используйте:
+
+```bash
+$ make fetch-data
+```
+
+Для просмотра логов последней загрузки:
+
+```bash
+$ make fetch-data-log
+```
+
+Для просмотра всех логов контейнера `data_collector`:
+
+```bash
+$ make logs SERVICE=data_collector
+```
+
 Подробнее о WebReport см. [webreport/README.md](./webreport/README.md)
 
 
