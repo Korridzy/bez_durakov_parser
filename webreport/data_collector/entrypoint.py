@@ -7,6 +7,11 @@ import importlib
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
     ZoneInfo = __import__("zoneinfo").ZoneInfo
     apscheduler_events = importlib.import_module("apscheduler.events")
     apscheduler_blocking = importlib.import_module("apscheduler.schedulers.blocking")
@@ -40,7 +45,7 @@ if __name__ == "__main__":
     except Exception as exc:
         raise ValueError(f"Invalid timezone: {XLSM_FETCH_TIMEZONE!r}") from exc
 
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone=tz)
 
     def job_executed_listener(event):
         logging.info("Job executed successfully at %s", datetime.now(tz=tz))
@@ -69,11 +74,8 @@ if __name__ == "__main__":
     )
 
     signal.signal(signal.SIGTERM, lambda sig, frame: scheduler.shutdown(wait=True))
+    signal.signal(signal.SIGINT, lambda sig, frame: scheduler.shutdown(wait=True))
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
     logging.info(
         "Scheduler starting. Next fetch at ~%s, interval=%sh",
         start_date,

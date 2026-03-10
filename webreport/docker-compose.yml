@@ -49,7 +49,8 @@ services:
     init: true
     stop_grace_period: 1200s
     environment:
-      - BD_DOCKER=1
+      - BD_DOCKER=true
+      - TZ=${TIMEZONE:-Europe/Belgrade}
     volumes:
       - ../bd_shared:/bd_shared:ro
       - ../xlsm_archive:/app/xlsm_archive

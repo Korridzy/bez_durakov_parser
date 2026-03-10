@@ -76,7 +76,7 @@ clean:
 
 fetch-data:
 	@echo "🔄 Starting manual XLSM fetch..."
-	docker-compose exec data_collector python fetch_pipeline.py
+	docker-compose exec -T data_collector python fetch_pipeline.py
 
 fetch-data-log:
 	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
