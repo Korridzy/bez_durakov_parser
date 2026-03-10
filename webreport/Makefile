@@ -1,4 +1,4 @@
-.PHONY: help test clean start stop restart logs build rebuild
+.PHONY: help test clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -45,8 +45,7 @@ restart:
 	@echo "✅ Services restarted"
 
 logs:
-	@echo "📜 Viewing logs (Ctrl+C to exit)..."
-	docker-compose logs -f
+	docker-compose logs -f $(SERVICE)
 
 build:
 	@echo "🔨 Building Docker images..."
@@ -74,3 +73,12 @@ clean:
 	find . -type f -name "*.pyo" -delete 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	@echo "✅ Cleanup complete"
+
+fetch-data:
+	@echo "🔄 Starting manual XLSM fetch..."
+	docker-compose exec data_collector python fetch_pipeline.py
+
+fetch-data-log:
+	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
+	docker-compose logs data_collector | tac | sed '/Fetch started at/q' | tac
+

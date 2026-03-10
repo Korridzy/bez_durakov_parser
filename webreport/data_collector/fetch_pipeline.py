@@ -1,34 +1,23 @@
-#!/usr/bin/env python3
-"""Fetch .xlsm files from Google Drive using different methods.
+"""Fetch pipeline for data_collector.
 
-This script reads configuration from config.toml and supports three modes:
-1. 'browser_selenium' - uses browser automation to access files
-2. 'public_api' - uses public Google Drive API (not implemented yet)
-3. 'gdown' - uses gdown library (not implemented yet)
-
-Usage:
-    python xlsm_fetch.py              # normal run
-    python xlsm_fetch.py --mode browser_selenium  # force specific mode
+Adapted from root xlsm_fetch.py for use as an importable module
+called by APScheduler. Exposes run_fetch() as the main entry point.
 """
-
-import argparse
 import sys
+sys.path.insert(0, '/')  # bd_shared is mounted at / in Docker
+
+import logging
+from datetime import datetime
 from pathlib import Path
+
 from xlsm_fetch import SeleniumFetcher, ApiFetcher, GdownFetcher
 from bd_shared.config import XLSM_FETCH_CONFIG
 from bd_shared.bd_game import BdGame
 from bd_shared.db_helpers import initialize_database, save_game_to_database
 
-# Constants
-PROJECT_ROOT = Path(__file__).parent.resolve()
 
-def load_config() -> dict:
-    """Load configuration from config.toml via config module."""
-    if not XLSM_FETCH_CONFIG.get('google_drive_folder_url'):
-        print("ERROR: google_drive_folder_url is required in config.toml [xlsm_fetch] section")
-        sys.exit(1)
+logger = logging.getLogger(__name__)
 
-    return XLSM_FETCH_CONFIG
 
 def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True):
     """Create appropriate fetcher based on mode.
@@ -49,6 +38,7 @@ def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless
         return GdownFetcher(folder_url, download_dir)
     else:
         raise ValueError(f"Unknown mode: {mode}")
+
 
 def process_downloaded_files(files, download_dir):
     """Process downloaded .xlsm files by parsing and saving to database.
@@ -122,45 +112,46 @@ def process_downloaded_files(files, download_dir):
 
     return successful_parses, successful_saves
 
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Fetch .xlsm files from Google Drive and process them")
-    parser.add_argument(
-        '--mode',
-        choices=['browser_selenium', 'public_api', 'gdown'],
-        help='Force specific fetching mode (overrides config)'
-    )
-    parser.add_argument('--no-headless', action='store_true', help='Disable headless mode for browser_selenium')
-    parser.add_argument('--fetch-only', action='store_true', help='Only fetch files, do not parse and save to database')
-    args = parser.parse_args()
 
-    # Load configuration
-    config = load_config()
+def run_fetch():
+    """Main entry point for the fetch pipeline.
 
-    # Determine headless preference
-    headless = not args.no_headless
+    Called by APScheduler to fetch XLSM files from Google Drive,
+    parse them, and save to database.
 
-    # Determine which modes to try
-    if args.mode:
-        modes_to_try = [args.mode]
-        print(f"Using forced mode: {args.mode}")
+    Returns:
+        list: List of downloaded files.
+
+    Raises:
+        ValueError: If google_drive_folder_url is missing from config.
+    """
+    logging.info(f"Fetch started at {datetime.now()}")
+
+    config = XLSM_FETCH_CONFIG
+
+    if not config.get('google_drive_folder_url'):
+        raise ValueError("google_drive_folder_url is required in config.toml [xlsm_fetch] section")
+
+    # Always headless in scheduled mode
+    headless = True
+
+    # Get modes from config (no argparse override)
+    modes_config = config.get('modes', ['browser_selenium'])
+    if isinstance(modes_config, str):
+        modes_to_try = [modes_config]
     else:
-        modes_config = config.get('modes', ['browser_selenium'])
-        if isinstance(modes_config, str):
-            modes_to_try = [modes_config]
-        else:
-            modes_to_try = modes_config
-        print(f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}")
+        modes_to_try = modes_config
+    logger.info(f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}")
 
     folder_url = config['google_drive_folder_url']
-    print(f"Folder URL: {folder_url}")
+    logger.info(f"Folder URL: {folder_url}")
 
     # Try each mode until one succeeds
     files = []
     download_dir = None
 
     for mode in modes_to_try:
-        print(f"\nTrying mode: {mode}")
+        logger.info(f"Trying mode: {mode}")
 
         try:
             fetcher = create_fetcher(mode, folder_url, config, headless=headless)
@@ -168,13 +159,13 @@ def main():
             download_dir = fetcher.download_dir
 
             if files:
-                print(f"✅ Successfully fetched {len(files)} files using {mode}")
+                logger.info(f"Successfully fetched {len(files)} files using {mode}")
                 break
             else:
-                print(f"⚠️ No files found using {mode}")
+                logger.warning(f"No files found using {mode}")
 
         except Exception as e:
-            print(f"❌ Error with {mode}: {e}")
+            logger.error(f"Error with {mode}: {e}")
             if len(modes_to_try) == 1:
                 # If only one mode specified, re-raise the error
                 raise
@@ -182,16 +173,10 @@ def main():
             continue
 
     if not files:
-        print("❌ All methods failed")
+        logger.warning("All methods failed")
         return []
 
-    # Process files unless --fetch-only is specified
-    if not args.fetch_only:
-        process_downloaded_files(files, download_dir)
-    else:
-        print(f"Fetch complete. Files available in: {download_dir}")
+    # Process downloaded files (parse + save to DB)
+    process_downloaded_files(files, download_dir)
 
     return files
-
-if __name__ == "__main__":
-    main()

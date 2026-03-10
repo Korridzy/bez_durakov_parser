@@ -22,9 +22,7 @@ parser/
 ├── vm/                 # MySQL data volume (gitignored)
 ├── webreport/          # Web reporting system: FastAPI + Streamlit + AutoGen (see webreport/AGENTS.md)
 ├── xlsm_archive/       # Fetched XLSM files storage (gitignored)
-├── xlsm_fetch/         # Google Drive fetcher module (Selenium/API/gdown strategies)
 ├── parse_data.py       # CLI entry point: parse XLSM → DB
-├── xlsm_fetch.py       # CLI entry point: fetch XLSM from Google Drive
 ├── clear_database.py   # Utility: wipe all game data from DB
 ├── Makefile            # setup, upgrade-db, upgrade-code, webreport-start/stop, mysql-start/stop
 ├── pyproject.toml      # Poetry config (package-mode=false), Python 3.11+
@@ -40,7 +38,7 @@ parser/
 | Add game to DB | `bd_shared/db_helpers.py` | `save_game_to_database()` with duplicate detection |
 | Configuration | `bd_shared/config.toml` + `bd_shared/config.py` | TOML config loaded via `tomllib`. Override with `BD_CONFIG_FILE` env var |
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
-| Fetch XLSM | `xlsm_fetch.py` → `xlsm_fetch/` | Strategy pattern: `BaseFetcher` → Selenium/API/Gdown |
+| Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | Separate subsystem with its own `AGENTS.md` |
 | Analysis examples | `examples/four_buckets.py` | Shows ORM usage for custom analysis |
 
@@ -76,7 +74,9 @@ make mysql-start        # Start MySQL container only
 make mysql-stop         # Stop MySQL container
 poetry run python parse_data.py <dir>           # Parse XLSM files in directory
 poetry run python parse_data.py <dir> --no-save # Parse without saving to DB
-poetry run python xlsm_fetch.py                 # Fetch XLSM from Google Drive
+make fetch-data                                  # Manually trigger XLSM fetch in data_collector container
+make fetch-data-log                              # Show logs since last fetch start
+make logs SERVICE=data_collector                 # Show all data_collector container logs
 ```
 
 ## NOTES

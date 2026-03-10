@@ -126,3 +126,12 @@ mysql-stop:
 	cd webreport && docker-compose stop mysql
 	@echo "✅ MySQL остановлен"
 
+# Data Collector targets
+fetch-data:
+	cd webreport && $(MAKE) fetch-data
+
+fetch-data-log:
+	cd webreport && $(MAKE) fetch-data-log
+
+logs:
+	cd webreport && $(MAKE) logs SERVICE=$(SERVICE)

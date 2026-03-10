@@ -1,3 +1,6 @@
+# OpenCode stuff
+.sisyphus
+
 #all fetched xlsm files will be here
 xlsm_archive/*
 !xlsm_archive/.gitkeep

@@ -28,7 +28,8 @@ LOG_LEVEL = config["application"].get("log_level", "INFO")
 DEFAULT_GAME_DATE_STR = config["application"].get("default_game_date", "02.03.2022")
 DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
-DATABASE_URL = config["database"]["url"]
+_bd_docker = os.environ.get('BD_DOCKER')
+DATABASE_URL = config["database"]["docker_url"] if _bd_docker else config["database"]["url"]
 
 # Function for getting the configuration (optional)
 def get_config():
@@ -36,6 +37,9 @@ def get_config():
 
 # XLSM Fetch configuration
 XLSM_FETCH_CONFIG = config.get("xlsm_fetch", {})
+XLSM_FETCH_START_TIME = XLSM_FETCH_CONFIG.get("start_time", "20:00")
+XLSM_FETCH_INTERVAL_HOURS = int(XLSM_FETCH_CONFIG.get("interval_hours", 24))
+XLSM_FETCH_TIMEZONE = XLSM_FETCH_CONFIG.get("timezone", "Europe/Belgrade")
 
 # WebReport configuration
 WEBREPORT_BACKEND_PORT = int(config["webreport"].get("backend_port", 28000))

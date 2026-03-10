@@ -27,7 +27,6 @@ services:
       - "${WEBREPORT_BACKEND_PORT}:8000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DATABASE_URL=mysql+pymysql://durak:devpass@mysql:3306/bez_durakov
       - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
       - WEBREPORT_BACKEND_DEBUG_PORT=${WEBREPORT_BACKEND_DEBUG_PORT}
     volumes:
@@ -39,6 +38,25 @@ services:
       - webreport-network
     depends_on:
       - mysql
+    restart: unless-stopped
+
+  data_collector:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.data_collector
+    container_name: webreport-data-collector
+    command: python entrypoint.py
+    init: true
+    stop_grace_period: 1200s
+    environment:
+      - BD_DOCKER=1
+    volumes:
+      - ../bd_shared:/bd_shared:ro
+      - ../xlsm_archive:/app/xlsm_archive
+    depends_on:
+      - mysql
+    networks:
+      - webreport-network
     restart: unless-stopped
 
   frontend:

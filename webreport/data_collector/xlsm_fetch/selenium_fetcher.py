@@ -43,9 +43,7 @@ class SeleniumFetcher(BaseFetcher):
         target_download_dir = self.download_dir
 
         # Create custom Chrome profile with download settings
-        # Use project_root, set in BaseFetcher
-        project_root = self.project_root
-        temp_profile_dir = project_root / "temp_chrome_profile"
+        temp_profile_dir = Path("/tmp/temp_chrome_profile")
         temp_profile_dir.mkdir(exist_ok=True)
 
         # Create Preferences file manually
@@ -75,7 +73,7 @@ class SeleniumFetcher(BaseFetcher):
             try:
                 chrome_options.add_argument("--headless=new")
                 chrome_options.add_argument("--hide-scrollbars")
-                chrome_options.add_argument("--single-process")
+                # Note: --single-process is omitted — it causes browser session drops in Docker
             except Exception:
                 # fallback to older headless flag if --headless=new isn't supported
                 try:
