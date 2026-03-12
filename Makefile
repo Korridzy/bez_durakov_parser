@@ -1,4 +1,29 @@
 SHELL := /bin/bash
+
+.PHONY: help setup upgrade-db upgrade-code webreport-start webreport-stop mysql-start mysql-stop fetch-data fetch-data-log logs
+
+help:
+	@echo "🎲 Без дураков parser - available commands"
+	@echo "========================================="
+	@echo ""
+	@echo "Core:"
+	@echo "  make setup          - Create venv and install dependencies"
+	@echo "  make upgrade-db     - Apply Alembic migrations"
+	@echo "  make upgrade-code   - Pull updates from main safely"
+	@echo ""
+	@echo "WebReport stack:"
+	@echo "  make webreport-start - Start MySQL + backend + frontend"
+	@echo "  make webreport-stop  - Stop WebReport stack"
+	@echo "  make mysql-start     - Start only MySQL container"
+	@echo "  make mysql-stop      - Stop only MySQL container"
+	@echo ""
+	@echo "Data collector:"
+	@echo "  make fetch-data      - Run XLSM fetch manually"
+	@echo "  make fetch-data-log  - Show logs since last fetch start"
+	@echo "  make logs SERVICE=name - Stream selected service logs"
+	@echo ""
+	@echo "Tip: make -C webreport help"
+
 setup:
 	@OS_TYPE=""; \
 	if [ "$(OS)" = "Windows_NT" ]; then \

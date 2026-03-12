@@ -18,6 +18,14 @@ help:
 	@echo "Maintenance:"
 	@echo "  make clean       - Clean temporary files"
 	@echo ""
+	@echo "Data collector:"
+	@echo "  make fetch-data      - Run XLSM fetch manually"
+	@echo "  make fetch-data-log  - Show logs since last fetch start"
+	@echo ""
+	@echo "Tips:"
+	@echo "  make logs SERVICE=data_collector"
+	@echo "  make logs SERVICE=backend"
+	@echo ""
 
 start:
 	@echo "🐳 Starting services with Docker Compose..."
@@ -81,4 +89,3 @@ fetch-data:
 fetch-data-log:
 	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
 	docker-compose logs data_collector | tac | sed '/Fetch started at/q' | tac
-
