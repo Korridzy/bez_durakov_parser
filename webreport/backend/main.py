@@ -2,14 +2,11 @@
 FastAPI backend for the web reporting system.
 Provides REST API for chat and report generation.
 """
-import os
-import sys
-from typing import List, Dict, Any, Optional
-from datetime import datetime, date
-from fastapi import FastAPI, HTTPException, Body
+from typing import Dict, Any, Optional
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import uvicorn
 
 
 from agents.report_agents import ReportAgentSystem
@@ -313,13 +310,3 @@ async def get_scores(game_id: Optional[int] = None):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
-
