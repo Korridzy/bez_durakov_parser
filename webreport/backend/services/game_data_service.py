@@ -11,7 +11,7 @@ import pandas as pd
 # Add parent of mounted bd_shared directory to path so we can import bd_shared as package
 sys.path.insert(0, '/')
 
-from bd_shared.db import Database, Game, Team, TeamGameScore
+from bd_shared.db import Database, Game, Team, TeamGameScore, normalize_team_name
 from bd_shared.db_helpers import initialize_database
 from sqlalchemy import func, text
 
@@ -139,7 +139,6 @@ class GameDataService:
         """
         session = self.db.Session()
         try:
-            from db import normalize_team_name
             normalized_name = normalize_team_name(team_name)
 
             team = session.query(Team).filter_by(team_name=normalized_name).first()
@@ -186,6 +185,117 @@ class GameDataService:
             }
         finally:
             session.close()
+
+    def get_team_wins(self, team_name: str, year: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get games won by a specific team.
+
+        A win is defined as the team having total_points equal to the
+        maximum total_points for that game (ties included).
+
+        Uses get_team_game_scores() data and pandas operations only —
+        no additional DB-layer queries.
+
+        Args:
+            team_name: Team name (will be normalized)
+            year: Optional year to filter games (e.g. 2025)
+
+        Returns:
+            Dictionary with team wins data:
+            - team_name: normalized team name
+            - year: year filter applied (or None)
+            - wins_count: number of games won
+            - games_played: number of games in the filtered set
+            - wins: list of dicts with game details for each win
+        """
+        normalized_name = normalize_team_name(team_name)
+
+        all_scores = self.get_team_game_scores()
+        if all_scores.empty:
+            return {
+                'team_name': normalized_name,
+                'year': year,
+                'wins_count': 0,
+                'games_played': 0,
+                'wins': []
+            }
+
+        # Normalize all team names in the dataframe for comparison
+        all_scores['team_name_normalized'] = all_scores['team_name'].apply(normalize_team_name)
+
+        # Check if team exists in the data at all
+        team_mask = all_scores['team_name_normalized'] == normalized_name
+        if not team_mask.any():
+            return {
+                'team_name': normalized_name,
+                'year': year,
+                'wins_count': 0,
+                'games_played': 0,
+                'wins': []
+            }
+
+        # Apply year filter if specified
+        if year is not None:
+            all_scores['game_date'] = pd.to_datetime(all_scores['game_date'])
+            all_scores = all_scores[all_scores['game_date'].dt.year == year]
+            if all_scores.empty:
+                return {
+                    'team_name': normalized_name,
+                    'year': year,
+                    'wins_count': 0,
+                    'games_played': 0,
+                    'wins': []
+                }
+            # Recompute team mask after year filter
+            team_mask = all_scores['team_name_normalized'] == normalized_name
+
+        # Find the team's games in the filtered set
+        team_game_ids = all_scores.loc[team_mask, 'game_id'].unique()
+        games_played = len(team_game_ids)
+
+        if games_played == 0:
+            return {
+                'team_name': normalized_name,
+                'year': year,
+                'wins_count': 0,
+                'games_played': 0,
+                'wins': []
+            }
+
+        # Compute max total_points per game (across all teams)
+        max_points_per_game = all_scores.groupby('game_id')['total_points'].max()
+
+        # Get the team's rows only
+        team_scores = all_scores[team_mask].copy()
+
+        # A win: team's total_points == max total_points for that game
+        team_scores['game_max'] = team_scores['game_id'].map(max_points_per_game)
+        wins_df = team_scores[team_scores['total_points'] == team_scores['game_max']]
+
+        # Build structured win records
+        point_columns = [
+            'vybor_points', 'chisla_points', 'pref_points', 'pairs_points',
+            'razobl_points', 'auction_points', 'mot_points'
+        ]
+        wins_list = []
+        for _, row in wins_df.iterrows():
+            win_record = {
+                'game_id': int(row['game_id']),
+                'game_date': str(row['game_date']),
+                'team_name': row['team_name'],
+                'total_points': float(row['total_points']),
+            }
+            for col in point_columns:
+                win_record[col] = float(row[col])
+            wins_list.append(win_record)
+
+        return {
+            'team_name': normalized_name,
+            'year': year,
+            'wins_count': len(wins_list),
+            'games_played': games_played,
+            'wins': wins_list
+        }
 
     def execute_custom_query(self, query_description: str, params: Dict[str, Any]) -> pd.DataFrame:
         """

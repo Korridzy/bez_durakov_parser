@@ -52,7 +52,7 @@ webreport/
 │       └── game_data_service.py # Сервис доступа к данным
 │
 └── 🧪 Тестирование
-    └── test_system.py       # Тесты системы
+    └── backend/test_system.py       # Тесты системы
 ```
 
 ## 🏗️ Архитектура
@@ -191,7 +191,7 @@ make stop
 
 ```bash
 # Запуск тестов
-python test_system.py
+python backend/test_system.py
 
 # Или через Makefile
 make test
@@ -365,4 +365,3 @@ make test
 **Создано для проекта "Без дураков. Белград."**
 
 *Дата создания: 28.11.2025*
-

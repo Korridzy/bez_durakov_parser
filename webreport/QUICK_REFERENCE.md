@@ -49,7 +49,7 @@ webreport/
 ├── services/         # Бизнес-логика
 ├── *.sh              # Скрипты запуска
 ├── *.md              # Документация
-└── test_system.py    # Тесты
+└── backend/test_system.py    # Тесты
 ```
 
 ## 🐛 Решение проблем
@@ -162,7 +162,7 @@ GET /health                 # Здоровье
 
 ```bash
 # Запуск всех тестов
-python3 test_system.py
+python3 backend/test_system.py
 
 # Или через make
 make test
@@ -234,4 +234,3 @@ cat USER_GUIDE.md
 **Версия**: 1.0
 **Дата**: 28.11.2025
 **Проект**: Без дураков. Белград.
-

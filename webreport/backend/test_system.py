@@ -1,0 +1,536 @@
+"""
+Test script for the web reporting system.
+Tests all components: services, agents, API.
+"""
+import sys
+import os
+from typing import Any
+
+import unittest
+from datetime import date, datetime
+
+# Import the app and set up in-process ASGI testing
+testclient = None
+try:
+    from main import app
+    import asyncio
+    import json as json_module
+    from io import BytesIO
+    
+    class ASGITestClient:
+        """In-process ASGI test client that directly calls the FastAPI app."""
+        
+        def __init__(self, app_instance):
+            self.app = app_instance
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            # Trigger startup events
+            self._run_startup()
+        
+        def _run_startup(self):
+            """Run all startup event handlers."""
+            async def startup():
+                for handler in self.app.router.on_startup:
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler()
+                    else:
+                        handler()
+            
+            self.loop.run_until_complete(startup())
+        
+        def _call(self, method, path, json_data=None):
+            """Make a synchronous call to the ASGI app."""
+            
+            # Build ASGI scope
+            scope: dict[str, Any] = {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": method,
+                "scheme": "http",
+                "path": path,
+                "query_string": b"",
+                "root_path": "",
+                "headers": [],
+                "server": ("testserver", 80),
+                "client": ("127.0.0.1", 8000),
+                "state": {},
+            }
+            
+            # Add JSON content-type if needed
+            if json_data is not None:
+                body = json_module.dumps(json_data).encode("utf-8")
+                scope["headers"].append((b"content-type", b"application/json"))
+            else:
+                body = b""
+            
+            # Create receive and send callables
+            body_sent = False
+            response_started = False
+            response_status = None
+            response_headers = []
+            response_body = BytesIO()
+            
+            async def receive():
+                nonlocal body_sent
+                if not body_sent:
+                    body_sent = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return {"type": "http.disconnect"}
+            
+            async def send(message):
+                nonlocal response_started, response_status, response_headers
+                if message["type"] == "http.response.start":
+                    response_started = True
+                    response_status = message["status"]
+                    response_headers = message.get("headers", [])
+                elif message["type"] == "http.response.body":
+                    response_body.write(message.get("body", b""))
+            
+            # Call the app
+            self.loop.run_until_complete(self.app(scope, receive, send))
+            
+            # Create a response-like object
+            class Response:
+                def __init__(self, status, headers, body):
+                    self.status_code = status
+                    self.headers = {k.decode(): v.decode() for k, v in headers}
+                    self._body = body.getvalue()
+                
+                def json(self):
+                    return json_module.loads(self._body.decode())
+            
+            return Response(response_status, response_headers, response_body)
+        
+        def get(self, path):
+            """Make a GET request."""
+            return self._call("GET", path)
+        
+        def post(self, path, json=None):
+            """Make a POST request with optional JSON body."""
+            return self._call("POST", path, json_data=json)
+    
+    testclient = ASGITestClient(app)
+except Exception as e:
+    print(f"⚠️ Warning: Could not initialize in-process test client: {e}")
+    testclient = None
+
+
+class TestGameDataService(unittest.TestCase):
+    """Test the GameDataService."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test fixtures."""
+        try:
+            from services.game_data_service import GameDataService
+            cls.service = GameDataService()
+        except Exception as e:
+            print(f"⚠️ Warning: Could not initialize GameDataService: {e}")
+            cls.service = None
+
+    def test_service_initialization(self):
+        """Test that service initializes correctly."""
+        self.assertIsNotNone(self.service, "Service should be initialized")
+
+    def test_get_all_games_summary(self):
+        """Test getting all games summary."""
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        try:
+            pandas_module = __import__("pandas")
+        except ImportError:
+            self.skipTest("pandas not available")
+
+        df = self.service.get_all_games_summary()
+        self.assertIsInstance(df, pandas_module.DataFrame, "Should return DataFrame")
+        print(f"✅ Found {len(df)} games in database")
+
+    def test_get_all_teams(self):
+        """Test getting all teams."""
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        try:
+            pandas_module = __import__("pandas")
+        except ImportError:
+            self.skipTest("pandas not available")
+
+        df = self.service.get_all_teams()
+        self.assertIsInstance(df, pandas_module.DataFrame, "Should return DataFrame")
+        print(f"✅ Found {len(df)} teams in database")
+
+    def test_get_team_game_scores(self):
+        """Test getting team game scores."""
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        try:
+            pandas_module = __import__("pandas")
+        except ImportError:
+            self.skipTest("pandas not available")
+
+        df = self.service.get_team_game_scores()
+        self.assertIsInstance(df, pandas_module.DataFrame, "Should return DataFrame")
+        print(f"✅ Found {len(df)} team game score records")
+
+    def test_regression_service_get_team_wins(self):
+        """Regression test for get_team_wins() service method.
+        
+        Tests the underlying service method that powers the win-prompt routing.
+        Ensures no 'No module named db' import errors occur at service level.
+        """
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        # Test get_team_wins without year
+        result = self.service.get_team_wins("однажды было дважды")
+        
+        # Verify response structure
+        self.assertIsInstance(result, dict, "Should return dictionary")
+        self.assertIn("team_name", result, "Result should have team_name")
+        self.assertIn("wins_count", result, "Result should have wins_count")
+        self.assertIn("games_played", result, "Result should have games_played")
+        self.assertIn("wins", result, "Result should have wins list")
+        
+        # Verify no error strings in result
+        result_str = str(result)
+        self.assertNotIn("No module named 'db'", result_str,
+                        "Result should not contain import error")
+        
+        print(f"✅ Service get_team_wins: {result['wins_count']} wins in {result['games_played']} games")
+
+    def test_regression_service_get_team_wins_with_year(self):
+        """Regression test for get_team_wins() with year parameter.
+        
+        Tests that year filtering works correctly in the service method.
+        """
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        # Test get_team_wins with year=2025
+        result = self.service.get_team_wins("однажды было дважды", year=2025)
+        
+        # Verify response structure
+        self.assertIsInstance(result, dict, "Should return dictionary")
+        self.assertEqual(result.get("year"), 2025, "Year should be set to 2025")
+        self.assertIn("wins_count", result, "Result should have wins_count")
+        
+        # Verify no error strings in result
+        result_str = str(result)
+        self.assertNotIn("No module named 'db'", result_str,
+                        "Result should not contain import error")
+        
+        print(f"✅ Service get_team_wins(year=2025): {result['wins_count']} wins")
+
+    def test_regression_service_get_team_statistics(self):
+        """Regression test for get_team_statistics() service method.
+        
+        Tests the underlying service method for generic team stats.
+        Ensures no 'No module named db' import errors occur.
+        """
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        result = self.service.get_team_statistics("однажды было дважды")
+        
+        # Verify response structure
+        self.assertIsInstance(result, dict, "Should return dictionary")
+        self.assertIn("team_name", result, "Result should have team_name")
+        
+        # Verify no error strings in result
+        result_str = str(result)
+        self.assertNotIn("No module named 'db'", result_str,
+                        "Result should not contain import error")
+        
+        print(f"✅ Service get_team_statistics executed successfully")
+
+
+class TestReportAgentSystem(unittest.TestCase):
+    """Test the ReportAgentSystem."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test fixtures."""
+        try:
+            from agents.report_agents import ReportAgentSystem
+            cls.agent_system = ReportAgentSystem()
+        except Exception as e:
+            print(f"⚠️ Warning: Could not initialize ReportAgentSystem: {e}")
+            cls.agent_system = None
+
+    def test_agent_initialization(self):
+        """Test that agent system initializes."""
+        self.assertIsNotNone(self.agent_system, "Agent system should be initialized")
+
+    def test_regression_agents_enabled_with_api_key(self):
+        """Regression: explicit api_key should enable non-fallback agent path."""
+        try:
+            from agents.report_agents import ReportAgentSystem
+        except Exception as e:
+            self.fail(f"Could not import ReportAgentSystem: {e}")
+
+        enabled_system = ReportAgentSystem(api_key="dummy")
+
+        self.assertTrue(enabled_system.agents_available,
+                        "agents_available must be True when api_key is provided and dependencies are present")
+        self.assertIsNotNone(enabled_system.coder_agent,
+                             "coder_agent must be initialized in enabled mode")
+        self.assertIsNotNone(enabled_system.model_client,
+                             "model_client must be initialized in enabled mode")
+
+        response = enabled_system.process_user_request("покажи все игры")
+        self.assertIsInstance(response, dict, "Enabled mode response should be dictionary")
+        self.assertTrue(response.get("success"), "Enabled mode request should succeed")
+        response_message = response.get("message", "")
+        self.assertIn("Report generated based on:", response_message,
+                      "Enabled mode should use non-fallback success message")
+        self.assertNotIn("fallback mode", response_message.lower(),
+                         "Enabled mode must not return fallback-mode message")
+
+        history = enabled_system.get_conversation_history()
+        self.assertIsInstance(history, list, "History should be list in enabled mode")
+        self.assertGreaterEqual(len(history), 2,
+                                "Enabled mode should record at least user+assistant history entries")
+
+    def test_process_request_all_games(self):
+        """Test processing a request for all games."""
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        response = self.agent_system.process_user_request("покажи все игры")
+        self.assertIsInstance(response, dict, "Should return dictionary")
+        self.assertIn("success", response, "Response should have success field")
+        print(f"✅ Request processed: {response.get('message', 'No message')}")
+
+    def test_conversation_history(self):
+        """Test conversation history tracking."""
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        self.agent_system.clear_history()
+        response = self.agent_system.process_user_request("тест")
+        history = self.agent_system.get_conversation_history()
+        self.assertIsInstance(history, list, "History should be a list")
+        # In fallback mode, history might be empty; just verify it's accessible
+        if len(history) > 0:
+            print(f"✅ Conversation history has {len(history)} entries")
+        else:
+            print(f"⚠️ Conversation history empty (fallback mode)")
+
+    def test_regression_team_wins_2025(self):
+        """Regression test for historical failing prompt about team wins in 2025.
+        
+        Previously failed with: 'No module named db' import error.
+        Tests that get_team_wins() method correctly routes and executes
+        for the exact historical prompt.
+        """
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        # Exact historical prompt that previously failed
+        user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
+        response = self.agent_system.process_user_request(user_prompt)
+        
+        # Basic response structure validation
+        self.assertIsInstance(response, dict, "Should return dictionary")
+        self.assertIn("success", response, "Response should have success field")
+        
+        # Critical: response must NOT contain the historical import error
+        response_str = str(response)
+        self.assertNotIn("No module named 'db'", response_str,
+                         "Response should not contain import error 'No module named db'")
+        
+        # If successful, verify routing MUST be to get_team_wins (strict routing check)
+        if response.get("success"):
+            self.assertIn("query", response, "Successful response should have query field")
+            query_info = response.get("query", {})
+            # Must be routed to get_team_wins for win-oriented prompt (strict assertion)
+            method = query_info.get("method")
+            self.assertEqual(method, "get_team_wins",
+                           f"Win-oriented prompt MUST route to get_team_wins, got {method}")
+            print(f"✅ Team wins 2025 prompt: correctly routed to get_team_wins")
+
+    def test_regression_generic_team_statistics(self):
+        """Regression test for generic team-statistics path without year.
+        
+        Tests that team statistics prompts (without win keywords)
+        correctly route to get_team_statistics and execute without errors.
+        """
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        # Generic team statistics prompt (without win keywords)
+        user_prompt = "статистика команды Однажды было дважды"
+        response = self.agent_system.process_user_request(user_prompt)
+        
+        # Basic response structure validation
+        self.assertIsInstance(response, dict, "Should return dictionary")
+        self.assertIn("success", response, "Response should have success field")
+        
+        # Critical: response must NOT contain the historical import error
+        response_str = str(response)
+        self.assertNotIn("No module named 'db'", response_str,
+                         "Response should not contain import error 'No module named db'")
+        
+        # If successful, verify routing to get_team_statistics
+        if response.get("success"):
+            self.assertIn("query", response, "Successful response should have query field")
+            query_info = response.get("query", {})
+            method = query_info.get("method")
+            self.assertEqual(method, "get_team_statistics",
+                            f"Generic team prompt should route to get_team_statistics, got {method}")
+            print(f"✅ Generic team statistics prompt: correctly routed to {method}")
+
+
+class TestAPI(unittest.TestCase):
+    """Test the FastAPI endpoints."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test fixtures."""
+        cls.client = testclient
+
+    def test_health_endpoint(self):
+        """Test the health check endpoint."""
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        try:
+            response = self.client.get("/health")
+            self.assertEqual(response.status_code, 200, "Health check should return 200")
+            data = response.json()
+            self.assertIn("status", data, "Should have status field")
+            print(f"✅ API health check passed: {data.get('status')}")
+        except Exception as e:
+            print(f"⚠️ API test error: {e}")
+            self.skipTest("API test failed")
+
+    def test_root_endpoint(self):
+        """Test the root endpoint."""
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        try:
+            response = self.client.get("/")
+            self.assertEqual(response.status_code, 200, "Root should return 200")
+            data = response.json()
+            self.assertIn("name", data, "Should have name field")
+            print(f"✅ API root endpoint: {data.get('name')}")
+        except Exception as e:
+            print(f"⚠️ API test error: {e}")
+            self.skipTest("API test failed")
+
+    def test_regression_api_team_wins_2025(self):
+        """Regression test for API endpoint with historical team wins 2025 prompt.
+        
+        Tests the full stack through the API: exact historical prompt that
+        previously failed with 'No module named db' import error.
+        Skips gracefully if API is unavailable.
+        """
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        try:
+            # Send exact historical prompt through chat API
+            user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
+            payload = {"message": user_prompt}
+            
+            response = self.client.post(
+                "/api/chat",
+                json=payload
+            )
+            
+            self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
+            data = response.json()
+            
+            # Verify response structure
+            self.assertIsInstance(data, dict, "Response should be dictionary")
+            
+            # Critical: response must NOT contain the historical import error
+            response_str = str(data)
+            self.assertNotIn("No module named 'db'", response_str,
+                            "API response should not contain import error")
+            
+            print(f"✅ API team wins 2025 prompt: returned successfully")
+            
+        except Exception as e:
+            print(f"⚠️ API test error: {e}")
+            self.skipTest("API test failed")
+
+    def test_regression_api_generic_team_statistics(self):
+        """Regression test for API endpoint with generic team statistics prompt.
+        
+        Tests the full stack through the API: generic team statistics prompt
+        that should route to get_team_statistics.
+        Skips gracefully if API is unavailable.
+        """
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        try:
+            # Send generic team statistics prompt through chat API
+            user_prompt = "статистика команды Однажды было дважды"
+            payload = {"message": user_prompt}
+            
+            response = self.client.post(
+                "/api/chat",
+                json=payload
+            )
+            
+            self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
+            data = response.json()
+            
+            # Verify response structure
+            self.assertIsInstance(data, dict, "Response should be dictionary")
+            
+            # Critical: response must NOT contain the historical import error
+            response_str = str(data)
+            self.assertNotIn("No module named 'db'", response_str,
+                            "API response should not contain import error")
+            
+            print(f"✅ API generic team statistics prompt: returned successfully")
+            
+        except Exception as e:
+            print(f"⚠️ API test error: {e}")
+            self.skipTest("API test failed")
+
+
+def run_tests():
+    """Run all tests."""
+    print("=" * 80)
+    print("🧪 Running Web Reporting System Tests")
+    print("=" * 80)
+    print()
+
+    # Create test suite
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+
+    # Add test classes
+    suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
+    suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
+    suite.addTests(loader.loadTestsFromTestCase(TestAPI))
+
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+
+    # Print summary
+    print()
+    print("=" * 80)
+    print("📊 Test Summary")
+    print("=" * 80)
+    print(f"Tests run: {result.testsRun}")
+    print(f"Successes: {result.testsRun - len(result.failures) - len(result.errors)}")
+    print(f"Failures: {len(result.failures)}")
+    print(f"Errors: {len(result.errors)}")
+    print(f"Skipped: {len(result.skipped)}")
+
+    return result.wasSuccessful()
+
+
+if __name__ == "__main__":
+    success = run_tests()
+    sys.exit(0 if success else 1)

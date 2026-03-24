@@ -70,9 +70,9 @@ rebuild:
 
 test:
 	@echo "🧪 Running tests in Docker..."
-	docker-compose exec backend python /app/webreport/test_system.py
+	docker-compose run --rm backend python /app/test_system.py
 	@echo ""
-	@echo "Or run locally with: python test_system.py"
+	@echo "Or run locally with: python backend/test_system.py"
 
 clean:
 	@echo "🧹 Cleaning temporary files..."

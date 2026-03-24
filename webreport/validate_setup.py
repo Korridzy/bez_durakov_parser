@@ -57,7 +57,7 @@ def main():
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.backend"), "Dockerfile Backend"))
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.frontend"), "Dockerfile Frontend"))
     all_checks.append(check_file(os.path.join(base_dir, "Makefile"), "Makefile"))
-    all_checks.append(check_file(os.path.join(base_dir, "test_system.py"), "Test Script"))
+    all_checks.append(check_file(os.path.join(base_dir, "backend", "test_system.py"), "Test Script"))
     all_checks.append(check_file(os.path.join(base_dir, "validate_setup.py"), "Validation Script"))
     print()
 
@@ -103,4 +103,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

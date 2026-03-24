@@ -26,6 +26,7 @@ services:
     ports:
       - "${WEBREPORT_BACKEND_PORT}:8000"
     environment:
+      - BD_DOCKER=true
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
       - WEBREPORT_BACKEND_DEBUG_PORT=${WEBREPORT_BACKEND_DEBUG_PORT}

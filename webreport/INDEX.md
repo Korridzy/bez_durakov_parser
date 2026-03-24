@@ -56,7 +56,7 @@ webreport/
 ├── Dockerfile.backend    - Backend образ
 ├── Dockerfile.frontend   - Frontend образ
 ├── Makefile              - Docker команды
-├── test_system.py        - Тесты
+├── backend/test_system.py        - Тесты
 └── validate_setup.py     - Валидация установки
 ```
 
@@ -182,4 +182,3 @@ curl http://localhost:28000/health
 **Создано: 28.11.2025**
 
 **Проект: Без дураков. Белград.**
-

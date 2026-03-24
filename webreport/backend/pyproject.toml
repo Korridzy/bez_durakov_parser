@@ -20,5 +20,6 @@ pandas = ">=2.0.0"
 sqlalchemy = ">=2.0.0"
 pymysql = {extras = ["rsa"], version = ">=1.1.0"}
 pyautogen = ">=0.2.0"
+autogen-ext = {extras = ["openai"], version = ">=0.7.5"}
 pydevd-pycharm = "~=252.27397.106"
-
+requests = ">=2.31.0"

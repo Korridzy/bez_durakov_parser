@@ -13,6 +13,8 @@ Requirements:
 import os
 import sys
 import subprocess
+import time
+import traceback
 from pathlib import Path
 from urllib.parse import urlparse
 import pymysql
@@ -69,7 +71,6 @@ def test_alembic_migration():
         print(f"✅ Test database created: {test_db_name}")
 
         # Small delay to ensure database is fully created
-        import time
         time.sleep(1)
 
         # Run alembic upgrade head with test config
@@ -128,7 +129,6 @@ def test_alembic_migration():
         return False
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        import traceback
         traceback.print_exc()
         return False
     finally:

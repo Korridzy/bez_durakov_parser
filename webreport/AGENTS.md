@@ -21,7 +21,7 @@ webreport/
 ├── generate_env.py                    # Reads ../bd_shared/config.toml → writes .env
 ├── .env.example                       # Template: ports, OPENAI_API_KEY
 ├── config.yaml                        # App-level config
-├── test_system.py                     # unittest-based tests for services, agents, API
+├── backend/test_system.py             # unittest-based tests for services, agents, API
 └── validate_setup.py                  # Pre-flight checks for deployment
 ```
 
@@ -36,7 +36,7 @@ webreport/
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
 | Port config | `.env` + `generate_env.py` | Auto-generated from `../bd_shared/config.toml` |
-| Tests | `test_system.py` | Run via `make test` (Docker) or directly |
+| Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
 ## CONVENTIONS
 
@@ -63,7 +63,7 @@ make restart    # docker-compose restart
 make logs       # docker-compose logs -f
 make build      # docker-compose build
 make rebuild    # down + build + up
-make test       # Run test_system.py in backend container
+make test       # Run backend/test_system.py in backend container
 make clean      # Remove __pycache__, .pyc files
 ```
 

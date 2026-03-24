@@ -128,7 +128,7 @@ make docker-up     # Docker
 ### Проверка
 ```bash
 python3 validate_setup.py  # Валидация установки
-python3 test_system.py     # Тесты системы
+python3 backend/test_system.py     # Тесты системы
 ```
 
 ### Остановка
@@ -284,4 +284,3 @@ cd /home/homo/git/bez_durakov/parser/webreport
 
 *Проект: Без дураков. Белград*  
 *Дата: 28.11.2025*
-
