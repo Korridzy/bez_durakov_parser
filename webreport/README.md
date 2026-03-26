@@ -52,51 +52,47 @@ webreport/
 
 ## 🚀 Быстрый старт
 
-### Установка зависимостей
+### Настройка конфигурации
 
 ```bash
-# Перейти в директорию проекта
-cd /home/homo/git/bez_durakov/parser
-
-# Активировать виртуальное окружение (если есть)
-source env/bin/activate
-
-# Установить зависимости для webreport
-pip install -r webreport/requirements.txt
+# Перейти в директорию webreport
+cd /home/homo/git/bez_durakov/parser/webreport
 ```
 
-### Настройка
+Источник конфигурации для WebReport — `../bd_shared/config.toml`.
 
-1. **База данных**: Убедитесь, что `bd_shared/config.toml` содержит правильные настройки БД
-2. **OpenAI API** (опционально): Для полной функциональности AutoGen установите переменную окружения:
-   ```bash
-   export OPENAI_API_KEY="your-api-key-here"
-   ```
+Используемые секции:
+
+- `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
+- `[application]` — `debug`, `log_level`, `default_game_date`
+- `[webreport]` — `backend_port`, `frontend_port`, `debug`, `backend_debug_port`, `frontend_debug_port`
+- `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
+
+`generate_env.py` читает эти настройки через `bd_shared/config.py` и генерирует `.env` для Docker Compose.
 
 ### Запуск
 
-#### Вариант 1: Запуск всей системы одной командой
+#### Вариант 1: Через Makefile (рекомендуется)
 
 ```bash
-cd webreport
-chmod +x start_all.sh
-./start_all.sh
+make start
 ```
 
-#### Вариант 2: Раздельный запуск
+#### Вариант 2: Вручную через Docker Compose
 
-**Терминал 1 - Backend:**
 ```bash
-cd webreport
-chmod +x start_backend.sh
-./start_backend.sh
+python3 generate_env.py
+docker-compose up -d
 ```
 
-**Терминал 2 - Frontend:**
+### OpenAI API key (опционально)
+
+`OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не генерируется в `.env`.
+Для полного AutoGen-режима экспортируйте его в shell перед запуском:
+
 ```bash
-cd webreport
-chmod +x start_frontend.sh
-./start_frontend.sh
+export OPENAI_API_KEY="your-api-key-here"
+make start
 ```
 
 ### Доступ к системе
@@ -199,8 +195,8 @@ chmod +x start_frontend.sh
 ### Агенты не работают (fallback mode)
 
 Система работает в fallback режиме без AutoGen. Для полной функциональности:
-1. Создайте файл `.env` из `.env.example`
-2. Добавьте `OPENAI_API_KEY=your-key-here`
+1. Экспортируйте `OPENAI_API_KEY=your-key-here` в shell
+2. Убедитесь, что backend запущен через `make start` / `make restart`
 3. Перезапустите: `make restart`
 
 ### Порты заняты
@@ -242,14 +238,14 @@ docker-compose down -v              # Остановить и удалить vol
 
 ### Добавление новых методов запросов
 
-1. Добавьте метод в `GameDataService` (services/game_data_service.py)
+1. Добавьте метод в `GameDataService` (`backend/services/game_data_service.py`)
 2. Используйте ТОЛЬКО существующие методы из db.py и db_helpers.py
 3. Обновите `_interpret_request` в `ReportAgentSystem` для распознавания новых паттернов
 4. При необходимости добавьте новый endpoint в API
 
 ### Расширение функциональности агентов
 
-1. Редактируйте system messages в `agents/report_agents.py`
+1. Редактируйте system messages в `backend/agents/report_agents.py`
 2. Добавляйте новые инструменты (tools) для агентов
 3. Настройте параметры LLM в `llm_config`
 
@@ -260,4 +256,3 @@ docker-compose down -v              # Остановить и удалить vol
 ## 👥 Авторы
 
 Создано для проекта "Без дураков. Белград."
-

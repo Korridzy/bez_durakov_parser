@@ -8,15 +8,15 @@
 
 ## 🚀 Запуск за 3 шага
 
-### Шаг 1: Установка зависимостей
+### Шаг 1: Настройка конфигурации
 ```bash
 cd /home/homo/git/bez_durakov/parser/webreport
-./setup.sh
+cat ../bd_shared/config.toml
 ```
 
 ### Шаг 2: Запуск системы
 ```bash
-./start_all.sh
+make start
 ```
 
 ### Шаг 3: Использование
@@ -32,26 +32,26 @@ cd /home/homo/git/bez_durakov/parser/webreport
 - ✅ **Agents** - AutoGen агенты для обработки запросов
 - ✅ **Services** - Сервисный слой (использует только существующие методы db.py)
 
-### 📁 Структура (28 файлов)
+### 📁 Структура
 ```
 webreport/
-├── 📚 Документация (8 файлов)
+├── 📚 Документация
 │   ├── README.md              - Основная документация
 │   ├── USER_GUIDE.md         - Руководство пользователя
 │   ├── ARCHITECTURE.md       - Архитектура
 │   ├── QUICK_REFERENCE.md    - Шпаргалка
 │   └── ...
-├── 💻 Код (8 файлов)
-│   ├── backend/api.py         - FastAPI
-│   ├── frontend/app.py        - Streamlit
-│   ├── agents/report_agents.py - AutoGen
-│   └── services/game_data_service.py
-├── 🚀 Скрипты (6 файлов)
-│   ├── setup.sh               - Установка
-│   ├── start_all.sh           - Запуск
-│   └── ...
+├── 💻 Код
+│   ├── backend/main.py        - FastAPI
+│   ├── backend/agents/report_agents.py
+│   ├── backend/services/game_data_service.py
+│   └── frontend/main.py       - Streamlit
+├── 📥 Data collector
+│   ├── data_collector/entrypoint.py
+│   └── data_collector/fetch_pipeline.py
 └── ⚙️ Конфигурация (6 файлов)
-    ├── requirements.txt
+    ├── ../bd_shared/config.toml
+    ├── generate_env.py
     ├── docker-compose.yml
     └── ...
 ```
@@ -119,10 +119,11 @@ webreport/
 ### Make команды
 ```bash
 make help          # Справка
-make install       # Установка
-make start-all     # Запуск
+make start         # Запуск
+make stop          # Остановка
+make restart       # Перезапуск
 make test          # Тесты
-make docker-up     # Docker
+make logs          # Логи
 ```
 
 ### Проверка
@@ -144,7 +145,7 @@ make stop          # Через Make
 ```bash
 $ python3 validate_setup.py
 
-✅ Passed: 28/28 checks
+✅ Passed: 33/33 checks
 🎉 All checks passed! System is ready to use.
 ```
 
@@ -227,10 +228,10 @@ docker-compose logs -f
 ### Для разработчиков
 1. Прочитать **ARCHITECTURE.md**
 2. Изучить код в порядке:
-   - `services/game_data_service.py`
-   - `agents/report_agents.py`
-   - `backend/api.py`
-   - `frontend/app.py`
+   - `backend/services/game_data_service.py`
+   - `backend/agents/report_agents.py`
+   - `backend/main.py`
+   - `frontend/main.py`
 
 ---
 
@@ -253,8 +254,8 @@ docker-compose logs -f
 - [ ] bd_shared/config.toml настроен правильно
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
-- [ ] Запущен `./setup.sh`
-- [ ] (Опционально) OpenAI API key в .env
+- [ ] Выполнен `make start` из каталога `webreport/`
+- [ ] (Опционально) `OPENAI_API_KEY` экспортирован в shell
 
 ---
 
@@ -265,7 +266,7 @@ docker-compose logs -f
 **Запустить:**
 ```bash
 cd /home/homo/git/bez_durakov/parser/webreport
-./start_all.sh
+make start
 ```
 
 **Использовать:**

@@ -19,8 +19,6 @@ webreport/
 ├── Dockerfile.frontend                # Frontend container
 ├── Makefile                           # start/stop/restart/logs/build/test/clean
 ├── generate_env.py                    # Reads ../bd_shared/config.toml → writes .env
-├── .env.example                       # Template: ports, OPENAI_API_KEY
-├── config.yaml                        # App-level config
 ├── backend/test_system.py             # unittest-based tests for services, agents, API
 └── validate_setup.py                  # Pre-flight checks for deployment
 ```
@@ -35,7 +33,8 @@ webreport/
 | Fallback mode | `backend/agents/report_agents.py` | `_interpret_request()` — regex-based, no LLM needed |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
-| Port config | `.env` + `generate_env.py` | Auto-generated from `../bd_shared/config.toml` |
+| Source config | `../bd_shared/config.toml` | Sections: `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]` |
+| Generated env | `.env` + `generate_env.py` | Ports/debug/timezone are generated; `OPENAI_API_KEY` comes from shell/docker env |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
 ## CONVENTIONS
@@ -43,7 +42,7 @@ webreport/
 - **Data access**: `GameDataService` → `bd_shared.Database` methods only. Never raw SQL, never new ORM queries
 - **Agent tools**: Agents call `GameDataService` methods — never access DB directly
 - **Dual mode**: System works without OpenAI API key (fallback: `_interpret_request()` with regex). Full mode requires `OPENAI_API_KEY`
-- **Config flow**: `bd_shared/config.toml` → `generate_env.py` → `.env` → `docker-compose.yml` env vars
+- **Config flow**: `bd_shared/config.toml` → `bd_shared/config.py` → `generate_env.py` → `.env` → `docker-compose.yml` env vars
 - **Container networking**: Backend connects to MySQL at `mysql:3306` (Docker network), not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
 
@@ -51,7 +50,7 @@ webreport/
 
 - **DO NOT** write new DB query methods here — add them to `bd_shared/db.py` `Database` class
 - **DO NOT** import `bd_shared` without the Docker mount path (`sys.path.insert(0, '/')` is already in service)
-- **DO NOT** hardcode ports — always read from `.env` / `config.toml`
+- **DO NOT** hardcode ports — always read from generated env vars or `bd_shared/config.toml`
 - **DO NOT** rely on AutoGen being available — always handle `autogen = None` fallback
 
 ## COMMANDS

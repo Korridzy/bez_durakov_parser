@@ -52,8 +52,6 @@ def main():
     all_checks.append(check_file(os.path.join(base_dir, "backend", "pyproject.toml"), "Backend pyproject"))
     all_checks.append(check_file(os.path.join(base_dir, "frontend", "pyproject.toml"), "Frontend pyproject"))
     all_checks.append(check_file(os.path.join(base_dir, "data_collector", "pyproject.toml"), "Data collector pyproject"))
-    all_checks.append(check_file(os.path.join(base_dir, "config.yaml"), "Config YAML"))
-    all_checks.append(check_file(os.path.join(base_dir, ".env.example"), "Env Example"))
     print()
 
     # Check Docker files and tools

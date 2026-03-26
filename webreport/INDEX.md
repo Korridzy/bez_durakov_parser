@@ -34,20 +34,21 @@
 ### Основные компоненты
 ```
 webreport/
-├── backend/api.py              - REST API (FastAPI)
-├── frontend/app.py             - UI (Streamlit)
-├── agents/report_agents.py     - Система агентов (AutoGen)
-└── services/game_data_service.py - Сервис данных
+├── backend/main.py                       - REST API (FastAPI)
+├── backend/agents/report_agents.py       - Система агентов (AutoGen)
+├── backend/services/game_data_service.py - Сервис данных
+└── frontend/main.py                      - UI (Streamlit)
 ```
 
 ### Конфигурация
 ```
 webreport/
-├── requirements.txt      - Python зависимости
-├── config.yaml          - Конфигурация системы
-├── .env.example         - Пример переменных окружения
+├── generate_env.py      - Генерирует `.env` из `../bd_shared/config.toml`
 └── docker-compose.yml   - Docker конфигурация
 ```
+
+Источник схемы конфигурации: `../bd_shared/config.toml`
+с секциями `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]`.
 
 ### Docker и утилиты
 ```

@@ -31,11 +31,13 @@ make start
 
 ```bash
 make help          # Справка
-make install       # Установка зависимостей
-make start-all     # Запуск всего
+make start         # Запуск всего стека
+make stop          # Остановка контейнеров
+make restart       # Перезапуск сервисов
+make logs          # Логи
+make build         # Сборка образов
+make rebuild       # Пересборка и запуск
 make test          # Тесты
-make docker-up     # Docker запуск
-make docker-down   # Docker остановка
 make clean         # Очистка
 ```
 
@@ -43,11 +45,10 @@ make clean         # Очистка
 
 ```
 webreport/
-├── backend/          # FastAPI
+├── backend/          # FastAPI + agents + services + tests
 ├── frontend/         # Streamlit
-├── agents/           # AutoGen
-├── services/         # Бизнес-логика
-├── *.sh              # Скрипты запуска
+├── data_collector/   # XLSM fetch scheduler
+├── generate_env.py   # Генерация .env из ../bd_shared/config.toml
 ├── *.md              # Документация
 └── backend/test_system.py    # Тесты
 ```
@@ -94,33 +95,23 @@ pkill -f uvicorn
 pkill -f streamlit
 ```
 
-## 📦 Установка зависимостей
+## ⚙️ Конфигурация
 
 ```bash
-pip install -r requirements.txt
+cat ../bd_shared/config.toml
+
+# Сгенерировать .env для docker-compose
+python3 generate_env.py
+
+# Для полного AutoGen режима (опционально)
+export OPENAI_API_KEY=your-openai-api-key-here
 ```
 
-### Основные пакеты:
-- fastapi
-- uvicorn
-- streamlit
-- pyautogen (опционально)
-- pandas
-- httpx
-
-## 🔑 Переменные окружения
-
-```bash
-# Создать .env файл
-cp .env.example .env
-
-# Редактировать
-nano .env
-
-# Важные переменные:
-# OPENAI_API_KEY=...        # Для AutoGen
-# API_BASE_URL=...          # URL backend
-```
+### Секции в `bd_shared/config.toml`
+- `[database]` — настройки подключения к БД
+- `[application]` — общие флаги приложения
+- `[webreport]` — порты и debug-настройки WebReport
+- `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
 ## 📊 API Endpoints (для интеграции)
 
@@ -200,7 +191,7 @@ docker-compose up -d --build
 
 ## 💡 Советы
 
-1. **Первый запуск**: Используйте setup.sh
+1. **Первый запуск**: Проверьте `bd_shared/config.toml`, затем используйте `make start`
 2. **Быстрая проверка**: validate_setup.py
 3. **Тестирование**: make test перед использованием
 4. **Логи**: Смотрите вывод в терминале
