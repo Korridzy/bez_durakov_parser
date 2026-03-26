@@ -39,18 +39,17 @@ setup:
 		echo "Poetry не найден, устанавливаю..."; \
 		pip install --user poetry; \
 	fi; \
-	python_min_version=$$(grep -Po '(?<=python = ")[^"]+' pyproject.toml | head -1 | grep -o '[0-9]\+\.[0-9]\+'); \
 	python_found=""; \
 	if [ "$$OS_TYPE" = "WIN" ]; then \
 		for py in $$(where python 2>nul); do \
-			if "$${py}" -c "import sys; min=tuple(map(int, '$$python_min_version'.split('.'))); sys.exit(0) if sys.version_info[:2] >= min else sys.exit(1)" 2>nul; then \
+			if poetry env use "$${py}" > /dev/null 2>&1; then \
 				python_found=$$py; \
 				break; \
 			fi; \
 		done; \
 	else \
-		for py in $$(compgen -c | grep -E '^python[0-9]+\.[0-9]+$$' | sort -Vr); do \
-			if "$$py" -c "import sys; min=tuple(map(int, '$$python_min_version'.split('.'))); sys.exit(0) if sys.version_info[:2] >= min else sys.exit(1)" 2>/dev/null; then \
+		for py in python3 python $$(compgen -c | grep -E '^python[0-9]+\.[0-9]+$$' | sort -Vr); do \
+			if command -v "$$py" > /dev/null 2>&1 && poetry env use "$$py" > /dev/null 2>&1; then \
 				python_found=$$py; \
 				break; \
 			fi; \
@@ -58,16 +57,12 @@ setup:
 	fi; \
 	echo "Найден Python: $$python_found"; \
 	if [ -z "$$python_found" ]; then \
-		echo "Не найден Python версии $$python_min_version или выше. Установите подходящую версию и добавьте в PATH."; \
+		echo "Не найден Python, совместимый с pyproject.toml. Установите подходящую версию и добавьте в PATH."; \
 		exit 1; \
 	fi; \
 	poetry env use "$$python_found"; \
 	poetry install --no-root; \
-	if [ "$$OS_TYPE" = "WIN" ]; then \
-		.venv\\Scripts\\python -V; \
-	else \
-		.venv/bin/python -V; \
-	fi
+	poetry run python -V
 
 upgrade-db:
 	@poetry run alembic upgrade head

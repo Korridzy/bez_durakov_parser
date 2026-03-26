@@ -29,7 +29,7 @@ help:
 
 start:
 	@echo "🐳 Starting services with Docker Compose..."
-	python3 generate_env.py
+	poetry run python generate_env.py
 	docker-compose up -d
 	@echo ""
 	@echo "✅ Services started!"
@@ -62,7 +62,7 @@ build:
 
 rebuild:
 	@echo "🔨 Rebuilding and restarting services..."
-	python3 generate_env.py
+	poetry run python generate_env.py
 	docker-compose down
 	docker-compose build
 	docker-compose up -d
@@ -72,7 +72,6 @@ test:
 	@echo "🧪 Running tests in Docker..."
 	docker-compose run --rm backend python /app/test_system.py
 	@echo ""
-	@echo "Or run locally with: python backend/test_system.py"
 
 clean:
 	@echo "🧹 Cleaning temporary files..."

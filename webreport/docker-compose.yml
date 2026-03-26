@@ -53,6 +53,7 @@ services:
       - BD_DOCKER=true
       - TZ=${TIMEZONE:-Europe/Belgrade}
     volumes:
+      - ./data_collector:/app
       - ../bd_shared:/bd_shared:ro
       - ../xlsm_archive:/app/xlsm_archive
     depends_on:

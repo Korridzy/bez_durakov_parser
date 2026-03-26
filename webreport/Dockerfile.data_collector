@@ -17,9 +17,15 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 
 WORKDIR /app
 
+# Create app directory placeholder
+# Code will be mounted as volume at runtime
+RUN mkdir -p /app
+
 RUN poetry config virtualenvs.create false
 
-COPY webreport/data_collector/pyproject.toml ./pyproject.toml
-RUN poetry install --only main --no-root --no-interaction --no-ansi
+# Copy pyproject.toml from build context (code itself is mounted at runtime)
+COPY webreport/data_collector/pyproject.toml /tmp/pyproject.toml
 
-COPY webreport/data_collector/ ./
+RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
+
+CMD ["python", "entrypoint.py"]
