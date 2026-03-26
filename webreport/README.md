@@ -32,25 +32,51 @@
 ```
 webreport/
 ├── backend/
-│   ├── __init__.py
-│   └── api.py              # FastAPI REST API
+│   ├── agents/
+│   │   └── report_agents.py       # AutoGen / fallback agent system
+│   ├── services/
+│   │   └── game_data_service.py   # Access to bd_shared.Database methods
+│   ├── main.py                     # FastAPI application and API routes
+│   ├── start.py                    # Container launcher for Uvicorn/debugger
+│   ├── test_system.py              # Docker-based backend tests
+│   └── pyproject.toml              # Backend Poetry dependencies
 ├── frontend/
-│   ├── __init__.py
-│   └── app.py              # Streamlit UI
-├── agents/
-│   ├── __init__.py
-│   └── report_agents.py    # AutoGen агенты
-├── services/
-│   ├── __init__.py
-│   └── game_data_service.py # Сервис для работы с БД
-├── requirements.txt         # Python зависимости
-├── start_backend.sh        # Запуск backend
-├── start_frontend.sh       # Запуск frontend
-├── start_all.sh            # Запуск всей системы
-└── README.md               # Документация
+│   ├── main.py                     # Streamlit application
+│   ├── start.py                    # Container launcher for Streamlit/debugger
+│   └── pyproject.toml              # Frontend Poetry dependencies
+├── data_collector/
+│   ├── entrypoint.py               # APScheduler entrypoint
+│   ├── fetch_pipeline.py           # Manual/scheduled XLSM fetch pipeline
+│   ├── xlsm_fetch/                 # Fetcher implementations
+│   └── pyproject.toml              # Data collector Poetry dependencies
+├── docker-compose.yml              # mysql + backend + frontend + data_collector
+├── Dockerfile.backend              # Backend image build
+├── Dockerfile.frontend             # Frontend image build
+├── Dockerfile.data_collector       # Data collector image build
+├── generate_env.py                 # Generate .env from ../bd_shared/config.toml
+├── validate_setup.py               # Validate expected layout and integration files
+├── Makefile                        # Start/stop/build/test helper commands
+└── README.md                       # Documentation
 ```
 
 ## 🚀 Быстрый старт
+
+### Требования
+
+- Docker и Docker Compose
+- Python 3.11+ и Poetry на хосте для ручного запуска `generate_env.py`
+- Настроенный `../bd_shared/config.toml`
+
+### Зависимости
+
+У WebReport нет общего `requirements.txt`.
+Зависимости разделены по сервисам и описаны в Poetry-манифестах:
+
+- `backend/pyproject.toml`
+- `frontend/pyproject.toml`
+- `data_collector/pyproject.toml`
+
+При обычном Docker-запуске вручную устанавливать их не нужно: Docker-образы устанавливают зависимости во время сборки.
 
 ### Настройка конфигурации
 
@@ -81,10 +107,16 @@ cd /home/homo/git/bez_durakov/parser/webreport
 make start
 ```
 
+Эта команда:
+
+1. запускает `generate_env.py`
+2. генерирует локальный файл `.env`
+3. поднимает `mysql`, `backend`, `frontend` и `data_collector` через Docker Compose
+
 #### Вариант 2: Вручную через Docker Compose
 
 ```bash
-python3 generate_env.py
+poetry run python generate_env.py
 docker-compose up -d
 ```
 
@@ -100,10 +132,12 @@ make start
 
 ### Доступ к системе
 
-- **Frontend UI**: http://localhost:28501
-- **Backend API**: http://localhost:28000
+- **Frontend UI** (по умолчанию): http://localhost:28501
+- **Backend API** (по умолчанию): http://localhost:28000
 - **API Documentation**: http://localhost:28000/docs
 - **API Health Check**: http://localhost:28000/health
+
+Порты берутся из секции `[webreport]` в `../bd_shared/config.toml` и затем попадают в `.env` через `generate_env.py`.
 
 ## 📖 Использование
 
@@ -177,22 +211,26 @@ make start
 
 ### Backend не запускается
 
-1. Проверьте логи: `make logs` или `docker-compose logs backend`
-2. Проверьте, что база данных доступна на хосте
+1. Проверьте логи: `make logs SERVICE=backend` или `docker-compose logs backend`
+2. Проверьте статус сервисов: `docker-compose ps`
 3. Проверьте настройки в `../bd_shared/config.toml`
-4. Проверьте подключение к БД из контейнера:
+4. Проверьте, что контейнер `mysql` поднят и доступен в Compose-сети
+5. Проверьте подключение backend к MySQL-сервису:
    ```bash
-   docker-compose exec backend ping host.docker.internal
+   docker-compose exec backend sh -lc 'python -c "import socket; print(socket.gethostbyname(\"mysql\"))"'
    ```
+
+Backend в Docker подключается к БД по имени хоста `mysql`, а не через `localhost`.
 
 ### Frontend не может подключиться к Backend
 
 1. Проверьте статус контейнеров: `docker-compose ps`
 2. Проверьте backend: `curl http://localhost:28000/health`
 3. Проверьте логи: `docker-compose logs frontend`
-4. Проверьте сеть между контейнерами:
+4. Проверьте переменную `API_BASE_URL` в `docker-compose.yml` — по умолчанию frontend обращается к `http://backend:8000`
+5. Проверьте, что backend отвечает из Compose-сети:
    ```bash
-   docker-compose exec frontend ping backend
+   docker-compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
    ```
 
 ### Агенты не работают (fallback mode)
@@ -221,6 +259,9 @@ make start          # Запуск в фоне
 make stop           # Остановка
 make restart        # Перезапуск
 make logs           # Все логи (Ctrl+C для выхода)
+make test           # Тесты backend в Docker
+make fetch-data     # Ручной запуск XLSM fetch
+make fetch-data-log # Логи data_collector с последнего fetch
 
 # Сборка
 make build          # Собрать образы
@@ -230,8 +271,9 @@ make rebuild        # Пересобрать и перезапустить
 docker-compose ps                    # Статус контейнеров
 docker-compose logs -f backend       # Логи backend
 docker-compose logs -f frontend      # Логи frontend
-docker-compose exec backend bash     # Войти в backend
-docker-compose exec frontend bash    # Войти в frontend
+docker-compose logs -f data_collector # Логи data_collector
+docker-compose exec backend sh       # Войти в backend
+docker-compose exec frontend sh      # Войти во frontend
 
 # Очистка
 docker-compose down -v              # Остановить и удалить volumes
