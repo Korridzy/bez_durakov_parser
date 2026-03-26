@@ -113,6 +113,9 @@ export OPENAI_API_KEY=your-openai-api-key-here
 - `[webreport]` — порты и debug-настройки WebReport
 - `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
+Для `[xlsm_fetch].modes` используйте только `browser_selenium`.
+`public_api` и `gdown` пока не реализуют реальную загрузку файлов.
+
 ## 📊 API Endpoints (для интеграции)
 
 ### Чат

@@ -22,6 +22,7 @@ modes = ["browser_selenium"]
 download_dir = "xlsm_archive"
 # Available modes: 'public_api' (no auth), 'browser_selenium' (browser automation), 'gdown' (download entire folder)
 # Can specify single mode or list of modes to try in sequence
+# Only browser_selenium is currently supported.
 # 'download_dir' is relative to project root or absolute path
 start_time = "20:00"
 interval_hours = 24

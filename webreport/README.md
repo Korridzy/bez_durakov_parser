@@ -68,6 +68,9 @@ cd /home/homo/git/bez_durakov/parser/webreport
 - `[webreport]` — `backend_port`, `frontend_port`, `debug`, `backend_debug_port`, `frontend_debug_port`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
+В `modes` сейчас поддерживается только `browser_selenium`.
+`public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
+
 `generate_env.py` читает эти настройки через `bd_shared/config.py` и генерирует `.env` для Docker Compose.
 
 ### Запуск

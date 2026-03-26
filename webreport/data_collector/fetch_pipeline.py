@@ -7,10 +7,11 @@ import sys
 sys.path.insert(0, '/')  # bd_shared is mounted at / in Docker
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from xlsm_fetch import SeleniumFetcher, ApiFetcher, GdownFetcher
+from xlsm_fetch import SeleniumFetcher
 from bd_shared.config import XLSM_FETCH_CONFIG
 from bd_shared.bd_game import BdGame
 from bd_shared.db_helpers import initialize_database, save_game_to_database
@@ -19,23 +20,19 @@ from bd_shared.db_helpers import initialize_database, save_game_to_database
 logger = logging.getLogger(__name__)
 
 
-def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True):
-    """Create appropriate fetcher based on mode.
-
-    If cfg is provided and mode == 'public_api', read 'google_api_key' and
-    'google_access_token' from it and pass to ApiFetcher.
-    """
-    # Extract download_dir from config (may be None)
-    download_dir = cfg.get('download_dir') if cfg else None
+def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True) -> SeleniumFetcher:
+    download_dir = None
+    if cfg is not None:
+        configured_download_dir = cfg.get('download_dir')
+        if configured_download_dir is not None:
+            download_dir = str(configured_download_dir)
 
     if mode == 'browser_selenium':
         return SeleniumFetcher(folder_url, download_dir, headless=headless)
     elif mode == 'public_api':
-        api_key = cfg.get('google_api_key') if cfg else None
-        access_token = cfg.get('google_access_token') if cfg else None
-        return ApiFetcher(folder_url, download_dir, api_key, access_token)
+        raise NotImplementedError("Fetch mode 'public_api' is not supported yet. Use 'browser_selenium'.")
     elif mode == 'gdown':
-        return GdownFetcher(folder_url, download_dir)
+        raise NotImplementedError("Fetch mode 'gdown' is not supported yet. Use 'browser_selenium'.")
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -54,6 +51,10 @@ def process_downloaded_files(files, download_dir):
         print("No files to process")
         return 0, 0
 
+    if download_dir is None:
+        print("❌ Download directory is not configured")
+        return 0, 0
+
     # Initialize database connection
     db = initialize_database()
     if not db:
@@ -67,28 +68,29 @@ def process_downloaded_files(files, download_dir):
     successful_parses = 0
     successful_saves = 0
 
-    for file_name in files:
-        # Handle both string filenames and dict objects
-        if isinstance(file_name, dict):
-            file_name = file_name.get('name', 'unknown')
+    normalized_files: list[str] = []
+    for file_entry in files:
+        if isinstance(file_entry, dict):
+            normalized_files.append(file_entry.get('name', 'unknown'))
+        else:
+            normalized_files.append(file_entry)
+
+    for file_name in normalized_files:
 
         file_path = Path(download_dir) / file_name
 
         print(f"\nProcessing: {file_name}")
 
-        # Check if file exists locally
         if not file_path.exists():
             print(f"❌ File not found locally: {file_path}")
             continue
 
-        # Create BdGame instance and parse file
         game = BdGame()
 
         if game.parse_from_file(str(file_path)):
             successful_parses += 1
             print(f"✅ Successfully parsed: {file_name}")
 
-            # Save to database
             if save_game_to_database(game, db):
                 successful_saves += 1
             else:
@@ -96,16 +98,15 @@ def process_downloaded_files(files, download_dir):
         else:
             print(f"❌ Failed to parse: {file_name}")
 
-    # Print summary
     print(f"\n{'='*60}")
     print(f"PROCESSING SUMMARY")
     print(f"{'='*60}")
-    print(f"Files processed: {len(files)}")
+    print(f"Files processed: {len(normalized_files)}")
     print(f"Successfully parsed: {successful_parses}")
     print(f"Successfully saved to database: {successful_saves}")
 
-    if successful_parses < len(files):
-        print(f"Failed to parse: {len(files) - successful_parses}")
+    if successful_parses < len(normalized_files):
+        print(f"Failed to parse: {len(normalized_files) - successful_parses}")
 
     if successful_saves < successful_parses:
         print(f"Failed to save: {successful_parses - successful_saves}")
@@ -113,7 +114,7 @@ def process_downloaded_files(files, download_dir):
     return successful_parses, successful_saves
 
 
-def run_fetch():
+def run_fetch() -> list[str]:
     """Main entry point for the fetch pipeline.
 
     Called by APScheduler to fetch XLSM files from Google Drive,
@@ -135,18 +136,18 @@ def run_fetch():
     # Always headless in scheduled mode
     headless = True
 
-    # Get modes from config (no argparse override)
     modes_config = config.get('modes', ['browser_selenium'])
     if isinstance(modes_config, str):
         modes_to_try = [modes_config]
+    elif isinstance(modes_config, Iterable):
+        modes_to_try = [str(mode) for mode in modes_config]
     else:
-        modes_to_try = modes_config
+        raise TypeError("xlsm_fetch.modes must be a string or iterable of strings")
     logger.info(f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}")
 
     folder_url = config['google_drive_folder_url']
     logger.info(f"Folder URL: {folder_url}")
 
-    # Try each mode until one succeeds
     files = []
     download_dir = None
 
@@ -167,16 +168,18 @@ def run_fetch():
         except Exception as e:
             logger.error(f"Error with {mode}: {e}")
             if len(modes_to_try) == 1:
-                # If only one mode specified, re-raise the error
                 raise
-            # Otherwise continue to next mode
             continue
 
     if not files:
         logger.warning("All methods failed")
         return []
 
-    # Process downloaded files (parse + save to DB)
-    process_downloaded_files(files, download_dir)
+    _ = process_downloaded_files(files, download_dir)
 
     return files
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    _ = run_fetch()
