@@ -31,22 +31,27 @@ def main():
     # Check directories
     print("📁 Directory Structure:")
     all_checks.append(check_dir(os.path.join(base_dir, "backend"), "Backend directory"))
+    all_checks.append(check_dir(os.path.join(base_dir, "backend", "agents"), "Backend agents directory"))
+    all_checks.append(check_dir(os.path.join(base_dir, "backend", "services"), "Backend services directory"))
     all_checks.append(check_dir(os.path.join(base_dir, "frontend"), "Frontend directory"))
-    all_checks.append(check_dir(os.path.join(base_dir, "agents"), "Agents directory"))
-    all_checks.append(check_dir(os.path.join(base_dir, "services"), "Services directory"))
+    all_checks.append(check_dir(os.path.join(base_dir, "data_collector"), "Data collector directory"))
     print()
 
     # Check main files
     print("📄 Main Files:")
-    all_checks.append(check_file(os.path.join(base_dir, "backend", "api.py"), "Backend API"))
-    all_checks.append(check_file(os.path.join(base_dir, "frontend", "app.py"), "Frontend App"))
-    all_checks.append(check_file(os.path.join(base_dir, "agents", "report_agents.py"), "Agent System"))
-    all_checks.append(check_file(os.path.join(base_dir, "services", "game_data_service.py"), "Data Service"))
+    all_checks.append(check_file(os.path.join(base_dir, "backend", "main.py"), "Backend API"))
+    all_checks.append(check_file(os.path.join(base_dir, "frontend", "main.py"), "Frontend App"))
+    all_checks.append(check_file(os.path.join(base_dir, "backend", "agents", "report_agents.py"), "Agent System"))
+    all_checks.append(check_file(os.path.join(base_dir, "backend", "services", "game_data_service.py"), "Data Service"))
+    all_checks.append(check_file(os.path.join(base_dir, "data_collector", "entrypoint.py"), "Data collector entrypoint"))
+    all_checks.append(check_file(os.path.join(base_dir, "data_collector", "fetch_pipeline.py"), "Data collector pipeline"))
     print()
 
     # Check configuration files
     print("⚙️ Configuration:")
-    all_checks.append(check_file(os.path.join(base_dir, "requirements.txt"), "Requirements"))
+    all_checks.append(check_file(os.path.join(base_dir, "backend", "pyproject.toml"), "Backend pyproject"))
+    all_checks.append(check_file(os.path.join(base_dir, "frontend", "pyproject.toml"), "Frontend pyproject"))
+    all_checks.append(check_file(os.path.join(base_dir, "data_collector", "pyproject.toml"), "Data collector pyproject"))
     all_checks.append(check_file(os.path.join(base_dir, "config.yaml"), "Config YAML"))
     all_checks.append(check_file(os.path.join(base_dir, ".env.example"), "Env Example"))
     print()
@@ -55,8 +60,10 @@ def main():
     print("🐳 Docker & Tools:")
     all_checks.append(check_file(os.path.join(base_dir, "docker-compose.yml"), "Docker Compose"))
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.backend"), "Dockerfile Backend"))
+    all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.data_collector"), "Dockerfile Data Collector"))
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.frontend"), "Dockerfile Frontend"))
     all_checks.append(check_file(os.path.join(base_dir, "Makefile"), "Makefile"))
+    all_checks.append(check_file(os.path.join(base_dir, "generate_env.py"), "Environment Generator"))
     all_checks.append(check_file(os.path.join(base_dir, "backend", "test_system.py"), "Test Script"))
     all_checks.append(check_file(os.path.join(base_dir, "validate_setup.py"), "Validation Script"))
     print()
@@ -71,10 +78,13 @@ def main():
     # Check parent project files
     print("🔗 Parent Project Integration:")
     parent_dir = os.path.dirname(base_dir)
-    all_checks.append(check_file(os.path.join(parent_dir, "db.py"), "Database ORM"))
-    all_checks.append(check_file(os.path.join(parent_dir, "db_helpers.py"), "Database Helpers"))
-    all_checks.append(check_file(os.path.join(parent_dir, "config.py"), "Config Module"))
-    all_checks.append(check_file(os.path.join(parent_dir, "config.toml"), "Config TOML"))
+    shared_dir = os.path.join(parent_dir, "bd_shared")
+    all_checks.append(check_dir(shared_dir, "Shared core directory"))
+    all_checks.append(check_file(os.path.join(shared_dir, "db.py"), "Database ORM"))
+    all_checks.append(check_file(os.path.join(shared_dir, "db_helpers.py"), "Database Helpers"))
+    all_checks.append(check_file(os.path.join(shared_dir, "config.py"), "Config Module"))
+    all_checks.append(check_file(os.path.join(shared_dir, "config.toml"), "Config TOML"))
+    all_checks.append(check_file(os.path.join(shared_dir, "bd_game.py"), "Game Data Model"))
     print()
 
     # Summary
@@ -94,7 +104,7 @@ def main():
         print()
         print("Next steps:")
         print("1. Run: make start")
-        print("2. Open: http://localhost:8501")
+        print("2. Open: http://localhost:28501")
         print("3. View logs: make logs")
         return 0
     else:
