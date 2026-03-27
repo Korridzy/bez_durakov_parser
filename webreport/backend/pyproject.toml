@@ -7,7 +7,7 @@ name = "webreport-backend"
 version = "1.0.0"
 description = "Backend API for game data reporting system"
 authors = [
-    { name="Korridzy", email="korridzy.pub@gmail.com" }
+    "Korridzy <korridzy.pub@gmail.com>"
 ]
 
 [tool.poetry.dependencies]
