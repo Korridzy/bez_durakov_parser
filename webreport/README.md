@@ -91,13 +91,20 @@ cd /home/homo/git/bez_durakov/parser/webreport
 
 - `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
 - `[application]` — `debug`, `log_level`, `default_game_date`
-- `[webreport]` — `backend_port`, `frontend_port`, `debug`, `backend_debug_port`, `frontend_debug_port`
+- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `backend_debug_port`, `frontend_debug_port`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
 
 `generate_env.py` читает эти настройки через `bd_shared/config.py` и генерирует `.env` для Docker Compose.
+
+`[webreport].allowed_origins` управляет CORS для backend. По умолчанию используются локальные frontend origins:
+
+- `http://localhost:28501`
+- `http://127.0.0.1:28501`
+
+Для production замените их на реальные доверенные frontend URL и не используйте `*` вместе с credentialed CORS.
 
 ### Запуск
 
@@ -200,9 +207,9 @@ make start
 
 ## 🔐 Безопасность
 
-- CORS настроен для локальной разработки
+- CORS ограничен списком origins из `[webreport].allowed_origins`
 - В production необходимо:
-  - Ограничить CORS origins
+  - Указать только реальные frontend origins в `[webreport].allowed_origins`
   - Добавить аутентификацию
   - Использовать HTTPS
   - Защитить API ключи

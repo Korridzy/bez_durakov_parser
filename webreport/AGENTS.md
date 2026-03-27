@@ -43,6 +43,7 @@ webreport/
 - **Agent tools**: Agents call `GameDataService` methods — never access DB directly
 - **Dual mode**: System works without OpenAI API key (fallback: `_interpret_request()` with regex). Full mode requires `OPENAI_API_KEY`
 - **Config flow**: `bd_shared/config.toml` → `bd_shared/config.py` → `generate_env.py` → `.env` → `docker-compose.yml` env vars
+- **CORS config**: backend reads allowed origins from `bd_shared/config.toml` `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: Backend connects to MySQL at `mysql:3306` (Docker network), not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
 - **Dev container pattern**: backend, frontend, and data_collector install dependencies in the image and mount service code at runtime; code-only changes should not require image rebuilds
@@ -72,5 +73,5 @@ make clean      # Remove __pycache__, .pyc files
 
 - Backend listens on port 8000 inside container, mapped to `WEBREPORT_BACKEND_PORT` (default 28000) on host
 - Frontend listens on port 8501 inside container, mapped to `WEBREPORT_FRONTEND_PORT` (default 28501) on host
-- CORS is open for all origins (development only)
+- Backend CORS uses explicit origins from `[webreport].allowed_origins`
 - Existing docs in this directory (`ARCHITECTURE.md`, `README.md`, etc.) contain detailed architecture diagrams and usage guides

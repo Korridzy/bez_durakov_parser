@@ -8,6 +8,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import sys
+
+sys.path.insert(0, '/')
+
+from bd_shared.config import WEBREPORT_ALLOWED_ORIGINS
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
@@ -48,7 +53,7 @@ app = FastAPI(
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=WEBREPORT_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

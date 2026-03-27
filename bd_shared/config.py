@@ -47,3 +47,10 @@ WEBREPORT_FRONTEND_PORT = int(config["webreport"].get("frontend_port", 28501))
 WEBREPORT_DEBUG = config["webreport"].get("debug", False)
 WEBREPORT_BACKEND_DEBUG_PORT = int(config["webreport"].get("backend_debug_port", 5678))
 WEBREPORT_FRONTEND_DEBUG_PORT = int(config["webreport"].get("frontend_debug_port", 5679))
+WEBREPORT_ALLOWED_ORIGINS = list(config["webreport"].get(
+    "allowed_origins",
+    [
+        f"http://localhost:{WEBREPORT_FRONTEND_PORT}",
+        f"http://127.0.0.1:{WEBREPORT_FRONTEND_PORT}",
+    ],
+))

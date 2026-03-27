@@ -101,7 +101,7 @@ pkill -f streamlit
 cat ../bd_shared/config.toml
 
 # Сгенерировать .env для docker-compose
-python3 generate_env.py
+poetry run python generate_env.py
 
 # Для полного AutoGen режима (опционально)
 export OPENAI_API_KEY=your-openai-api-key-here
@@ -110,7 +110,7 @@ export OPENAI_API_KEY=your-openai-api-key-here
 ### Секции в `bd_shared/config.toml`
 - `[database]` — настройки подключения к БД
 - `[application]` — общие флаги приложения
-- `[webreport]` — порты и debug-настройки WebReport
+- `[webreport]` — порты, CORS (`allowed_origins`) и debug-настройки WebReport
 - `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
 Для `[xlsm_fetch].modes` используйте только `browser_selenium`.
