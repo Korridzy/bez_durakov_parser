@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import unittest
+from unittest.mock import patch
 from datetime import date, datetime
 
 # Import the app and set up in-process ASGI testing
@@ -174,6 +175,25 @@ class TestGameDataService(unittest.TestCase):
         df = self.service.get_team_game_scores()
         self.assertIsInstance(df, pandas_module.DataFrame, "Should return DataFrame")
         print(f"✅ Found {len(df)} team game score records")
+
+    def test_regression_service_get_game_by_id_returns_none_for_missing_game(self):
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        with patch.object(self.service.db, "get_game_data", side_effect=ValueError("missing")):
+            self.assertIsNone(self.service.get_game_by_id(999999))
+
+        print("✅ Service get_game_by_id: missing game returns None")
+
+    def test_regression_service_get_game_by_id_reraises_unexpected_errors(self):
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        with patch.object(self.service.db, "get_game_data", side_effect=RuntimeError("db exploded")):
+            with self.assertRaises(RuntimeError):
+                self.service.get_game_by_id(123)
+
+        print("✅ Service get_game_by_id: unexpected errors are re-raised")
 
     def test_regression_service_get_team_wins(self):
         """Regression test for get_team_wins() service method.
@@ -495,6 +515,32 @@ class TestAPI(unittest.TestCase):
         except Exception as e:
             print(f"⚠️ API test error: {e}")
             self.skipTest("API test failed")
+
+    def test_regression_api_get_game_returns_404_for_missing_game(self):
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        with patch.object(main_module.data_service, "get_game_by_id", return_value=None):
+            response = self.client.get("/api/games/999999")
+
+        self.assertEqual(response.status_code, 404, "Missing game should return 404")
+        self.assertIn("not found", response.json()["detail"].lower())
+        print("✅ API get_game: missing game returns 404")
+
+    def test_regression_api_get_game_returns_500_for_unexpected_error(self):
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        with patch.object(main_module.data_service, "get_game_by_id", side_effect=RuntimeError("db exploded")):
+            response = self.client.get("/api/games/123")
+
+        self.assertEqual(response.status_code, 500, "Unexpected game lookup failures should return 500")
+        self.assertEqual(response.json()["detail"], "db exploded")
+        print("✅ API get_game: unexpected errors return 500")
 
 
 def run_tests():

@@ -4,6 +4,7 @@ Uses existing db.py and db_helpers.py methods.
 """
 import sys
 import os
+import traceback
 from typing import List, Dict, Optional, Any
 from datetime import date, datetime
 import pandas as pd
@@ -57,9 +58,12 @@ class GameDataService:
         try:
             bd_game = self.db.get_game_data(game_id)
             return bd_game.get_data()
+        except ValueError:
+            return None
         except Exception as e:
             print(f"Error getting game {game_id}: {e}")
-            return None
+            print(traceback.format_exc())
+            raise
 
     def get_games_by_date_range(self, start_date: date, end_date: Optional[date] = None) -> List[int]:
         """
