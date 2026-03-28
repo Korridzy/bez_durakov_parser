@@ -191,7 +191,7 @@ class TestGameDataService(unittest.TestCase):
 
         with patch.object(self.service.db, "get_game_data", side_effect=RuntimeError("db exploded")):
             with self.assertRaises(RuntimeError):
-                self.service.get_game_by_id(123)
+                _ = self.service.get_game_by_id(123)
 
         print("✅ Service get_game_by_id: unexpected errors are re-raised")
 
@@ -313,6 +313,18 @@ class TestReportAgentSystem(unittest.TestCase):
         self.assertIsInstance(history, list, "History should be list in enabled mode")
         self.assertGreaterEqual(len(history), 2,
                                 "Enabled mode should record at least user+assistant history entries")
+
+    def test_regression_agent_system_uses_injected_service(self):
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        from agents.report_agents import ReportAgentSystem
+
+        injected_service = object()
+        system = ReportAgentSystem(service=injected_service)
+
+        self.assertIs(system.service, injected_service)
+        print("✅ Agent system reuses injected data service")
 
     def test_process_request_all_games(self):
         """Test processing a request for all games."""
@@ -542,6 +554,78 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "db exploded")
         print("✅ API get_game: unexpected errors return 500")
 
+    def test_regression_health_returns_503_without_data_service(self):
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        with patch.object(main_module, "data_service", None):
+            response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 503, "Health should return 503 when data service is unavailable")
+        print("✅ API health: returns 503 when data service is unavailable")
+
+
+class TestStartupInitialization(unittest.TestCase):
+    @staticmethod
+    def _get_main_module():
+        import main as main_module
+        return main_module
+
+    def test_regression_startup_retries_database_initialization(self):
+        main_module = self._get_main_module()
+
+        created_service = object()
+        attempts = {"count": 0}
+
+        def fake_game_data_service():
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise RuntimeError("db not ready")
+            return created_service
+
+        created_agent_system = object()
+
+        class FakeReportAgentSystem:
+            def __init__(self, api_key=None, service=None):
+                self.api_key = api_key
+                self.service = service
+
+        async def run_test():
+            with patch.object(main_module, "GameDataService", side_effect=fake_game_data_service), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=lambda service=None: created_agent_system), \
+                 patch.object(main_module.asyncio, "sleep") as mock_sleep:
+                main_module.data_service = None
+                main_module.agent_system = None
+                await main_module.startup_event()
+
+            self.assertEqual(attempts["count"], 3)
+            self.assertEqual(mock_sleep.await_count, 2)
+            self.assertIs(main_module.data_service, created_service)
+            self.assertIs(main_module.agent_system, created_agent_system)
+
+        import asyncio
+        asyncio.run(run_test())
+        print("✅ Startup retries database initialization before succeeding")
+
+    def test_regression_startup_reraises_after_retry_exhaustion(self):
+        main_module = self._get_main_module()
+
+        async def run_test():
+            with patch.object(main_module, "GameDataService", side_effect=RuntimeError("db not ready")), \
+                 patch.object(main_module.asyncio, "sleep") as mock_sleep:
+                main_module.data_service = None
+                main_module.agent_system = None
+                with self.assertRaises(RuntimeError):
+                    await main_module.startup_event()
+
+            self.assertEqual(mock_sleep.await_count, main_module.STARTUP_RETRY_ATTEMPTS - 1)
+
+        import asyncio
+        asyncio.run(run_test())
+        print("✅ Startup fails fast after bounded database retries")
+
 
 def run_tests():
     """Run all tests."""
@@ -558,6 +642,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
     suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
     suite.addTests(loader.loadTestsFromTestCase(TestAPI))
+    suite.addTests(loader.loadTestsFromTestCase(TestStartupInitialization))
 
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)

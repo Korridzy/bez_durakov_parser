@@ -4,6 +4,7 @@ Provides REST API for chat and report generation.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -64,17 +65,38 @@ agent_system: Optional[ReportAgentSystem] = None
 data_service: Optional[GameDataService] = None
 sessions: Dict[str, ReportAgentSystem] = {}
 
+STARTUP_RETRY_ATTEMPTS = 5
+STARTUP_RETRY_DELAY_SECONDS = 2
+
+
+async def initialize_data_service_with_retry() -> GameDataService:
+    last_error: Exception | None = None
+
+    for attempt in range(1, STARTUP_RETRY_ATTEMPTS + 1):
+        try:
+            return GameDataService()
+        except Exception as exc:
+            last_error = exc
+            print(f"❌ Database initialization attempt {attempt}/{STARTUP_RETRY_ATTEMPTS} failed: {exc}")
+            if attempt < STARTUP_RETRY_ATTEMPTS:
+                await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
+
+    if last_error is None:
+        raise RuntimeError("Database initialization failed without an exception")
+
+    raise last_error
+
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
     global agent_system, data_service
-    try:
-        data_service = GameDataService()
-        agent_system = ReportAgentSystem()
-        print("✅ Services initialized successfully")
-    except Exception as e:
-        print(f"❌ Error initializing services: {e}")
+
+    data_service = await initialize_data_service_with_retry()
+
+    agent_system = ReportAgentSystem(service=data_service)
+
+    print("✅ Services initialized successfully")
 
 
 @app.get("/")
@@ -98,6 +120,9 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    if data_service is None:
+        raise HTTPException(status_code=503, detail="Data service not available")
+
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -126,7 +151,7 @@ async def chat(message: ChatMessage):
         # Get or create session
         session_id = message.session_id or "default"
         if session_id not in sessions:
-            sessions[session_id] = ReportAgentSystem()
+            sessions[session_id] = ReportAgentSystem(service=data_service)
 
         session_agent = sessions[session_id]
 

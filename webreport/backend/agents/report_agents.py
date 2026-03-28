@@ -36,14 +36,8 @@ except ImportError:
 class ReportAgentSystem:
     """Agent system for generating data reports using AutoGen."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize the agent system.
-
-        Args:
-            api_key: OpenAI API key (optional, can use env var OPENAI_API_KEY)
-        """
-        self.service = GameDataService()
+    def __init__(self, api_key: Optional[str] = None, service: Optional[GameDataService] = None):
+        self.service = service or GameDataService()
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.conversation_history = []
         self.model_client = None
