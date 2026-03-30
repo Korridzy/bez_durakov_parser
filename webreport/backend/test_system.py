@@ -176,6 +176,25 @@ class TestGameDataService(unittest.TestCase):
         self.assertIsInstance(df, pandas_module.DataFrame, "Should return DataFrame")
         print(f"✅ Found {len(df)} team game score records")
 
+    def test_regression_get_team_game_scores_filters_zero_game_id(self):
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        with patch.object(self.service.db, "Session") as mock_session_factory:
+            mock_session = mock_session_factory.return_value
+            mock_query = mock_session.query.return_value
+            filtered_query = mock_query.filter.return_value
+            filtered_query.all.return_value = []
+
+            df = self.service.get_team_game_scores(0)
+
+            mock_query.filter.assert_called_once()
+            filtered_query.all.assert_called_once()
+            self.assertTrue(df.empty, "Filtered zero game_id query should still return a DataFrame")
+            mock_session.close.assert_called_once()
+
+        print("✅ Service get_team_game_scores: game_id=0 still applies filtering")
+
     def test_regression_service_get_game_by_id_returns_none_for_missing_game(self):
         if self.service is None:
             self.skipTest("Service not available")

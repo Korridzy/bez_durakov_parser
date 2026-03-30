@@ -91,7 +91,7 @@ class GameDataService:
         session = self.db.Session()
         try:
             query = session.query(TeamGameScore)
-            if game_id:
+            if game_id is not None:
                 query = query.filter(TeamGameScore.game_id == game_id)
 
             scores = query.all()
