@@ -313,6 +313,8 @@ async def get_team_stats(team_name: str):
             "success": True,
             "data": stats
         }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

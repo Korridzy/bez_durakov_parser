@@ -147,7 +147,7 @@ class GameDataService:
 
             team = session.query(Team).filter_by(team_name=normalized_name).first()
             if not team:
-                return {'error': f'Team {team_name} not found'}
+                raise ValueError(f'Team {team_name} not found')
 
             scores = session.query(TeamGameScore).filter_by(team_id=team.team_id).all()
 

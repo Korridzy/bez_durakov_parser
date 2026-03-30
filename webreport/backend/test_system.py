@@ -263,8 +263,24 @@ class TestGameDataService(unittest.TestCase):
         result_str = str(result)
         self.assertNotIn("No module named 'db'", result_str,
                         "Result should not contain import error")
-        
+
         print(f"✅ Service get_team_statistics executed successfully")
+
+    def test_regression_service_get_team_statistics_reraises_missing_team(self):
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        with patch.object(self.service.db, "Session") as mock_session_factory:
+            mock_session = mock_session_factory.return_value
+            mock_query = mock_session.query.return_value
+            mock_query.filter_by.return_value.first.return_value = None
+
+            with self.assertRaises(ValueError):
+                self.service.get_team_statistics("missing team")
+
+            mock_session.close.assert_called_once()
+
+        print("✅ Service get_team_statistics: missing team is re-raised")
 
 
 class TestReportAgentSystem(unittest.TestCase):
@@ -412,8 +428,19 @@ class TestReportAgentSystem(unittest.TestCase):
             query_info = response.get("query", {})
             method = query_info.get("method")
             self.assertEqual(method, "get_team_statistics",
-                            f"Generic team prompt should route to get_team_statistics, got {method}")
+                             f"Generic team prompt should route to get_team_statistics, got {method}")
             print(f"✅ Generic team statistics prompt: correctly routed to {method}")
+
+    def test_regression_team_statistics_missing_team_returns_error_response(self):
+        if self.agent_system is None:
+            self.skipTest("Agent system not available")
+
+        with patch.object(self.agent_system.service, "get_team_statistics", side_effect=ValueError("Team missing team not found")):
+            response = self.agent_system.process_user_request("статистика команды missing team")
+
+        self.assertFalse(response.get("success"), "Missing team should not look like a successful report")
+        self.assertIn("not found", response.get("error", "").lower())
+        print("✅ Agent team statistics: missing team returns error response")
 
 
 class TestAPI(unittest.TestCase):
@@ -565,6 +592,19 @@ class TestAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503, "Health should return 503 when data service is unavailable")
         print("✅ API health: returns 503 when data service is unavailable")
+
+    def test_regression_api_team_stats_returns_404_for_missing_team(self):
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        with patch.object(main_module.data_service, "get_team_statistics", side_effect=ValueError("Team missing team not found")):
+            response = self.client.get("/api/teams/missing team/stats")
+
+        self.assertEqual(response.status_code, 404, "Missing team stats should return 404")
+        self.assertIn("not found", response.json()["detail"].lower())
+        print("✅ API team stats: missing team returns 404")
 
 
 class TestStartupInitialization(unittest.TestCase):
