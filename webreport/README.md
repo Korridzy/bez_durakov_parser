@@ -82,7 +82,7 @@ webreport/
 
 ```bash
 # Перейти в директорию webreport
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 ```
 
 Источник конфигурации для WebReport — `../bd_shared/config.toml`.

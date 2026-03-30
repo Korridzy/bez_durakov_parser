@@ -28,7 +28,7 @@
 
 **С Docker (единственный способ):**
 ```bash
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 make start
 # ИЛИ
 docker-compose up -d

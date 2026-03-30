@@ -124,7 +124,7 @@ Agents (AutoGen) ← → Services (GameDataService)
 
 ```bash
 # Валидация файлов
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 python3 validate_setup.py
 
 # Проверка контейнеров

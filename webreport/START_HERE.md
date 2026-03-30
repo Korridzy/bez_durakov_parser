@@ -10,7 +10,7 @@
 
 ### Шаг 1: Настройка конфигурации
 ```bash
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 cat ../bd_shared/config.toml
 ```
 
@@ -265,7 +265,7 @@ docker-compose logs -f
 
 **Запустить:**
 ```bash
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 make start
 ```
 

@@ -3,7 +3,7 @@
 ## ⚡ Быстрый старт (2 команды)
 
 ```bash
-cd /home/homo/git/bez_durakov/parser/webreport
+cd webreport
 make start
 # Открыть http://localhost:28501
 ```
