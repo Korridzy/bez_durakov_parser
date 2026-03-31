@@ -24,6 +24,11 @@ try:
         def __init__(self, app_instance):
             self.app = app_instance
             self.loop = asyncio.new_event_loop()
+            self._closed = False
+            try:
+                self._previous_loop = asyncio.get_event_loop()
+            except RuntimeError:
+                self._previous_loop = None
             asyncio.set_event_loop(self.loop)
             # Trigger startup events
             self._run_startup()
@@ -38,6 +43,24 @@ try:
                         handler()
             
             self.loop.run_until_complete(startup())
+
+        def close(self):
+            if self._closed:
+                return
+
+            async def shutdown():
+                for handler in self.app.router.on_shutdown:
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler()
+                    else:
+                        handler()
+
+            try:
+                self.loop.run_until_complete(shutdown())
+            finally:
+                asyncio.set_event_loop(self._previous_loop)
+                self.loop.close()
+                self._closed = True
         
         def _call(self, method, path, json_data=None):
             """Make a synchronous call to the ASGI app."""
@@ -469,6 +492,12 @@ class TestAPI(unittest.TestCase):
     def setUpClass(cls):
         """Set up test fixtures."""
         cls.client = testclient
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.client is not None:
+            cls.client.close()
+            cls.client = None
 
     def test_health_endpoint(self):
         """Test the health check endpoint."""
