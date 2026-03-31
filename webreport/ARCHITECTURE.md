@@ -89,7 +89,7 @@
 - `get_conversation_history()` - получение истории
 
 ### 2. Backend (FastAPI)
-**Файл**: `backend/api.py`
+**Файл**: `backend/main.py`
 
 **Ответственность**:
 - Предоставление REST API
@@ -254,7 +254,7 @@
 
 ### Добавление новых функций
 1. **Новый тип отчёта**: Добавить метод в GameDataService
-2. **Новый endpoint**: Добавить в backend/api.py
+2. **Новый endpoint**: Добавить в backend/main.py
 3. **Новая визуализация**: Добавить в frontend/main.py
 4. **Новый агент**: Добавить в agents/report_agents.py
 
