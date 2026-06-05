@@ -17,6 +17,7 @@ from bd_shared.config import WEBREPORT_ALLOWED_ORIGINS
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
+from session_store import SessionStore
 
 
 # Pydantic models for request/response
@@ -63,7 +64,7 @@ app.add_middleware(
 # Global instances
 agent_system: Optional[ReportAgentSystem] = None
 data_service: Optional[GameDataService] = None
-sessions: Dict[str, ReportAgentSystem] = {}
+sessions: SessionStore = SessionStore()
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2

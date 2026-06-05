@@ -715,6 +715,75 @@ class TestStartupInitialization(unittest.TestCase):
         print("✅ Startup fails fast after bounded database retries")
 
 
+class TestSessionStore(unittest.TestCase):
+    """Unit tests for SessionStore LRU+TTL eviction."""
+
+    def _make_store(self, max_size=4, ttl=60.0):
+        from session_store import SessionStore
+        return SessionStore(max_size=max_size, ttl=ttl)
+
+    def test_basic_set_get_contains(self):
+        store = self._make_store()
+        sentinel = object()
+        store["a"] = sentinel
+        self.assertIn("a", store)
+        self.assertIs(store["a"], sentinel)
+
+    def test_missing_key_not_in(self):
+        store = self._make_store()
+        self.assertNotIn("missing", store)
+
+    def test_lru_eviction_at_capacity(self):
+        store = self._make_store(max_size=3)
+        store["a"] = object()
+        store["b"] = object()
+        store["c"] = object()
+        _ = store["a"]  # touch "a" — makes "b" the LRU
+        store["d"] = object()
+        self.assertNotIn("b", store)
+        self.assertIn("a", store)
+        self.assertIn("c", store)
+        self.assertIn("d", store)
+        print("✅ SessionStore: LRU eviction evicts least-recently-used entry")
+
+    def test_ttl_expiry(self):
+        import time as time_mod
+        store = self._make_store(ttl=0.05)
+        store["x"] = object()
+        self.assertIn("x", store)
+        time_mod.sleep(0.1)
+        self.assertNotIn("x", store)
+        print("✅ SessionStore: expired session is evicted on next access")
+
+    def test_overwrite_does_not_grow_store(self):
+        store = self._make_store(max_size=2)
+        store["a"] = object()
+        store["b"] = object()
+        store["a"] = object()
+        self.assertEqual(len(store._store), 2)
+        print("✅ SessionStore: overwriting an existing key does not grow the store")
+
+    def test_capacity_hard_cap(self):
+        store = self._make_store(max_size=10)
+        for i in range(10):
+            store[str(i)] = object()
+        self.assertEqual(len(store._store), 10)
+        store["overflow"] = object()
+        self.assertEqual(len(store._store), 10)
+        print("✅ SessionStore: capacity hard cap is never exceeded")
+
+    def test_max_1024_sessions(self):
+        from session_store import SessionStore, MAX_SESSIONS
+        self.assertEqual(MAX_SESSIONS, 1024)
+        store = SessionStore()
+        for i in range(1024):
+            store[str(i)] = object()
+        self.assertEqual(len(store._store), 1024)
+        store["one_more"] = object()
+        self.assertEqual(len(store._store), 1024)
+        print("✅ SessionStore: default MAX_SESSIONS=1024 is enforced")
+
+
 def run_tests():
     """Run all tests."""
     print("=" * 80)
@@ -727,6 +796,7 @@ def run_tests():
     suite = unittest.TestSuite()
 
     # Add test classes
+    suite.addTests(loader.loadTestsFromTestCase(TestSessionStore))
     suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
     suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
     suite.addTests(loader.loadTestsFromTestCase(TestAPI))
