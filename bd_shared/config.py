@@ -28,7 +28,7 @@ LOG_LEVEL = config["application"].get("log_level", "INFO")
 DEFAULT_GAME_DATE_STR = config["application"].get("default_game_date", "02.03.2022")
 DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
-_bd_docker = os.environ.get('BD_DOCKER')
+_bd_docker = os.environ.get('BD_DOCKER', '').lower() in ('1', 'true', 'yes')
 DATABASE_URL = config["database"]["docker_url"] if _bd_docker else config["database"]["url"]
 
 # Function for getting the configuration (optional)
