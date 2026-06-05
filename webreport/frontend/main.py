@@ -9,10 +9,10 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import os
+import uuid
 
 # Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-SESSION_ID = "streamlit_session"
 
 # Page configuration
 st.set_page_config(
@@ -56,6 +56,8 @@ st.markdown("""
 
 def init_session_state():
     """Initialize session state variables."""
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
     if 'view' not in st.session_state:
         st.session_state.view = 'chat'
     if 'chat_history' not in st.session_state:
@@ -80,7 +82,7 @@ def send_chat_message(message: str) -> Dict[str, Any]:
     try:
         response = requests.post(
             f"{API_BASE_URL}/api/chat",
-            json={"message": message, "session_id": SESSION_ID},
+            json={"message": message, "session_id": st.session_state.session_id},
             timeout=30
         )
         response.raise_for_status()
@@ -97,7 +99,7 @@ def get_conversation_history() -> List[Dict[str, Any]]:
     """Get conversation history from API."""
     try:
         response = requests.get(
-            f"{API_BASE_URL}/api/history/{SESSION_ID}",
+            f"{API_BASE_URL}/api/history/{st.session_state.session_id}",
             timeout=10
         )
         response.raise_for_status()
@@ -110,7 +112,7 @@ def get_conversation_history() -> List[Dict[str, Any]]:
 def clear_conversation():
     """Clear conversation history."""
     try:
-        requests.post(f"{API_BASE_URL}/api/clear/{SESSION_ID}", timeout=10)
+        requests.post(f"{API_BASE_URL}/api/clear/{st.session_state.session_id}", timeout=10)
         st.session_state.chat_history = []
         st.session_state.current_report = None
         st.session_state.report_data = None
