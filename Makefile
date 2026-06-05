@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+DOCKER_COMPOSE ?= docker compose
 
 .PHONY: help setup upgrade-db upgrade-code webreport-start webreport-stop mysql-start mysql-stop fetch-data fetch-data-log logs
 
@@ -138,12 +139,12 @@ webreport-stop:
 # MySQL only management
 mysql-start:
 	@echo "🗄️  Запуск MySQL..."
-	cd webreport && docker-compose up -d mysql
+	cd webreport && $(DOCKER_COMPOSE) up -d mysql
 	@echo "✅ MySQL запущен на localhost:3306"
 
 mysql-stop:
 	@echo "🛑 Остановка MySQL..."
-	cd webreport && docker-compose stop mysql
+	cd webreport && $(DOCKER_COMPOSE) stop mysql
 	@echo "✅ MySQL остановлен"
 
 # Data Collector targets

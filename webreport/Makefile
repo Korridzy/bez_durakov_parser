@@ -1,3 +1,5 @@
+DOCKER_COMPOSE ?= docker compose
+
 .PHONY: help test clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
@@ -30,7 +32,7 @@ help:
 start:
 	@echo "🐳 Starting services with Docker Compose..."
 	poetry run python generate_env.py
-	docker-compose up -d
+	$(DOCKER_COMPOSE) up -d
 	@echo ""
 	@echo "✅ Services started!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -44,33 +46,33 @@ start:
 
 stop:
 	@echo "🐳 Stopping Docker containers..."
-	docker-compose down
+	$(DOCKER_COMPOSE) down
 	@echo "✅ Containers stopped"
 
 restart:
 	@echo "🔄 Restarting services..."
-	docker-compose restart
+	$(DOCKER_COMPOSE) restart
 	@echo "✅ Services restarted"
 
 logs:
-	docker-compose logs -f $(SERVICE)
+	$(DOCKER_COMPOSE) logs -f $(SERVICE)
 
 build:
 	@echo "🔨 Building Docker images..."
-	docker-compose build
+	$(DOCKER_COMPOSE) build
 	@echo "✅ Build complete"
 
 rebuild:
 	@echo "🔨 Rebuilding and restarting services..."
 	poetry run python generate_env.py
-	docker-compose down
-	docker-compose build
-	docker-compose up -d
+	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) build
+	$(DOCKER_COMPOSE) up -d
 	@echo "✅ Services rebuilt and started"
 
 test:
 	@echo "🧪 Running tests in Docker..."
-	docker-compose run --rm backend python /app/test_system.py
+	$(DOCKER_COMPOSE) run --rm backend python /app/test_system.py
 	@echo ""
 
 clean:
@@ -83,8 +85,8 @@ clean:
 
 fetch-data:
 	@echo "🔄 Starting manual XLSM fetch..."
-	docker-compose exec -T data_collector python fetch_pipeline.py
+	$(DOCKER_COMPOSE) exec -T data_collector python fetch_pipeline.py
 
 fetch-data-log:
 	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
-	docker-compose logs data_collector | tac | sed '/Fetch started at/q' | tac
+	$(DOCKER_COMPOSE) logs data_collector | tac | sed '/Fetch started at/q' | tac
