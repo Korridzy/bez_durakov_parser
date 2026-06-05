@@ -6,6 +6,7 @@
 .claude/
 .codex/
 .omc/
+.omo/
 .skillshare/
 
 #all fetched xlsm files will be here
@@ -209,4 +210,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
