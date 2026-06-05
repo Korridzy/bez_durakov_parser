@@ -6,6 +6,20 @@ from datetime import datetime
 import importlib
 
 
+def _parse_start_time(value):
+    try:
+        hour, minute = map(int, value.split(":"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid start_time: {value!r}. Expected HH:MM format."
+        ) from exc
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError(
+            f"Invalid start_time: {value!r}. Expected HH:MM format."
+        )
+    return hour, minute
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
@@ -27,13 +41,7 @@ if __name__ == "__main__":
     XLSM_FETCH_START_TIME = bd_config.XLSM_FETCH_START_TIME
     XLSM_FETCH_TIMEZONE = bd_config.XLSM_FETCH_TIMEZONE
 
-    try:
-        hour, minute = map(int, XLSM_FETCH_START_TIME.split(":"))
-        assert 0 <= hour <= 23 and 0 <= minute <= 59
-    except (ValueError, AssertionError) as exc:
-        raise ValueError(
-            f"Invalid start_time: {XLSM_FETCH_START_TIME!r}. Expected HH:MM format."
-        ) from exc
+    hour, minute = _parse_start_time(XLSM_FETCH_START_TIME)
 
     if XLSM_FETCH_INTERVAL_HOURS <= 0:
         raise ValueError(
