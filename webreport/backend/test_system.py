@@ -755,6 +755,22 @@ class TestSessionStore(unittest.TestCase):
         self.assertNotIn("x", store)
         print("✅ SessionStore: expired session is evicted on next access")
 
+    def test_getitem_enforces_ttl(self):
+        import time as time_mod
+        store = self._make_store(ttl=0.05)
+        store["x"] = object()
+        time_mod.sleep(0.1)
+        with self.assertRaises(KeyError):
+            _ = store["x"]
+        self.assertNotIn("x", store._store)
+        print("✅ SessionStore: __getitem__ enforces TTL and drops expired entry")
+
+    def test_getitem_missing_raises_keyerror(self):
+        store = self._make_store()
+        with self.assertRaises(KeyError):
+            _ = store["missing"]
+        print("✅ SessionStore: __getitem__ raises KeyError for missing key")
+
     def test_overwrite_does_not_grow_store(self):
         store = self._make_store(max_size=2)
         store["a"] = object()

@@ -27,6 +27,11 @@ class SessionStore:
         return True
 
     def __getitem__(self, session_id: str):
+        if session_id not in self._store:
+            raise KeyError(session_id)
+        if self._expired(session_id):
+            self._drop(session_id)
+            raise KeyError(session_id)
         self._store.move_to_end(session_id)
         self._accessed[session_id] = time.monotonic()
         return self._store[session_id]
