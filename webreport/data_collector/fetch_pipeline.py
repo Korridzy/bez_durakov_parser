@@ -4,7 +4,7 @@ Adapted from root xlsm_fetch.py for use as an importable module
 called by APScheduler. Exposes run_fetch() as the main entry point.
 """
 import sys
-sys.path.insert(0, '/')  # bd_shared is mounted at / in Docker
+sys.path.insert(0, '/')  # bd_shared is mounted at /bd_shared in Docker; / on sys.path lets `import bd_shared` resolve the package
 
 import logging
 from collections.abc import Iterable
