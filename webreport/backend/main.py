@@ -5,6 +5,7 @@ Provides REST API for chat and report generation.
 from typing import Dict, Any, Optional
 from datetime import datetime
 import asyncio
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -13,7 +14,9 @@ import sys
 
 sys.path.insert(0, '/')
 
-from bd_shared.config import WEBREPORT_ALLOWED_ORIGINS
+from bd_shared.config import WEBREPORT_ALLOWED_ORIGINS, WEBREPORT_DEBUG
+
+logger = logging.getLogger(__name__)
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
@@ -68,6 +71,12 @@ sessions: SessionStore = SessionStore()
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2
+
+
+def _internal_error(e: Exception) -> HTTPException:
+    logger.exception("Unexpected error in API handler")
+    detail = str(e) if WEBREPORT_DEBUG else "Internal server error"
+    return HTTPException(status_code=500, detail=detail)
 
 
 async def initialize_data_service_with_retry() -> GameDataService:
@@ -176,7 +185,7 @@ async def chat(message: ChatMessage):
             )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
 
 
 @app.get("/api/history/{session_id}")
@@ -240,7 +249,7 @@ async def get_games(limit: Optional[int] = None):
             "count": len(df)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
 
 
 @app.get("/api/games/{game_id}")
@@ -269,7 +278,7 @@ async def get_game(game_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
 
 
 @app.get("/api/teams")
@@ -291,7 +300,7 @@ async def get_teams():
             "count": len(df)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
 
 
 @app.get("/api/teams/{team_name}/stats")
@@ -317,7 +326,7 @@ async def get_team_stats(team_name: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
 
 
 @app.get("/api/scores")
@@ -342,4 +351,4 @@ async def get_scores(game_id: Optional[int] = None):
             "count": len(df)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _internal_error(e)
