@@ -203,18 +203,11 @@ class TestGameDataService(unittest.TestCase):
         if self.service is None:
             self.skipTest("Service not available")
 
-        with patch.object(self.service.db, "Session") as mock_session_factory:
-            mock_session = mock_session_factory.return_value
-            mock_query = mock_session.query.return_value
-            filtered_query = mock_query.filter.return_value
-            filtered_query.all.return_value = []
-
+        with patch.object(self.service.db, "get_team_game_scores", return_value=[]) as mock_method:
             df = self.service.get_team_game_scores(0)
 
-            mock_query.filter.assert_called_once()
-            filtered_query.all.assert_called_once()
+            mock_method.assert_called_once_with(game_id=0)
             self.assertTrue(df.empty, "Filtered zero game_id query should still return a DataFrame")
-            mock_session.close.assert_called_once()
 
         print("✅ Service get_team_game_scores: game_id=0 still applies filtering")
 
@@ -312,15 +305,11 @@ class TestGameDataService(unittest.TestCase):
         if self.service is None:
             self.skipTest("Service not available")
 
-        with patch.object(self.service.db, "Session") as mock_session_factory:
-            mock_session = mock_session_factory.return_value
-            mock_query = mock_session.query.return_value
-            mock_query.filter_by.return_value.first.return_value = None
-
+        with patch.object(self.service.db, "get_team_by_name", return_value=None) as mock_lookup:
             with self.assertRaises(ValueError):
                 self.service.get_team_statistics("missing team")
 
-            mock_session.close.assert_called_once()
+            mock_lookup.assert_called_once_with("missing team")
 
         print("✅ Service get_team_statistics: missing team is re-raised")
 

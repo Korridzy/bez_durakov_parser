@@ -12,9 +12,8 @@ import pandas as pd
 # Add parent of mounted bd_shared directory to path so we can import bd_shared as package
 sys.path.insert(0, '/')
 
-from bd_shared.db import Database, Game, Team, TeamGameScore, normalize_team_name
+from bd_shared.db import normalize_team_name
 from bd_shared.db_helpers import initialize_database
-from sqlalchemy import func, text
 
 
 class GameDataService:
@@ -33,17 +32,13 @@ class GameDataService:
         Returns:
             DataFrame with game summaries
         """
-        session = self.db.Session()
-        try:
-            games = session.query(Game).all()
-            data = [{
-                'game_id': g.game_id,
-                'game_date': g.game_date,
-                'created_at': g.created_at
-            } for g in games]
-            return pd.DataFrame(data)
-        finally:
-            session.close()
+        games = self.db.get_all_games()
+        data = [{
+            'game_id': g.game_id,
+            'game_date': g.game_date,
+            'created_at': g.created_at
+        } for g in games]
+        return pd.DataFrame(data)
 
     def get_game_by_id(self, game_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -88,30 +83,22 @@ class GameDataService:
         Returns:
             DataFrame with team scores
         """
-        session = self.db.Session()
-        try:
-            query = session.query(TeamGameScore)
-            if game_id is not None:
-                query = query.filter(TeamGameScore.game_id == game_id)
-
-            scores = query.all()
-            data = [{
-                'game_id': s.game_id,
-                'team_id': s.team_id,
-                'game_date': s.game_date,
-                'team_name': s.team_name,
-                'vybor_points': float(s.vybor_points) if s.vybor_points else 0,
-                'chisla_points': float(s.chisla_points) if s.chisla_points else 0,
-                'pref_points': float(s.pref_points) if s.pref_points else 0,
-                'pairs_points': float(s.pairs_points) if s.pairs_points else 0,
-                'razobl_points': float(s.razobl_points) if s.razobl_points else 0,
-                'auction_points': float(s.auction_points) if s.auction_points else 0,
-                'mot_points': float(s.mot_points) if s.mot_points else 0,
-                'total_points': float(s.total_points) if s.total_points else 0
-            } for s in scores]
-            return pd.DataFrame(data)
-        finally:
-            session.close()
+        scores = self.db.get_team_game_scores(game_id=game_id)
+        data = [{
+            'game_id': s.game_id,
+            'team_id': s.team_id,
+            'game_date': s.game_date,
+            'team_name': s.team_name,
+            'vybor_points': float(s.vybor_points) if s.vybor_points else 0,
+            'chisla_points': float(s.chisla_points) if s.chisla_points else 0,
+            'pref_points': float(s.pref_points) if s.pref_points else 0,
+            'pairs_points': float(s.pairs_points) if s.pairs_points else 0,
+            'razobl_points': float(s.razobl_points) if s.razobl_points else 0,
+            'auction_points': float(s.auction_points) if s.auction_points else 0,
+            'mot_points': float(s.mot_points) if s.mot_points else 0,
+            'total_points': float(s.total_points) if s.total_points else 0
+        } for s in scores]
+        return pd.DataFrame(data)
 
     def get_all_teams(self) -> pd.DataFrame:
         """
@@ -120,16 +107,12 @@ class GameDataService:
         Returns:
             DataFrame with all teams
         """
-        session = self.db.Session()
-        try:
-            teams = session.query(Team).all()
-            data = [{
-                'team_id': t.team_id,
-                'team_name': t.team_name
-            } for t in teams]
-            return pd.DataFrame(data)
-        finally:
-            session.close()
+        teams = self.db.get_all_teams()
+        data = [{
+            'team_id': t.team_id,
+            'team_name': t.team_name
+        } for t in teams]
+        return pd.DataFrame(data)
 
     def get_team_statistics(self, team_name: str) -> Dict[str, Any]:
         """
@@ -141,54 +124,48 @@ class GameDataService:
         Returns:
             Dictionary with team statistics
         """
-        session = self.db.Session()
-        try:
-            normalized_name = normalize_team_name(team_name)
+        team = self.db.get_team_by_name(team_name)
+        if not team:
+            raise ValueError(f'Team {team_name} not found')
 
-            team = session.query(Team).filter_by(team_name=normalized_name).first()
-            if not team:
-                raise ValueError(f'Team {team_name} not found')
+        scores = self.db.get_team_game_scores(team_id=team.team_id)
 
-            scores = session.query(TeamGameScore).filter_by(team_id=team.team_id).all()
-
-            if not scores:
-                return {
-                    'team_name': team.team_name,
-                    'games_played': 0,
-                    'statistics': {}
-                }
-
-            df = pd.DataFrame([{
-                'game_date': s.game_date,
-                'vybor_points': float(s.vybor_points) if s.vybor_points else 0,
-                'chisla_points': float(s.chisla_points) if s.chisla_points else 0,
-                'pref_points': float(s.pref_points) if s.pref_points else 0,
-                'pairs_points': float(s.pairs_points) if s.pairs_points else 0,
-                'razobl_points': float(s.razobl_points) if s.razobl_points else 0,
-                'auction_points': float(s.auction_points) if s.auction_points else 0,
-                'mot_points': float(s.mot_points) if s.mot_points else 0,
-                'total_points': float(s.total_points) if s.total_points else 0
-            } for s in scores])
-
+        if not scores:
             return {
                 'team_name': team.team_name,
-                'games_played': len(scores),
-                'total_points_sum': df['total_points'].sum(),
-                'total_points_avg': df['total_points'].mean(),
-                'total_points_max': df['total_points'].max(),
-                'total_points_min': df['total_points'].min(),
-                'category_averages': {
-                    'vybor': df['vybor_points'].mean(),
-                    'chisla': df['chisla_points'].mean(),
-                    'pref': df['pref_points'].mean(),
-                    'pairs': df['pairs_points'].mean(),
-                    'razobl': df['razobl_points'].mean(),
-                    'auction': df['auction_points'].mean(),
-                    'mot': df['mot_points'].mean()
-                }
+                'games_played': 0,
+                'statistics': {}
             }
-        finally:
-            session.close()
+
+        df = pd.DataFrame([{
+            'game_date': s.game_date,
+            'vybor_points': float(s.vybor_points) if s.vybor_points else 0,
+            'chisla_points': float(s.chisla_points) if s.chisla_points else 0,
+            'pref_points': float(s.pref_points) if s.pref_points else 0,
+            'pairs_points': float(s.pairs_points) if s.pairs_points else 0,
+            'razobl_points': float(s.razobl_points) if s.razobl_points else 0,
+            'auction_points': float(s.auction_points) if s.auction_points else 0,
+            'mot_points': float(s.mot_points) if s.mot_points else 0,
+            'total_points': float(s.total_points) if s.total_points else 0
+        } for s in scores])
+
+        return {
+            'team_name': team.team_name,
+            'games_played': len(scores),
+            'total_points_sum': df['total_points'].sum(),
+            'total_points_avg': df['total_points'].mean(),
+            'total_points_max': df['total_points'].max(),
+            'total_points_min': df['total_points'].min(),
+            'category_averages': {
+                'vybor': df['vybor_points'].mean(),
+                'chisla': df['chisla_points'].mean(),
+                'pref': df['pref_points'].mean(),
+                'pairs': df['pairs_points'].mean(),
+                'razobl': df['razobl_points'].mean(),
+                'auction': df['auction_points'].mean(),
+                'mot': df['mot_points'].mean()
+            }
+        }
 
     def get_team_wins(self, team_name: str, year: Optional[int] = None) -> Dict[str, Any]:
         """
