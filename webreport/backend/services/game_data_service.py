@@ -322,7 +322,8 @@ class GameDataService:
             end_date = params.get('end_date')
             if start_date:
                 game_ids = self.get_games_by_date_range(start_date, end_date)
-                return self.get_team_game_scores().query(f'game_id in {game_ids}')
+                scores = self.get_team_game_scores()
+                return scores[scores['game_id'].isin(game_ids)]
 
         # Default: return all team game scores
         return self.get_team_game_scores()
