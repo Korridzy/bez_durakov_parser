@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import asyncio
 import logging
+import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -33,6 +34,7 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     """Chat response model."""
     success: bool
+    session_id: str
     data: Optional[Any] = None
     query_info: Optional[Dict[str, Any]] = None
     message: str
@@ -158,8 +160,9 @@ async def chat(message: ChatMessage):
         raise HTTPException(status_code=503, detail="Agent system not available")
 
     try:
-        # Get or create session
-        session_id = message.session_id or "default"
+        # Anonymous callers each get a fresh session so they never share
+        # conversation history or agent state with other clients.
+        session_id = message.session_id or uuid.uuid4().hex
         if session_id not in sessions:
             sessions[session_id] = ReportAgentSystem(service=data_service)
 
@@ -171,6 +174,7 @@ async def chat(message: ChatMessage):
         if result.get("success"):
             return ChatResponse(
                 success=True,
+                session_id=session_id,
                 data=result.get("data"),
                 query_info=result.get("query"),
                 message=result.get("message", "Report generated successfully"),
@@ -179,6 +183,7 @@ async def chat(message: ChatMessage):
         else:
             return ChatResponse(
                 success=False,
+                session_id=session_id,
                 message="Failed to generate report",
                 error=result.get("error", "Unknown error"),
                 timestamp=result.get("timestamp", datetime.now().isoformat())

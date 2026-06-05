@@ -654,6 +654,89 @@ class TestAPI(unittest.TestCase):
         self.assertIn("not found", response.json()["detail"].lower())
         print("✅ API team stats: missing team returns 404")
 
+    def test_regression_chat_without_session_id_assigns_unique_id(self):
+        """Chat without session_id must mint a fresh server-side id, not the literal "default"."""
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        class _StubAgent:
+            def process_user_request(self, _msg):
+                return {"success": True, "message": "ok", "timestamp": "t"}
+
+        main_module.sessions._store.clear()
+        main_module.sessions._accessed.clear()
+
+        with patch.object(main_module, "agent_system", object()), \
+             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+            response = self.client.post("/api/chat", json={"message": "hi"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        sid = body.get("session_id")
+        self.assertIsInstance(sid, str)
+        self.assertTrue(sid, "Response must include a non-empty session_id")
+        self.assertNotEqual(sid, "default", "Server must not fall back to the shared 'default' id")
+        self.assertNotIn("default", main_module.sessions._store,
+                         "Server must not create a shared 'default' session entry")
+        self.assertIn(sid, main_module.sessions._store, "Session must be stored under the assigned id")
+        print("✅ API chat: assigns server-side session_id when client omits it")
+
+    def test_regression_chat_without_session_id_yields_distinct_sessions(self):
+        """Two anonymous chat calls must not collide on a shared session."""
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        class _StubAgent:
+            def process_user_request(self, _msg):
+                return {"success": True, "message": "ok", "timestamp": "t"}
+
+        main_module.sessions._store.clear()
+        main_module.sessions._accessed.clear()
+
+        with patch.object(main_module, "agent_system", object()), \
+             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+            r1 = self.client.post("/api/chat", json={"message": "a"})
+            r2 = self.client.post("/api/chat", json={"message": "b"})
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        sid1 = r1.json().get("session_id")
+        sid2 = r2.json().get("session_id")
+        self.assertTrue(sid1 and sid2)
+        self.assertNotEqual(sid1, sid2, "Anonymous callers must not share session state")
+        print("✅ API chat: anonymous callers get distinct session ids")
+
+    def test_regression_chat_with_explicit_session_id_is_preserved(self):
+        """Client-supplied session_id must be echoed back unchanged."""
+        if self.client is None:
+            self.skipTest("TestClient not available")
+
+        import main as main_module
+
+        class _StubAgent:
+            def process_user_request(self, _msg):
+                return {"success": True, "message": "ok", "timestamp": "t"}
+
+        main_module.sessions._store.clear()
+        main_module.sessions._accessed.clear()
+        explicit = "client-supplied-id-12345"
+
+        with patch.object(main_module, "agent_system", object()), \
+             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+            response = self.client.post(
+                "/api/chat", json={"message": "hi", "session_id": explicit}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("session_id"), explicit,
+                         "Explicit client session_id must be preserved")
+        self.assertIn(explicit, main_module.sessions._store)
+        print("✅ API chat: explicit client session_id is preserved")
+
 
 class TestStartupInitialization(unittest.TestCase):
     @staticmethod
