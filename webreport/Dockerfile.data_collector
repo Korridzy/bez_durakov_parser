@@ -23,8 +23,8 @@ RUN mkdir -p /app
 
 RUN poetry config virtualenvs.create false
 
-# Copy pyproject.toml from build context (code itself is mounted at runtime)
-COPY webreport/data_collector/pyproject.toml /tmp/pyproject.toml
+# Copy locked dependency metadata from the build context (code itself is mounted at runtime).
+COPY webreport/data_collector/pyproject.toml webreport/data_collector/poetry.lock /tmp/
 
 RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
 
