@@ -45,6 +45,7 @@ XLSM_FETCH_TIMEZONE = XLSM_FETCH_CONFIG.get("timezone", "Europe/Belgrade")
 WEBREPORT_BACKEND_PORT = int(config["webreport"].get("backend_port", 28000))
 WEBREPORT_FRONTEND_PORT = int(config["webreport"].get("frontend_port", 28501))
 WEBREPORT_DEBUG = config["webreport"].get("debug", False)
+WEBREPORT_RELOAD = config["webreport"].get("reload", True)
 WEBREPORT_BACKEND_DEBUG_PORT = int(config["webreport"].get("backend_debug_port", 5678))
 WEBREPORT_FRONTEND_DEBUG_PORT = int(config["webreport"].get("frontend_debug_port", 5679))
 WEBREPORT_ALLOWED_ORIGINS = list(config["webreport"].get(

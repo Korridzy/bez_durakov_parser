@@ -14,6 +14,7 @@ backend_port = 28000
 frontend_port = 28501
 allowed_origins = ["http://localhost:28501", "http://127.0.0.1:28501"]
 debug = false
+reload = true
 backend_debug_port = 5678
 frontend_debug_port = 5679
 

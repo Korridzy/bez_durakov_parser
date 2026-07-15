@@ -29,6 +29,7 @@ services:
       - BD_DOCKER=true
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
+      - WEBREPORT_RELOAD=${WEBREPORT_RELOAD}
       - WEBREPORT_BACKEND_DEBUG_PORT=${WEBREPORT_BACKEND_DEBUG_PORT}
     volumes:
       - ./backend:/app
@@ -72,6 +73,7 @@ services:
     environment:
       - API_BASE_URL=http://backend:8000
       - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
+      - WEBREPORT_RELOAD=${WEBREPORT_RELOAD}
       - WEBREPORT_FRONTEND_DEBUG_PORT=${WEBREPORT_FRONTEND_DEBUG_PORT}
     volumes:
       - ./frontend:/app

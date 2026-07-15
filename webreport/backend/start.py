@@ -3,6 +3,9 @@ import os
 import uvicorn
 
 debug_mode = os.getenv("WEBREPORT_DEBUG") == "true"
+reload_enabled = (
+    os.getenv("WEBREPORT_RELOAD", "true") == "true" and not debug_mode
+)
 
 if debug_mode:
     import pydevd_pycharm
@@ -14,4 +17,4 @@ if debug_mode:
 
 if __name__ == "__main__":
     # Disable reload in debug mode to prevent worker from also connecting to debugger
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=not debug_mode)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=reload_enabled)

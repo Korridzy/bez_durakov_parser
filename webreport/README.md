@@ -91,7 +91,7 @@ cd webreport
 
 - `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
 - `[application]` — `debug`, `log_level`, `default_game_date`
-- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `backend_debug_port`, `frontend_debug_port`
+- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 В `modes` сейчас поддерживается только `browser_selenium`.
@@ -105,6 +105,8 @@ cd webreport
 - `http://127.0.0.1:28501`
 
 Для production замените их на реальные доверенные frontend URL и не используйте `*` вместе с credentialed CORS.
+
+`[webreport].reload` управляет автоматической перезагрузкой backend и frontend при изменении кода. Она всегда отключается при `[webreport].debug = true`.
 
 ### Запуск
 
