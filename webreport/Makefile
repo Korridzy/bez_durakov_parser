@@ -89,4 +89,4 @@ fetch-data:
 
 fetch-data-log:
 	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
-	$(DOCKER_COMPOSE) logs data_collector | tac | sed '/Fetch started at/q' | tac
+	$(DOCKER_COMPOSE) logs data_collector | awk '/Fetch started at/ { output = "" } { output = output $$0 ORS } END { printf "%s", output }'
