@@ -15,10 +15,9 @@ RUN apt-get update && apt-get install -y \
 # Code will be mounted as volume at runtime
 RUN mkdir -p /app
 
-# Copy pyproject.toml from build context (will be in mounted volume)
+# Copy locked dependency metadata from the build context.
 # We need to pre-install dependencies before mounting
-# Use a minimal pyproject.toml that gets overridden by mount
-COPY webreport/backend/pyproject.toml /tmp/pyproject.toml
+COPY webreport/backend/pyproject.toml webreport/backend/poetry.lock /tmp/
 
 # Configure poetry to not create virtual env (we're in container)
 RUN poetry config virtualenvs.create false
