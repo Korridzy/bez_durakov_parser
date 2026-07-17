@@ -89,7 +89,12 @@ async def initialize_data_service_with_retry() -> GameDataService:
             return GameDataService()
         except Exception as exc:
             last_error = exc
-            print(f"❌ Database initialization attempt {attempt}/{STARTUP_RETRY_ATTEMPTS} failed: {exc}")
+            logger.warning(
+                "Database initialization attempt %d/%d failed: %s",
+                attempt,
+                STARTUP_RETRY_ATTEMPTS,
+                exc,
+            )
             if attempt < STARTUP_RETRY_ATTEMPTS:
                 await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
 
@@ -108,7 +113,7 @@ async def startup_event():
 
     agent_system = ReportAgentSystem(service=data_service)
 
-    print("✅ Services initialized successfully")
+    logger.info("Services initialized successfully")
 
 
 @app.get("/")
