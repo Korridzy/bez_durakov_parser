@@ -188,13 +188,13 @@ $ python3 validate_setup.py
 
 ```bash
 # Запуск
-make docker-up
+make start
 
 # Остановка
-make docker-down
+make stop
 
 # Логи
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ---

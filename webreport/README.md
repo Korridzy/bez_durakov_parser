@@ -53,7 +53,7 @@ webreport/
 ├── Dockerfile.backend              # Backend image build
 ├── Dockerfile.frontend             # Frontend image build
 ├── Dockerfile.data_collector       # Data collector image build
-├── generate_env.py                 # Generate .env from ../bd_shared/config.toml
+├── generate_env.py                 # Generate Compose/service env files from config.toml
 ├── validate_setup.py               # Validate expected layout and integration files
 ├── Makefile                        # Start/stop/build/test helper commands
 └── README.md                       # Documentation
@@ -97,7 +97,21 @@ cd webreport
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
 
-`generate_env.py` читает эти настройки через `bd_shared/config.py` и генерирует `.env` для Docker Compose.
+`generate_env.py` создаёт общий файл для интерполяции Docker Compose и отдельный env-файл для каждого сервиса. Все файлы создаются сразу с правами `0600`:
+
+| Файл | Назначение |
+|---|---|
+| `.env` | Host-порты для интерполяции Docker Compose |
+| `.env.mysql` | `MYSQL_*` для контейнера MySQL |
+| `.env.backend` | `BD_DOCKER` и debug/reload backend |
+| `.env.data_collector` | `BD_DOCKER` и timezone data collector |
+| `.env.frontend` | URL backend и debug/reload frontend |
+
+Не редактируйте сгенерированные `.env*` вручную. Для изменения настроек обновите `../bd_shared/config.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
+
+Запущенные на хосте `parse_data.py` и Alembic используют `[database].url`. Backend и data collector получают `[database].docker_url` через `bd_shared/config.py`, а контейнер MySQL — сгенерированные из этого URL значения `MYSQL_DATABASE`, `MYSQL_USER` и `MYSQL_PASSWORD`. Для совместимости dev-стека `MYSQL_ROOT_PASSWORD` получает тот же пароль из `docker_url`.
+
+MySQL применяет эти значения при первой инициализации каталога данных. Изменение `config.toml` не меняет пользователей и пароли в уже существующем `../vm/mysql/mysql_data`.
 
 `[webreport].allowed_origins` управляет CORS для backend. По умолчанию используются локальные frontend origins:
 
@@ -119,19 +133,19 @@ make start
 Эта команда:
 
 1. запускает `generate_env.py`
-2. генерирует локальный файл `.env`
+2. генерирует `.env` и отдельные env-файлы сервисов
 3. поднимает `mysql`, `backend`, `frontend` и `data_collector` через Docker Compose
 
 #### Вариант 2: Вручную через Docker Compose
 
 ```bash
 poetry run python generate_env.py
-docker-compose up -d
+docker compose up -d
 ```
 
 ### OpenAI API key (опционально)
 
-`OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не генерируется в `.env`.
+`OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не записывается ни в один сгенерированный env-файл.
 Для полного AutoGen-режима экспортируйте его в shell перед запуском:
 
 ```bash
@@ -146,7 +160,7 @@ make start
 - **API Documentation**: http://localhost:28000/docs
 - **API Health Check**: http://localhost:28000/health
 
-Порты берутся из секции `[webreport]` в `../bd_shared/config.toml` и затем попадают в `.env` через `generate_env.py`.
+Host-порты берутся из секции `[webreport]` в `../bd_shared/config.toml` и попадают в Compose-файл `.env` через `generate_env.py`.
 
 ## 📖 Использование
 
@@ -220,26 +234,26 @@ make start
 
 ### Backend не запускается
 
-1. Проверьте логи: `make logs SERVICE=backend` или `docker-compose logs backend`
-2. Проверьте статус сервисов: `docker-compose ps`
+1. Проверьте логи: `make logs SERVICE=backend` или `docker compose logs backend`
+2. Проверьте статус сервисов: `docker compose ps`
 3. Проверьте настройки в `../bd_shared/config.toml`
 4. Проверьте, что контейнер `mysql` поднят и доступен в Compose-сети
 5. Проверьте подключение backend к MySQL-сервису:
    ```bash
-   docker-compose exec backend sh -lc 'python -c "import socket; print(socket.gethostbyname(\"mysql\"))"'
+   docker compose exec backend sh -lc 'python -c "import socket; print(socket.gethostbyname(\"mysql\"))"'
    ```
 
 Backend в Docker подключается к БД по имени хоста `mysql`, а не через `localhost`.
 
 ### Frontend не может подключиться к Backend
 
-1. Проверьте статус контейнеров: `docker-compose ps`
+1. Проверьте статус контейнеров: `docker compose ps`
 2. Проверьте backend: `curl http://localhost:28000/health`
-3. Проверьте логи: `docker-compose logs frontend`
+3. Проверьте логи: `docker compose logs frontend`
 4. Проверьте переменную `API_BASE_URL` в `docker-compose.yml` — по умолчанию frontend обращается к `http://backend:8000`
 5. Проверьте, что backend отвечает из Compose-сети:
    ```bash
-   docker-compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
+   docker compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
    ```
 
 ### Агенты не работают (fallback mode)
@@ -277,15 +291,15 @@ make build          # Собрать образы
 make rebuild        # Пересобрать и перезапустить
 
 # Отладка
-docker-compose ps                    # Статус контейнеров
-docker-compose logs -f backend       # Логи backend
-docker-compose logs -f frontend      # Логи frontend
-docker-compose logs -f data_collector # Логи data_collector
-docker-compose exec backend sh       # Войти в backend
-docker-compose exec frontend sh      # Войти во frontend
+docker compose ps                    # Статус контейнеров
+docker compose logs -f backend       # Логи backend
+docker compose logs -f frontend      # Логи frontend
+docker compose logs -f data_collector # Логи data_collector
+docker compose exec backend sh       # Войти в backend
+docker compose exec frontend sh      # Войти во frontend
 
 # Очистка
-docker-compose down -v              # Остановить и удалить volumes
+docker compose down -v              # Остановить и удалить volumes
 ```
 
 ## 📝 Разработка

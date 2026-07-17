@@ -18,7 +18,7 @@ webreport/
 ├── Dockerfile.backend                 # Backend container (mounts bd_shared as /bd_shared)
 ├── Dockerfile.frontend                # Frontend container
 ├── Makefile                           # start/stop/restart/logs/build/test/clean
-├── generate_env.py                    # Reads ../bd_shared/config.toml → writes .env
+├── generate_env.py                    # Writes Compose + per-service env files
 ├── backend/test_system.py             # unittest-based tests for services, agents, API
 └── validate_setup.py                  # Pre-flight checks for deployment
 ```
@@ -34,7 +34,7 @@ webreport/
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
 | Source config | `../bd_shared/config.toml` | Sections: `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]` |
-| Generated env | `.env` + `generate_env.py` | Ports/debug/timezone are generated; `OPENAI_API_KEY` comes from shell/docker env |
+| Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; `OPENAI_API_KEY` stays shell-injected |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
 ## CONVENTIONS
@@ -42,7 +42,7 @@ webreport/
 - **Data access**: `GameDataService` → `bd_shared.Database` methods only. Never raw SQL, never new ORM queries
 - **Agent tools**: Agents call `GameDataService` methods — never access DB directly
 - **Dual mode**: System works without OpenAI API key (fallback: `_interpret_request()` with regex). Full mode requires `OPENAI_API_KEY`
-- **Config flow**: `bd_shared/config.toml` → `bd_shared/config.py` → `generate_env.py` → `.env` → `docker-compose.yml` env vars
+- **Config flow**: `bd_shared/config.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
 - **CORS config**: backend reads allowed origins from `bd_shared/config.toml` `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: Backend connects to MySQL at `mysql:3306` (Docker network), not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
@@ -59,11 +59,11 @@ webreport/
 ## COMMANDS
 
 ```bash
-make start      # docker-compose up -d (generates .env first)
-make stop       # docker-compose down
-make restart    # docker-compose restart
-make logs       # docker-compose logs -f
-make build      # docker-compose build
+make start      # docker compose up -d (generates all env files first)
+make stop       # docker compose down
+make restart    # regenerate env files, then docker compose up -d
+make logs       # docker compose logs -f
+make build      # docker compose build
 make rebuild    # down + build + up
 make test       # Run backend/test_system.py in backend container
 make clean      # Remove __pycache__, .pyc files

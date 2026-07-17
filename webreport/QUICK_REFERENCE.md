@@ -48,7 +48,7 @@ webreport/
 ├── backend/          # FastAPI + agents + services + tests
 ├── frontend/         # Streamlit
 ├── data_collector/   # XLSM fetch scheduler
-├── generate_env.py   # Генерация .env из ../bd_shared/config.toml
+├── generate_env.py   # Генерация Compose/service env-файлов
 ├── *.md              # Документация
 └── backend/test_system.py    # Тесты
 ```
@@ -73,7 +73,7 @@ lsof -i :28000
 curl http://localhost:28000/health
 
 # Проверить статус контейнеров
-docker-compose ps
+docker compose ps
 ```
 
 ### Общая диагностика
@@ -100,8 +100,8 @@ pkill -f streamlit
 ```bash
 cat ../bd_shared/config.toml
 
-# Сгенерировать .env для docker-compose
-poetry run python generate_env.py
+# Сгенерировать Compose/service env-файлы
+make generate-env
 
 # Для полного AutoGen режима (опционально)
 export OPENAI_API_KEY=your-openai-api-key-here
@@ -169,16 +169,18 @@ python3 validate_setup.py
 
 ```bash
 # Запуск
-docker-compose up -d
+poetry run python generate_env.py
+docker compose up -d
 
 # Остановка
-docker-compose down
+docker compose down
 
 # Логи
-docker-compose logs -f
+docker compose logs -f
 
 # Пересборка
-docker-compose up -d --build
+poetry run python generate_env.py
+docker compose up -d --build
 ```
 
 ## 📖 Документация

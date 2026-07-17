@@ -1,5 +1,6 @@
-# Generated environment file
+# Generated environment files
 .env
+.env.*
 
 # Python cache
 __pycache__/

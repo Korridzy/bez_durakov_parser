@@ -1,15 +1,11 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
     container_name: webreport-mysql
     restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: bez_durakov
-      MYSQL_ROOT_PASSWORD: devpass
-      MYSQL_USER: durak
-      MYSQL_PASSWORD: devpass
+    env_file:
+      - path: .env.mysql
+        required: false
     ports:
       - "3306:3306"
     volumes:
@@ -25,12 +21,11 @@ services:
     container_name: webreport-backend
     ports:
       - "${WEBREPORT_BACKEND_PORT}:8000"
+    env_file:
+      - path: .env.backend
+        required: false
     environment:
-      - BD_DOCKER=true
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
-      - WEBREPORT_RELOAD=${WEBREPORT_RELOAD}
-      - WEBREPORT_BACKEND_DEBUG_PORT=${WEBREPORT_BACKEND_DEBUG_PORT}
     volumes:
       - ./backend:/app
       - ../bd_shared:/bd_shared:ro
@@ -50,9 +45,9 @@ services:
     command: python entrypoint.py
     init: true
     stop_grace_period: 1200s
-    environment:
-      - BD_DOCKER=true
-      - TZ=${TIMEZONE:-Europe/Belgrade}
+    env_file:
+      - path: .env.data_collector
+        required: false
     volumes:
       - ./data_collector:/app
       - ../bd_shared:/bd_shared:ro
@@ -70,11 +65,9 @@ services:
     container_name: webreport-frontend
     ports:
       - "${WEBREPORT_FRONTEND_PORT}:8501"
-    environment:
-      - API_BASE_URL=http://backend:8000
-      - WEBREPORT_DEBUG=${WEBREPORT_DEBUG}
-      - WEBREPORT_RELOAD=${WEBREPORT_RELOAD}
-      - WEBREPORT_FRONTEND_DEBUG_PORT=${WEBREPORT_FRONTEND_DEBUG_PORT}
+    env_file:
+      - path: .env.frontend
+        required: false
     volumes:
       - ./frontend:/app
     extra_hosts:

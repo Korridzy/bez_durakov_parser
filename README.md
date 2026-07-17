@@ -33,7 +33,7 @@
 
 На этом этапе будет создана виртуальная среда в каталоге `/your/comfortable/path/bez_durakov_parser/.venv`, и в неё будут установлены все необходимые зависимости.
 
-Далее необходимо прописать в `bd_shared/config.toml` строку доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
+Далее необходимо прописать в `bd_shared/config.toml` параметры доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
 
 ```bash
 $ make mysql-start
@@ -44,8 +44,11 @@ $ make mysql-start
 ```toml
 [database]
 url = "mysql+pymysql://durak:devpass@localhost:3306/bez_durakov"
+docker_url = "mysql+pymysql://durak:devpass@mysql:3306/bez_durakov"
 sqlalchemy_logging = false
 ```
+
+`url` используется командами на хосте, а `docker_url` — backend и data collector внутри Docker. Команда `make mysql-start` генерирует в `webreport/` общий Compose env-файл и отдельные env-файлы сервисов перед запуском контейнера MySQL.
 
 В конфиге имеется закомментированная строка подключения в качестве примера для подключения к удалённой базе данных с SSL:
 
@@ -130,10 +133,12 @@ $ python four_buckets.py
 $ make webreport-start
 ```
 
-После запуска доступны:
+После запуска по умолчанию доступны:
 - **Frontend** (Streamlit UI): http://localhost:28501
 - **Backend API**: http://localhost:28000
 - **API документация**: http://localhost:28000/docs
+
+Фактические порты берутся из секции `[webreport]` в `bd_shared/config.toml` и выводятся командой запуска.
 
 Остановка:
 

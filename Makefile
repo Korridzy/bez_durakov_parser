@@ -126,9 +126,9 @@ webreport-start:
 	@echo ""
 	@echo "✅ WebReport запущен!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🎨 Frontend:  http://localhost:28501"
-	@echo "🔌 Backend:   http://localhost:28000"
-	@echo "📚 API Docs:  http://localhost:28000/docs"
+	@echo "🎨 Frontend:  http://localhost:$$(grep WEBREPORT_FRONTEND_PORT webreport/.env | cut -d'=' -f2)"
+	@echo "🔌 Backend:   http://localhost:$$(grep WEBREPORT_BACKEND_PORT webreport/.env | cut -d'=' -f2)"
+	@echo "📚 API Docs:  http://localhost:$$(grep WEBREPORT_BACKEND_PORT webreport/.env | cut -d'=' -f2)/docs"
 	@echo "🗄️  MySQL:    localhost:3306"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -139,7 +139,7 @@ webreport-stop:
 # MySQL only management
 mysql-start:
 	@echo "🗄️  Запуск MySQL..."
-	cd webreport && $(DOCKER_COMPOSE) up -d mysql
+	cd webreport && poetry run python generate_env.py && $(DOCKER_COMPOSE) up -d mysql
 	@echo "✅ MySQL запущен на localhost:3306"
 
 mysql-stop:

@@ -1,12 +1,13 @@
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help test clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env test clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
 	@echo "=========================================="
 	@echo ""
 	@echo "Docker Operations:"
+	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
 	@echo "  make restart     - Restart services"
@@ -29,9 +30,11 @@ help:
 	@echo "  make logs SERVICE=backend"
 	@echo ""
 
-start:
-	@echo "🐳 Starting services with Docker Compose..."
+generate-env:
 	poetry run python generate_env.py
+
+start: generate-env
+	@echo "🐳 Starting services with Docker Compose..."
 	$(DOCKER_COMPOSE) up -d
 	@echo ""
 	@echo "✅ Services started!"
@@ -49,28 +52,27 @@ stop:
 	$(DOCKER_COMPOSE) down
 	@echo "✅ Containers stopped"
 
-restart:
+restart: generate-env
 	@echo "🔄 Restarting services..."
-	$(DOCKER_COMPOSE) restart
+	$(DOCKER_COMPOSE) up -d
 	@echo "✅ Services restarted"
 
 logs:
 	$(DOCKER_COMPOSE) logs -f $(SERVICE)
 
-build:
+build: generate-env
 	@echo "🔨 Building Docker images..."
 	$(DOCKER_COMPOSE) build
 	@echo "✅ Build complete"
 
-rebuild:
+rebuild: generate-env
 	@echo "🔨 Rebuilding and restarting services..."
-	poetry run python generate_env.py
 	$(DOCKER_COMPOSE) down
 	$(DOCKER_COMPOSE) build
 	$(DOCKER_COMPOSE) up -d
 	@echo "✅ Services rebuilt and started"
 
-test:
+test: generate-env
 	@echo "🧪 Running tests in Docker..."
 	$(DOCKER_COMPOSE) run --rm backend python /app/test_system.py
 	@echo ""
@@ -83,7 +85,7 @@ clean:
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	@echo "✅ Cleanup complete"
 
-fetch-data:
+fetch-data: generate-env
 	@echo "🔄 Starting manual XLSM fetch..."
 	$(DOCKER_COMPOSE) exec -T data_collector python fetch_pipeline.py
 

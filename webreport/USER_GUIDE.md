@@ -30,22 +30,23 @@
 ```bash
 cd webreport
 make start
-# ИЛИ
-docker-compose up -d
+# ИЛИ вручную
+poetry run python generate_env.py
+docker compose up -d
 ```
 
 **Остановка:**
 ```bash
 make stop
 # ИЛИ
-docker-compose down
+docker compose down
 ```
 
 **Просмотр логов:**
 ```bash
 make logs
 # ИЛИ
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### Доступ к системе
@@ -252,27 +253,27 @@ A: Да, в fallback режиме. Некоторые сложные запро�
 **Q: Backend не запускается**
 
 A: Проверьте:
-1. Docker контейнеры запущены: `docker-compose ps`
-2. Логи контейнера: `make logs` или `docker-compose logs backend`
-3. База данных доступна на хосте через host.docker.internal:3306
+1. Docker контейнеры запущены: `docker compose ps`
+2. Логи контейнера: `make logs` или `docker compose logs backend`
+3. Контейнер MySQL доступен backend по имени `mysql` на порту `3306`
 4. Файл bd_shared/config.toml существует в родительской директории
 
 **Q: Frontend показывает "API недоступен"**
 
 A: 
 1. Проверьте статус backend: `curl http://localhost:28000/health`
-2. Проверьте контейнеры: `docker-compose ps`
-3. Посмотрите логи: `docker-compose logs frontend`
+2. Проверьте контейнеры: `docker compose ps`
+3. Посмотрите логи: `docker compose logs frontend`
 4. Перезапустите: `make restart`
 
 **Q: Ошибка "Database connection failed"**
 
 A:
-1. Проверьте что MySQL запущена на хосте
+1. Проверьте сервис MySQL: `docker compose ps mysql`
 2. Проверьте настройки в `../bd_shared/config.toml`
 3. Проверьте подключение из контейнера:
    ```bash
-   docker-compose exec backend ping host.docker.internal
+   docker compose exec backend python -c "import socket; print(socket.gethostbyname('mysql'))"
    ```
 
 **Q: Как использовать с настоящими AI агентами?**
@@ -281,7 +282,7 @@ A:
 1. Убедитесь, что `bd_shared/config.toml` настроен для WebReport
 2. Экспортируйте OpenAI API ключ в shell: `export OPENAI_API_KEY=ваш-ключ`
 3. Запустите или перезапустите стек: `make start` / `make restart`
-4. Учтите, что `.env` для Docker Compose генерируется `generate_env.py` из `bd_shared/config.toml`
+4. Учтите, что Compose и service env-файлы генерируются `generate_env.py` из `bd_shared/config.toml`
 
 ### Вопросы по данным
 

@@ -43,7 +43,7 @@ webreport/
 ### Конфигурация
 ```
 webreport/
-├── generate_env.py      - Генерирует `.env` из `../bd_shared/config.toml`
+├── generate_env.py      - Генерирует Compose/service env-файлы из `config.toml`
 └── docker-compose.yml   - Docker конфигурация
 ```
 
@@ -66,21 +66,22 @@ webreport/
 ### Запуск (Docker только)
 ```bash
 make start
-# ИЛИ
-docker-compose up -d
+# ИЛИ вручную
+poetry run python generate_env.py
+docker compose up -d
 ```
 
 ### Остановка
 ```bash
 make stop
 # ИЛИ
-docker-compose down
+docker compose down
 ```
 
 ### Логи и проверка
 ```bash
 make logs                 # Просмотр логов
-docker-compose ps         # Статус контейнеров
+docker compose ps         # Статус контейнеров
 python3 validate_setup.py # Проверка файлов
 ```
 
@@ -128,7 +129,7 @@ cd webreport
 python3 validate_setup.py
 
 # Проверка контейнеров
-docker-compose ps
+docker compose ps
 
 # Проверка здоровья API
 curl http://localhost:28000/health
