@@ -45,7 +45,9 @@ def write_env_file(file_name: str, values: dict[str, str]) -> None:
         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
         0o600,
     )
-    os.fchmod(file_descriptor, 0o600)
+    fchmod = getattr(os, "fchmod", None)
+    if fchmod is not None:
+        fchmod(file_descriptor, 0o600)
     with os.fdopen(file_descriptor, "w", encoding="utf-8") as env_file:
         _ = env_file.write(content)
 
