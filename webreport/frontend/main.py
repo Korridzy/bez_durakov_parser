@@ -105,7 +105,7 @@ def get_conversation_history() -> List[Dict[str, Any]]:
         response.raise_for_status()
         data = response.json()
         return data.get("history", [])
-    except:
+    except requests.exceptions.RequestException:
         return []
 
 
