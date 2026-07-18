@@ -97,6 +97,7 @@ class ReportAgentSystem:
                 - get_all_teams(): Get all teams
                 - get_team_statistics(team_name): Get statistics for a team
                 - get_team_wins(team_name, year=None): Get games won by a team (optionally filtered by year)
+                - get_top_teams(limit=10): Get top teams by total points
 
                 When user asks for a report, respond with a JSON object containing:
                 {
@@ -359,7 +360,7 @@ class ReportAgentSystem:
             "get_all_teams": self.service.get_all_teams,
             "get_team_statistics": self.service.get_team_statistics,
             "get_team_wins": self.service.get_team_wins,
-            "get_top_teams": self.service._get_top_teams,
+            "get_top_teams": self.service.get_top_teams,
         }
 
         method = method_map.get(method_name)
