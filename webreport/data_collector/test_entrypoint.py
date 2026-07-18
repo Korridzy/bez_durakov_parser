@@ -21,8 +21,12 @@ class ParseStartTimeTests(unittest.TestCase):
         self.assertEqual(_parse_start_time("20:00"), (20, 0))
 
     def test_hour_too_high(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             _parse_start_time("24:00")
+        self.assertEqual(
+            str(context.exception),
+            "Invalid start_time: '24:00'. Expected hour 00-23 and minute 00-59.",
+        )
 
     def test_hour_negative(self):
         with self.assertRaises(ValueError):

@@ -15,7 +15,7 @@ def _parse_start_time(value):
         ) from exc
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         raise ValueError(
-            f"Invalid start_time: {value!r}. Expected HH:MM format."
+            f"Invalid start_time: {value!r}. Expected hour 00-23 and minute 00-59."
         )
     return hour, minute
 
