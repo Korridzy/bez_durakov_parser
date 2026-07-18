@@ -6,10 +6,13 @@ Uses AutoGen framework to orchestrate agent conversations.
 import os
 import sys
 import importlib
+import logging
 from datetime import datetime, date
 import json
 from textwrap import dedent
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # No need to add path, services is in same app
 from services.game_data_service import GameDataService
@@ -48,12 +51,12 @@ class ReportAgentSystem:
         if agentchat_available and self.api_key:
             try:
                 self._setup_agents()
-            except Exception as e:
+            except Exception:
                 self.agents_available = False
-                print(f"Agents not available ({e}). Using fallback mode.")
+                logger.warning("Agent setup failed; using fallback mode", exc_info=True)
         else:
             self.agents_available = False
-            print("Agents not available. Using fallback mode.")
+            logger.info("Agents unavailable; using fallback mode")
 
     def _setup_agents(self):
         """Setup AutoGen agents."""

@@ -4,7 +4,7 @@ Uses existing db.py and db_helpers.py methods.
 """
 import sys
 import os
-import traceback
+import logging
 from typing import List, Dict, Optional, Any
 from datetime import date, datetime
 import pandas as pd
@@ -14,6 +14,8 @@ sys.path.insert(0, '/')
 
 from bd_shared.db import normalize_team_name
 from bd_shared.db_helpers import initialize_database
+
+logger = logging.getLogger(__name__)
 
 
 class GameDataService:
@@ -55,9 +57,8 @@ class GameDataService:
             return bd_game.get_data()
         except ValueError:
             return None
-        except Exception as e:
-            print(f"Error getting game {game_id}: {e}")
-            print(traceback.format_exc())
+        except Exception:
+            logger.exception("Error getting game %s", game_id)
             raise
 
     def get_games_by_date_range(self, start_date: date, end_date: Optional[date] = None) -> List[int]:

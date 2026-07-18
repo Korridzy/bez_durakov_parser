@@ -13,6 +13,7 @@ from .bd_game import BdGame
 logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 if SQLALCHEMY_LOGGING:
     logging.getLogger("sqlalchemy.engine").setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+logger = logging.getLogger(__name__)
 
 # Base class for all models
 Base = declarative_base()
@@ -414,9 +415,9 @@ class Database:
 
             session.commit()
             return True
-        except Exception as e:
+        except Exception:
             session.rollback()
-            print(f"Error adding game data: {e}")
+            logger.exception("Error adding game data")
             return False
         finally:
             session.close()

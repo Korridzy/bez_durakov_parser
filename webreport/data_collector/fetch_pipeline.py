@@ -48,22 +48,20 @@ def process_downloaded_files(files, download_dir):
         tuple: (successful_parses, successful_saves)
     """
     if not files:
-        print("No files to process")
+        logger.info("No files to process")
         return 0, 0
 
     if download_dir is None:
-        print("❌ Download directory is not configured")
+        logger.error("Download directory is not configured")
         return 0, 0
 
     # Initialize database connection
     db = initialize_database()
     if not db:
-        print("❌ Failed to initialize database connection")
+        logger.error("Failed to initialize database connection")
         return 0, 0
 
-    print(f"\n{'='*60}")
-    print(f"PROCESSING DOWNLOADED FILES")
-    print(f"{'='*60}")
+    logger.info("Processing downloaded files")
 
     successful_parses = 0
     successful_saves = 0
@@ -79,37 +77,43 @@ def process_downloaded_files(files, download_dir):
 
         file_path = Path(download_dir) / file_name
 
-        print(f"\nProcessing: {file_name}")
+        logger.info("Processing downloaded file: %s", file_name)
 
         if not file_path.exists():
-            print(f"❌ File not found locally: {file_path}")
+            logger.warning("Downloaded file not found locally: %s", file_path)
             continue
 
         game = BdGame()
 
         if game.parse_from_file(str(file_path)):
             successful_parses += 1
-            print(f"✅ Successfully parsed: {file_name}")
+            logger.info("Successfully parsed downloaded file: %s", file_name)
 
             if save_game_to_database(game, db):
                 successful_saves += 1
             else:
-                print(f"⚠️ Failed to save to database: {file_name}")
+                logger.warning("Failed to save downloaded file to database: %s", file_name)
         else:
-            print(f"❌ Failed to parse: {file_name}")
+            logger.error("Failed to parse downloaded file: %s", file_name)
 
-    print(f"\n{'='*60}")
-    print(f"PROCESSING SUMMARY")
-    print(f"{'='*60}")
-    print(f"Files processed: {len(normalized_files)}")
-    print(f"Successfully parsed: {successful_parses}")
-    print(f"Successfully saved to database: {successful_saves}")
+    logger.info(
+        "Downloaded file processing completed: files=%d parsed=%d saved=%d",
+        len(normalized_files),
+        successful_parses,
+        successful_saves,
+    )
 
     if successful_parses < len(normalized_files):
-        print(f"Failed to parse: {len(normalized_files) - successful_parses}")
+        logger.warning(
+            "Downloaded files failed to parse: %d",
+            len(normalized_files) - successful_parses,
+        )
 
     if successful_saves < successful_parses:
-        print(f"Failed to save: {successful_parses - successful_saves}")
+        logger.warning(
+            "Parsed files failed to save: %d",
+            successful_parses - successful_saves,
+        )
 
     return successful_parses, successful_saves
 

@@ -1,6 +1,10 @@
+import logging
+import warnings
+
 from .config import DATABASE_URL, DEFAULT_GAME_DATE
 from .db import Database, normalize_team_name
-import warnings
+
+logger = logging.getLogger(__name__)
 
 
 # Re-export normalize_team_name for backwards compatibility
@@ -16,10 +20,10 @@ def initialize_database():
     """
     try:
         db = Database(DATABASE_URL)
-        print(f"Connected to database: {DATABASE_URL}")
+        logger.info("Database connection established")
         return db
-    except Exception as e:
-        print(f"❌ Failed to connect to database: {e}")
+    except Exception:
+        logger.exception("Failed to connect to database")
         return None
 
 
@@ -59,8 +63,11 @@ def save_game_to_database(game_instance, db):
         identical_game = db.find_identical_game(game_instance)
 
         if identical_game:
-            print(f"ℹ️ Identical game from {game_data['date'].strftime('%d.%m.%Y')} already exists in the database. "
-                  f"Id: {identical_game.get_data()['game_id']}. Skipping.")
+            logger.info(
+                "Identical game already exists; skipping: date=%s game_id=%s",
+                game_data['date'].strftime('%d.%m.%Y'),
+                identical_game.get_data()['game_id'],
+            )
             return False
 
         # Check if there are any games with the same date in the database
@@ -80,11 +87,17 @@ def save_game_to_database(game_instance, db):
 
         # Display success/error message
         if success:
-            print(f"✅ Data for game from {game_data['date'].strftime('%d.%m.%Y')} successfully saved to database")
+            logger.info(
+                "Game successfully saved to database: date=%s",
+                game_data['date'].strftime('%d.%m.%Y'),
+            )
             return True
         else:
-            print(f"❌ Error saving game from {game_data['date'].strftime('%d.%m.%Y')} to database")
+            logger.error(
+                "Failed to save game to database: date=%s",
+                game_data['date'].strftime('%d.%m.%Y'),
+            )
             return False
-    except Exception as e:
-        print(f"❌ Database error: {e}")
+    except Exception:
+        logger.exception("Database error while saving game")
         return False

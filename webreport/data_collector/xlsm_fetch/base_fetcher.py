@@ -1,7 +1,10 @@
 """Base fetcher for xlsm_fetch package."""
 
+import logging
 from typing import List, Dict, Optional
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class BaseFetcher:
@@ -35,6 +38,12 @@ class BaseFetcher:
         """
         raise NotImplementedError
 
-    def _log(self, msg: str) -> None:
+    def _log(
+        self,
+        msg: str,
+        *,
+        level: int = logging.INFO,
+        exc_info: bool = False,
+    ) -> None:
         """Simple logging helper; subclasses can override if needed."""
-        print(msg)
+        logger.log(level, "%s", msg, exc_info=exc_info)
