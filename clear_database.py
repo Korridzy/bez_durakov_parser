@@ -4,7 +4,7 @@ Script to clear all data from the database using existing ORM methods.
 """
 
 import argparse
-from db import Database, Team
+from bd_shared.db import Database, Team
 
 def clear_database(clear_teams=False):
     """

@@ -1,0 +1,83 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: webreport-mysql
+    restart: unless-stopped
+    env_file:
+      - path: .env.mysql
+        required: false
+    ports:
+      - "3306:3306"
+    volumes:
+      - ../vm/mysql/mysql_data:/var/lib/mysql
+    networks:
+      - webreport-network
+    command: --default-authentication-plugin=mysql_native_password
+
+  backend:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.backend
+    container_name: webreport-backend
+    ports:
+      - "${WEBREPORT_BACKEND_PORT}:8000"
+    env_file:
+      - path: .env.backend
+        required: false
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - ./backend:/app
+      - ../bd_shared:/bd_shared:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webreport-network
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  data_collector:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.data_collector
+    container_name: webreport-data-collector
+    command: python entrypoint.py
+    init: true
+    stop_grace_period: 1200s
+    env_file:
+      - path: .env.data_collector
+        required: false
+    volumes:
+      - ./data_collector:/app
+      - ../bd_shared:/bd_shared:ro
+      - ../xlsm_archive:/app/xlsm_archive
+    depends_on:
+      - mysql
+    networks:
+      - webreport-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.frontend
+    container_name: webreport-frontend
+    ports:
+      - "${WEBREPORT_FRONTEND_PORT}:8501"
+    env_file:
+      - path: .env.frontend
+        required: false
+    volumes:
+      - ./frontend:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+    networks:
+      - webreport-network
+    restart: unless-stopped
+
+networks:
+  webreport-network:
+    driver: bridge

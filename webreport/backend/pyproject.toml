@@ -1,0 +1,25 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "webreport-backend"
+version = "1.0.0"
+description = "Backend API for game data reporting system"
+authors = [
+    "Korridzy <korridzy.pub@gmail.com>"
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+fastapi = ">=0.104.0"
+uvicorn = {extras = ["standard"], version = ">=0.24.0"}
+pydantic = ">=2.0.0"
+python-dotenv = ">=1.0.0"
+pandas = ">=2.0.0"
+sqlalchemy = ">=2.0.0"
+pymysql = {extras = ["rsa"], version = ">=1.1.0"}
+pyautogen = ">=0.2.0"
+autogen-ext = {extras = ["openai"], version = ">=0.7.5"}
+pydevd-pycharm = "~=252.27397.106"
+requests = ">=2.31.0"

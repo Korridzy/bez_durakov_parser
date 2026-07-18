@@ -2,6 +2,7 @@
 
 import time
 import re
+import logging
 from typing import List, Dict, Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -43,9 +44,7 @@ class SeleniumFetcher(BaseFetcher):
         target_download_dir = self.download_dir
 
         # Create custom Chrome profile with download settings
-        # Use project_root, set in BaseFetcher
-        project_root = self.project_root
-        temp_profile_dir = project_root / "temp_chrome_profile"
+        temp_profile_dir = Path("/tmp/temp_chrome_profile")
         temp_profile_dir.mkdir(exist_ok=True)
 
         # Create Preferences file manually
@@ -75,7 +74,7 @@ class SeleniumFetcher(BaseFetcher):
             try:
                 chrome_options.add_argument("--headless=new")
                 chrome_options.add_argument("--hide-scrollbars")
-                chrome_options.add_argument("--single-process")
+                # Note: --single-process is omitted — it causes browser session drops in Docker
             except Exception:
                 # fallback to older headless flag if --headless=new isn't supported
                 try:
@@ -115,13 +114,19 @@ class SeleniumFetcher(BaseFetcher):
             # Step 2: Find and click download button
             download_success = self._find_download_button_by_properties(driver)
             if not download_success:
-                self._log("❌ Failed to find or click download button")
+                self._log(
+                    "❌ Failed to find or click download button",
+                    level=logging.ERROR,
+                )
                 return []
 
             # Step 3: Wait for download to complete
             zip_path = self._wait_for_download_completion(driver, target_download_dir)
             if not zip_path:
-                self._log("❌ Download did not complete successfully")
+                self._log(
+                    "❌ Download did not complete successfully",
+                    level=logging.ERROR,
+                )
                 return []
 
             # Step 4: Process downloaded archive
@@ -132,7 +137,11 @@ class SeleniumFetcher(BaseFetcher):
             return added_files
 
         except Exception as e:
-            self._log(f"Error during Selenium fetch: {e}")
+            self._log(
+                f"Error during Selenium fetch: {e}",
+                level=logging.ERROR,
+                exc_info=True,
+            )
             return []
 
         finally:
@@ -144,7 +153,11 @@ class SeleniumFetcher(BaseFetcher):
                 try:
                     shutil.rmtree(temp_profile_dir)
                 except Exception as cleanup_ex:
-                    self._log(f"Warning: Could not cleanup temp profile: {cleanup_ex}")
+                    self._log(
+                        f"Warning: Could not cleanup temp profile: {cleanup_ex}",
+                        level=logging.WARNING,
+                        exc_info=True,
+                    )
 
     def _scroll_and_select_files(self, driver) -> None:
         """Scroll through the file list to load all files and select them all.
@@ -212,7 +225,7 @@ class SeleniumFetcher(BaseFetcher):
                 ActionChains(driver).send_keys(Keys.CONTROL, 'a').perform()
                 self._log('Sent Ctrl+A (fallback)')
             except Exception:
-                self._log('Failed to send Ctrl+A')
+                self._log('Failed to send Ctrl+A', level=logging.WARNING)
 
         # wait for the selection to be registered and toolbar to appear
         time.sleep(10)
@@ -332,7 +345,10 @@ class SeleniumFetcher(BaseFetcher):
                     })
 
                 except Exception as ex:
-                    self._log(f"Error checking element: {ex}")
+                    self._log(
+                        f"Error checking element: {ex}",
+                        level=logging.WARNING,
+                    )
                     continue
 
             self._log(f"✅ Found {len(matching_elements)} elements matching all criteria")
@@ -357,14 +373,25 @@ class SeleniumFetcher(BaseFetcher):
                     return True  # Download button found and clicked
 
                 except Exception as ex:
-                    self._log(f"❌ Error focusing and pressing space on download button: {ex}")
+                    self._log(
+                        f"❌ Error focusing and pressing space on download button: {ex}",
+                        level=logging.ERROR,
+                        exc_info=True,
+                    )
                     return False
             else:
-                self._log("❌ No suitable download button found to activate")
+                self._log(
+                    "❌ No suitable download button found to activate",
+                    level=logging.WARNING,
+                )
                 return False
 
         except Exception as ex:
-            self._log(f"❌ Error during property-based search: {ex}")
+            self._log(
+                f"❌ Error during property-based search: {ex}",
+                level=logging.ERROR,
+                exc_info=True,
+            )
             return False
 
     def _wait_for_download_completion(self, driver, target_download_dir):
@@ -415,7 +442,10 @@ class SeleniumFetcher(BaseFetcher):
                     self._log(f"📦 File size: {zip_path.stat().st_size} bytes")
                     return zip_path
                 else:
-                    self._log(f"⚠️ Zip file exists but may be incomplete: {zip_file} ({elapsed_time}s)")
+                    self._log(
+                        f"⚠️ Zip file exists but may be incomplete: {zip_file} ({elapsed_time}s)",
+                        level=logging.WARNING,
+                    )
 
             # Check if any new files appeared
             if new_files:
@@ -423,7 +453,10 @@ class SeleniumFetcher(BaseFetcher):
             else:
                 self._log(f"⏳ Still waiting for download... ({elapsed_time}s)")
 
-        self._log(f"⏰ Download wait timeout after {max_wait_time} seconds")
+        self._log(
+            f"⏰ Download wait timeout after {max_wait_time} seconds",
+            level=logging.WARNING,
+        )
 
         # List all files in target directory for debugging
         if target_download_dir.exists():
@@ -454,7 +487,11 @@ class SeleniumFetcher(BaseFetcher):
                     zf.extractall(tmp_dir)
                 self._log(f"✅ Extracted archive to temporary dir: {tmp_dir}")
             except Exception as ex:
-                self._log(f"❌ Failed to extract archive: {ex}")
+                self._log(
+                    f"❌ Failed to extract archive: {ex}",
+                    level=logging.ERROR,
+                    exc_info=True,
+                )
                 return []
 
             # Helper to compute SHA256 of a file
@@ -500,7 +537,11 @@ class SeleniumFetcher(BaseFetcher):
                     added_files.append(dest_path.name)
                     self._log(f"➕ Added file: {dest_path.name}")
                 except Exception as ex:
-                    self._log(f"❌ Error while handling extracted file {ef}: {ex}")
+                    self._log(
+                        f"❌ Error while handling extracted file {ef}: {ex}",
+                        level=logging.WARNING,
+                        exc_info=True,
+                    )
 
             if not added_files:
                 self._log("ℹ️ No new files to add from the archive")
@@ -515,14 +556,22 @@ class SeleniumFetcher(BaseFetcher):
                 zip_path.unlink()
                 self._log(f"🗑️ Removed downloaded archive: {zip_path}")
             except Exception as ex:
-                self._log(f"⚠️ Could not remove archive {zip_path}: {ex}")
+                self._log(
+                    f"⚠️ Could not remove archive {zip_path}: {ex}",
+                    level=logging.WARNING,
+                    exc_info=True,
+                )
 
             # Cleanup temporary extraction directory
             try:
                 shutil.rmtree(tmp_dir)
                 self._log(f"🗑️ Removed temporary extraction dir: {tmp_dir}")
             except Exception as ex:
-                self._log(f"⚠️ Could not remove temp dir {tmp_dir}: {ex}")
+                self._log(
+                    f"⚠️ Could not remove temp dir {tmp_dir}: {ex}",
+                    level=logging.WARNING,
+                    exc_info=True,
+                )
 
     def _analyze_element_details(self, driver, elem):
         """Analyze element details (same as before but extracted to separate method)."""
@@ -690,7 +739,11 @@ class SeleniumFetcher(BaseFetcher):
             self._log(f"🔍 ALTERNATIVE SELECTORS: {alt_selectors}")
 
         except Exception as ex:
-            self._log(f"❌ Error analyzing element: {ex}")
+            self._log(
+                f"❌ Error analyzing element: {ex}",
+                level=logging.WARNING,
+                exc_info=True,
+            )
 
     def _analyze_download_button(self, driver):
         """Find and analyze 'Скачать все' button with detailed property extraction."""
@@ -702,7 +755,10 @@ class SeleniumFetcher(BaseFetcher):
             elements = driver.find_elements(By.XPATH, xpath_exact)
 
             if not elements:
-                self._log("❌ No element with exact text 'Скачать все' found")
+                self._log(
+                    "❌ No element with exact text 'Скачать все' found",
+                    level=logging.WARNING,
+                )
                 return
 
             self._log(f"✅ Found {len(elements)} element(s) with exact text 'Скачать все'")
@@ -874,7 +930,15 @@ class SeleniumFetcher(BaseFetcher):
                     self._log(f"🔍 ALTERNATIVE SELECTORS: {alt_selectors}")
 
                 except Exception as ex:
-                    self._log(f"❌ Error analyzing element #{i}: {ex}")
+                    self._log(
+                        f"❌ Error analyzing element #{i}: {ex}",
+                        level=logging.WARNING,
+                        exc_info=True,
+                    )
 
         except Exception as ex:
-            self._log(f"❌ Error during download button analysis: {ex}")
+            self._log(
+                f"❌ Error during download button analysis: {ex}",
+                level=logging.WARNING,
+                exc_info=True,
+            )

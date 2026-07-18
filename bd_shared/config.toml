@@ -1,5 +1,6 @@
 [database]
 url = "mysql+pymysql://durak:devpass@localhost:3306/bez_durakov"
+docker_url = "mysql+pymysql://durak:devpass@mysql:3306/bez_durakov"
 #url = "mysql+pymysql://username:password@srv_address:port/db_name?ssl_ca=/path/to/ca.pem&ssl_cert=/path/to/client-cert.pem&ssl_key=/path/to/client-key.pem"
 sqlalchemy_logging = false
 
@@ -8,10 +9,23 @@ debug = true
 log_level = "INFO"
 default_game_date = "02.03.2022"
 
+[webreport]
+backend_port = 28000
+frontend_port = 28501
+allowed_origins = ["http://localhost:28501", "http://127.0.0.1:28501"]
+debug = false
+reload = true
+backend_debug_port = 5678
+frontend_debug_port = 5679
+
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
 modes = ["browser_selenium"]
 download_dir = "xlsm_archive"
 # Available modes: 'public_api' (no auth), 'browser_selenium' (browser automation), 'gdown' (download entire folder)
 # Can specify single mode or list of modes to try in sequence
+# Only browser_selenium is currently supported.
 # 'download_dir' is relative to project root or absolute path
+start_time = "20:00"
+interval_hours = 24
+timezone = "Europe/Belgrade"

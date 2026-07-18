@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+ARG POETRY_VERSION=2.1.3
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Match the Poetry release used to generate the lock file.
+RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+
+# Create pyproject.toml placeholder to install dependencies
+# Code will be mounted as volume at runtime
+RUN mkdir -p /app
+
+# Copy locked dependency metadata from the build context.
+# We need to pre-install dependencies before mounting
+COPY webreport/backend/pyproject.toml webreport/backend/poetry.lock /tmp/
+
+# Configure poetry to not create virtual env (we're in container)
+RUN poetry config virtualenvs.create false
+
+# Install dependencies
+RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
+
+# Expose port
+EXPOSE 8000
+EXPOSE 5678
+
+# Run the backend (code will be mounted as volume)
+CMD ["python", "start.py"]

@@ -21,3 +21,6 @@ dependencies = [
 
 [tool.poetry]
 package-mode = false
+[tool.poetry.group.dev.dependencies]
+basedpyright = "^1.38.2"
+

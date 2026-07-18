@@ -5,8 +5,8 @@ from sqlalchemy import and_
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-from db import Database, TeamGameScore
-from db_helpers import normalize_team_name
+from bd_shared.db import Database, TeamGameScore
+from bd_shared.db_helpers import normalize_team_name
 
 
 def evaluate_four_bucket_strategy(team_name):

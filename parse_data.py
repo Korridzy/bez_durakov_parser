@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import os
-from bd_game import BdGame
-from db_helpers import initialize_database, save_game_to_database
+from bd_shared.bd_game import BdGame
+from bd_shared.db_helpers import initialize_database, save_game_to_database
 
 
 def parse_xlsm(file_path):

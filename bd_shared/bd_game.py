@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
+import logging
 import warnings
 from pprint import pprint
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class XLSParseError(Exception):
     def __init__(self, message):
@@ -151,10 +154,10 @@ class BdGame:
 
             return True
         except XLSParseError as e:
-            print(f"Error parsing file {file_path}: {e}")
+            logger.error("Error parsing file %s: %s", file_path, e)
             return False
-        except Exception as e:
-            print(f"Unexpected error parsing file {file_path}: {e}")
+        except Exception:
+            logger.exception("Unexpected error parsing file %s", file_path)
             return False
 
     def _parse_date(self, all_sheets):

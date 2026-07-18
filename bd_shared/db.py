@@ -5,14 +5,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
 import datetime
 import logging
-from config import LOG_LEVEL, SQLALCHEMY_LOGGING
-from config import DATABASE_URL
-from bd_game import BdGame
+from .config import LOG_LEVEL, SQLALCHEMY_LOGGING
+from .config import DATABASE_URL
+from .bd_game import BdGame
 
 # Set up logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 if SQLALCHEMY_LOGGING:
     logging.getLogger("sqlalchemy.engine").setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+logger = logging.getLogger(__name__)
 
 # Base class for all models
 Base = declarative_base()
@@ -414,9 +415,9 @@ class Database:
 
             session.commit()
             return True
-        except Exception as e:
+        except Exception:
             session.rollback()
-            print(f"Error adding game data: {e}")
+            logger.exception("Error adding game data")
             return False
         finally:
             session.close()
@@ -686,6 +687,42 @@ class Database:
 
             # No match found
             return None
+
+    def get_all_teams(self):
+        """Get all teams from the database."""
+        with self.Session() as session:
+            return session.query(Team).all()
+
+    def get_team_by_name(self, team_name):
+        """Look up a team by name, normalizing the input first.
+
+        Args:
+            team_name (str): Team name (raw or normalized).
+
+        Returns:
+            Team | None: The matching Team ORM instance, or None if not found.
+        """
+        normalized = normalize_team_name(team_name)
+        with self.Session() as session:
+            return session.query(Team).filter_by(team_name=normalized).first()
+
+    def get_team_game_scores(self, game_id=None, team_id=None):
+        """Read rows from the team_game_scores view, optionally filtered.
+
+        Args:
+            game_id (int, optional): If provided, restrict results to this game.
+            team_id (int, optional): If provided, restrict results to this team.
+
+        Returns:
+            list[TeamGameScore]: Matching rows from the view (empty list if none).
+        """
+        with self.Session() as session:
+            query = session.query(TeamGameScore)
+            if game_id is not None:
+                query = query.filter(TeamGameScore.game_id == game_id)
+            if team_id is not None:
+                query = query.filter(TeamGameScore.team_id == team_id)
+            return query.all()
 
 # Usage example
 if __name__ == "__main__":

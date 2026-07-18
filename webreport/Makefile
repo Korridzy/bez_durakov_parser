@@ -1,0 +1,94 @@
+DOCKER_COMPOSE ?= docker compose
+
+.PHONY: help generate-env test clean start stop restart logs build rebuild fetch-data fetch-data-log
+
+help:
+	@echo "🎮 Web Reporting System - Docker Commands"
+	@echo "=========================================="
+	@echo ""
+	@echo "Docker Operations:"
+	@echo "  make generate-env - Generate Compose and service env files"
+	@echo "  make start       - Start services with Docker Compose"
+	@echo "  make stop        - Stop Docker containers"
+	@echo "  make restart     - Restart services"
+	@echo "  make logs        - View logs"
+	@echo "  make build       - Build Docker images"
+	@echo "  make rebuild     - Rebuild and restart services"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test        - Run tests (requires running containers)"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  make clean       - Clean temporary files"
+	@echo ""
+	@echo "Data collector:"
+	@echo "  make fetch-data      - Run XLSM fetch manually"
+	@echo "  make fetch-data-log  - Show logs since last fetch start"
+	@echo ""
+	@echo "Tips:"
+	@echo "  make logs SERVICE=data_collector"
+	@echo "  make logs SERVICE=backend"
+	@echo ""
+
+generate-env:
+	poetry run python generate_env.py
+
+start: generate-env
+	@echo "🐳 Starting services with Docker Compose..."
+	$(DOCKER_COMPOSE) up -d
+	@echo ""
+	@echo "✅ Services started!"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🎨 Frontend:  http://localhost:$$(grep WEBREPORT_FRONTEND_PORT .env | cut -d'=' -f2)"
+	@echo "🔌 Backend:   http://localhost:$$(grep WEBREPORT_BACKEND_PORT .env | cut -d'=' -f2)"
+	@echo "📚 API Docs:  http://localhost:$$(grep WEBREPORT_BACKEND_PORT .env | cut -d'=' -f2)/docs"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "View logs:    make logs"
+	@echo "Stop:         make stop"
+
+stop:
+	@echo "🐳 Stopping Docker containers..."
+	$(DOCKER_COMPOSE) down
+	@echo "✅ Containers stopped"
+
+restart: generate-env
+	@echo "🔄 Restarting services..."
+	$(DOCKER_COMPOSE) up -d
+	@echo "✅ Services restarted"
+
+logs:
+	$(DOCKER_COMPOSE) logs -f $(SERVICE)
+
+build: generate-env
+	@echo "🔨 Building Docker images..."
+	$(DOCKER_COMPOSE) build
+	@echo "✅ Build complete"
+
+rebuild: generate-env
+	@echo "🔨 Rebuilding and restarting services..."
+	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) build
+	$(DOCKER_COMPOSE) up -d
+	@echo "✅ Services rebuilt and started"
+
+test: generate-env
+	@echo "🧪 Running tests in Docker..."
+	$(DOCKER_COMPOSE) run --rm backend python /app/test_system.py
+	@echo ""
+
+clean:
+	@echo "🧹 Cleaning temporary files..."
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✅ Cleanup complete"
+
+fetch-data: generate-env
+	@echo "🔄 Starting manual XLSM fetch..."
+	$(DOCKER_COMPOSE) exec -T data_collector python fetch_pipeline.py
+
+fetch-data-log:
+	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."
+	$(DOCKER_COMPOSE) logs data_collector | awk '/Fetch started at/ { output = "" } { output = output $$0 ORS } END { printf "%s", output }'
