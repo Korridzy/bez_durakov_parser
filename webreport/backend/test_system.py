@@ -615,8 +615,8 @@ class TestAPI(unittest.TestCase):
             response = self.client.get("/api/games/123")
 
         self.assertEqual(response.status_code, 500, "Unexpected game lookup failures should return 500")
-        self.assertEqual(response.json()["detail"], "db exploded")
-        print("✅ API get_game: unexpected errors return 500")
+        self.assertEqual(response.json()["detail"], "Internal server error")
+        print("✅ API get_game: unexpected errors return a generic 500 response")
 
     def test_regression_health_returns_503_without_data_service(self):
         if self.client is None:
