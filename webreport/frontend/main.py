@@ -73,7 +73,7 @@ def check_api_health() -> bool:
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=2)
         return response.status_code == 200
-    except:
+    except requests.exceptions.RequestException:
         return False
 
 
