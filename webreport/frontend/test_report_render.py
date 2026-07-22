@@ -110,18 +110,29 @@ class ReportRenderTest(unittest.TestCase):
             self.driver.execute_async_script(
                 "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
             )
-            pane_heights = self.driver.execute_script(
+            pane_sizes = self.driver.execute_script(
                 """
-                return [
-                    document.querySelector(".st-key-chat-pane-scroll").style.height,
-                    document.querySelector(".st-key-report-pane-scroll").style.height,
-                ];
+                const chatPane = document.querySelector(".st-key-chat-pane-scroll");
+                const reportPane = document.querySelector(".st-key-report-pane-scroll");
+                const chatColumn = chatPane.closest('[data-testid="stColumn"]');
+                const reportColumn = reportPane.closest('[data-testid="stColumn"]');
+                const row = chatColumn.parentElement;
+                const availableHeight = Math.max(320, Math.floor(window.innerHeight - row.getBoundingClientRect().top));
+                const chatChrome = Math.round(chatPane.getBoundingClientRect().top - chatColumn.getBoundingClientRect().top);
+                const reportChrome = Math.round(reportPane.getBoundingClientRect().top - reportColumn.getBoundingClientRect().top);
+                return {
+                    actual: [chatPane.style.height, reportPane.style.height],
+                    expected: [
+                        `${Math.max(96, availableHeight - chatChrome)}px`,
+                        `${Math.max(160, availableHeight - reportChrome)}px`,
+                    ],
+                };
                 """
             )
         finally:
             self.driver.set_window_size(original_size["width"], original_size["height"])
 
-        self.assertTrue(all(isinstance(height, str) and height.endswith("px") for height in pane_heights))
+        self.assertEqual(pane_sizes["expected"], pane_sizes["actual"])
 
 
 if __name__ == "__main__":

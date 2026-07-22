@@ -61,6 +61,15 @@ export default function({ parentElement, data, setTriggerValue }) {
 
   const clamp = (value) => Math.min(100 - %MINIMUM_PANE_WIDTH%, Math.max(%MINIMUM_PANE_WIDTH%, value));
   const isStacked = () => window.matchMedia("(max-width: 768px)").matches;
+  const minimumViewportHeight = 320;
+  const minimumStackedPaneHeight = 230;
+  const minimumChatPaneHeight = 96;
+  const minimumReportPaneHeight = 160;
+
+  const chromeHeight = (pane, column) => {
+    if (!pane) return 0;
+    return Math.max(0, Math.round(pane.getBoundingClientRect().top - column.getBoundingClientRect().top));
+  };
 
   const applySplit = (position) => {
     const current = layout();
@@ -72,10 +81,10 @@ export default function({ parentElement, data, setTriggerValue }) {
     const chatPane = documentRoot.querySelector(".st-key-chat-pane-scroll");
     const reportPane = documentRoot.querySelector(".st-key-report-pane-scroll");
     const loadingOverlay = documentRoot.querySelector(".report-loading-overlay");
-    const viewportHeight = Math.max(320, window.innerHeight - 118);
-    const paneHeight = stacked ? Math.max(230, Math.floor(viewportHeight / 2) - 8) : viewportHeight;
-    const chatPaneHeight = Math.max(96, paneHeight - 240);
-    const reportPaneHeight = Math.max(160, paneHeight - 112);
+    const viewportHeight = Math.max(minimumViewportHeight, Math.floor(window.innerHeight - row.getBoundingClientRect().top));
+    const paneHeight = stacked ? Math.max(minimumStackedPaneHeight, Math.floor(viewportHeight / 2)) : viewportHeight;
+    const chatPaneHeight = Math.max(minimumChatPaneHeight, paneHeight - chromeHeight(chatPane, chatColumn));
+    const reportPaneHeight = Math.max(minimumReportPaneHeight, paneHeight - chromeHeight(reportPane, reportColumn));
 
     row.style.display = "flex";
     row.style.height = `${viewportHeight}px`;
