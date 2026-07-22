@@ -85,10 +85,10 @@ export default function({ parentElement, data, setTriggerValue }) {
     row.style.alignItems = "stretch";
     row.style.flexWrap = "nowrap";
     row.style.gap = "0";
-    setStyle(chatPane, "height", stacked ? `${chatPaneHeight}px` : null);
-    setStyle(reportPane, "height", stacked ? `${reportPaneHeight}px` : null);
-    setStyle(chatPane, "max-height", stacked ? `${chatPaneHeight}px` : null);
-    setStyle(reportPane, "max-height", stacked ? `${reportPaneHeight}px` : null);
+    setStyle(chatPane, "height", `${chatPaneHeight}px`);
+    setStyle(reportPane, "height", `${reportPaneHeight}px`);
+    setStyle(chatPane, "max-height", `${chatPaneHeight}px`);
+    setStyle(reportPane, "max-height", `${reportPaneHeight}px`);
 
     if (stacked) {
       divider.style.display = "none";

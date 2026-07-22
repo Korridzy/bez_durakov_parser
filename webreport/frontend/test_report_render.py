@@ -99,6 +99,30 @@ class ReportRenderTest(unittest.TestCase):
         ]
         self.assertEqual([], console_errors)
 
+    def test_desktop_split_pane_sets_scroll_pane_heights(self) -> None:
+        original_size = self.driver.get_window_size()
+        self.driver.set_window_size(1280, 720)
+        try:
+            self.driver.get(FRONTEND_URL)
+            self.wait.until(
+                lambda driver: driver.find_element(By.CSS_SELECTOR, ".st-key-chat-pane-scroll")
+            )
+            self.driver.execute_async_script(
+                "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
+            )
+            pane_heights = self.driver.execute_script(
+                """
+                return [
+                    document.querySelector(".st-key-chat-pane-scroll").style.height,
+                    document.querySelector(".st-key-report-pane-scroll").style.height,
+                ];
+                """
+            )
+        finally:
+            self.driver.set_window_size(original_size["width"], original_size["height"])
+
+        self.assertTrue(all(isinstance(height, str) and height.endswith("px") for height in pane_heights))
+
 
 if __name__ == "__main__":
     unittest.main()
