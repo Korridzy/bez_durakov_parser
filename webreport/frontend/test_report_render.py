@@ -83,8 +83,8 @@ class ReportRenderTest(unittest.TestCase):
 
         self.driver.execute_script(
             """
-            document.querySelector(".st-key-chat-pane-scroll").classList.remove("st-key-chat-pane-scroll");
-            document.querySelector(".st-key-report-pane-scroll").classList.remove("st-key-report-pane-scroll");
+            document.querySelector(".st-key-chat-pane-scroll")?.classList.remove("st-key-chat-pane-scroll");
+            document.querySelector(".st-key-report-pane-scroll")?.classList.remove("st-key-report-pane-scroll");
             window.dispatchEvent(new Event("resize"));
             """
         )
@@ -109,6 +109,16 @@ class ReportRenderTest(unittest.TestCase):
             )
             self.driver.execute_async_script(
                 "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
+            )
+            self.wait.until(
+                lambda driver: driver.execute_script(
+                    """
+                    return [
+                        document.querySelector(".st-key-chat-pane-scroll"),
+                        document.querySelector(".st-key-report-pane-scroll"),
+                    ].every((pane) => pane?.style.height.endsWith("px"));
+                    """
+                )
             )
             pane_sizes = self.driver.execute_script(
                 """
