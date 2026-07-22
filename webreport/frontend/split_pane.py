@@ -224,7 +224,6 @@ export default function({ parentElement, data, setTriggerValue }) {
   justify-content: center;
   min-width: 22px;
   overflow: hidden;
-  resize: horizontal;
   transition: background-color 120ms ease;
 }
 .split-pane-divider:hover,
