@@ -105,7 +105,13 @@ class ReportRenderTest(unittest.TestCase):
         try:
             self.driver.get(FRONTEND_URL)
             self.wait.until(
-                lambda driver: driver.find_element(By.CSS_SELECTOR, ".st-key-chat-pane-scroll")
+                lambda driver: all(
+                    driver.find_elements(By.CSS_SELECTOR, selector)
+                    for selector in (
+                        ".st-key-chat-pane-scroll",
+                        ".st-key-report-pane-scroll",
+                    )
+                )
             )
             self.driver.execute_async_script(
                 "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
