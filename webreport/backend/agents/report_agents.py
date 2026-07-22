@@ -7,6 +7,7 @@ import os
 import sys
 import importlib
 import logging
+import re
 from datetime import datetime, date
 import json
 from textwrap import dedent
@@ -282,11 +283,18 @@ class ReportAgentSystem:
                 "description": "Get summary of all games",
             }
 
-        elif "топ команд" in message_lower or "top teams" in message_lower:
+        elif top_teams_match := re.search(r"топ\s*(\d+)?\s+команд", message_lower):
+            return {
+                "method": "get_top_teams",
+                "params": {"limit": int(top_teams_match.group(1) or 10)},
+                "description": "Get top teams by total points",
+            }
+
+        elif "top teams" in message_lower:
             return {
                 "method": "get_top_teams",
                 "params": {"limit": 10},
-                "description": "Get top 10 teams by total points",
+                "description": "Get top teams by total points",
             }
 
         elif any(
