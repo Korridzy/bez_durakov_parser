@@ -8,11 +8,14 @@ authors = [
 
 [tool.poetry.dependencies]
 python = ">=3.11"
-streamlit = ">=1.28.0"
+streamlit = ">=1.59.2"
 requests = ">=2.31.0"
 pandas = ">=2.0.0"
 python-dotenv = ">=1.0.0"
 pydevd-pycharm = "~=252.27397.106"
+
+[tool.poetry.group.dev.dependencies]
+selenium = "^4.46.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
