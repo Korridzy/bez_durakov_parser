@@ -124,7 +124,11 @@ def send_chat_message(message: str) -> dict[str, object]:
         }
     if isinstance(payload, dict):
         return payload
-    return {"success": False, "error": "Сервер вернул некорректный ответ."}
+    return {
+        "success": False,
+        "error": "Сервер вернул некорректный ответ.",
+        "message": "Сервер вернул некорректный ответ.",
+    }
 
 
 def clear_conversation() -> None:
