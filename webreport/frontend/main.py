@@ -114,7 +114,14 @@ def send_chat_message(message: str) -> dict[str, object]:
             "error": str(error),
             "message": "Не удалось связаться с сервером.",
         }
-    payload: object = response.json()
+    try:
+        payload: object = response.json()
+    except requests.exceptions.JSONDecodeError:
+        return {
+            "success": False,
+            "error": "Сервер вернул некорректный ответ.",
+            "message": "Сервер вернул некорректный ответ.",
+        }
     if isinstance(payload, dict):
         return payload
     return {"success": False, "error": "Сервер вернул некорректный ответ."}
