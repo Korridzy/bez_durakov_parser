@@ -10,6 +10,7 @@ from streamlit.components.v2 import component
 
 CONTROLLER_KEY: Final = "split_pane_controller"
 _MINIMUM_PANE_WIDTH: Final = 20.0
+_MAXIMUM_PANE_WIDTH: Final = 100.0 - _MINIMUM_PANE_WIDTH
 
 _SPLIT_PANE_CONTROLLER = component(
     "split_pane_controller",
@@ -259,7 +260,7 @@ def _save_split_position() -> None:
     position = event.get("position_pct")
     if isinstance(position, bool) or not isinstance(position, (int, float)):
         return
-    st.session_state.split_pct = min(80.0, max(_MINIMUM_PANE_WIDTH, float(position)))
+    st.session_state.split_pct = min(_MAXIMUM_PANE_WIDTH, max(_MINIMUM_PANE_WIDTH, float(position)))
     st.session_state.user_has_dragged = True
 
 
