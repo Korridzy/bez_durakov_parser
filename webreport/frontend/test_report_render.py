@@ -74,6 +74,31 @@ class ReportRenderTest(unittest.TestCase):
         ]
         self.assertEqual([], console_errors)
 
+    def test_split_pane_tolerates_missing_scroll_panes_during_rerender(self) -> None:
+        self.driver.get(FRONTEND_URL)
+        self.wait.until(
+            lambda driver: driver.find_element(By.CSS_SELECTOR, "textarea[aria-label='Ваше сообщение']")
+        )
+        self.driver.get_log("browser")
+
+        self.driver.execute_script(
+            """
+            document.querySelector(".st-key-chat-pane-scroll").classList.remove("st-key-chat-pane-scroll");
+            document.querySelector(".st-key-report-pane-scroll").classList.remove("st-key-report-pane-scroll");
+            window.dispatchEvent(new Event("resize"));
+            """
+        )
+        self.driver.execute_async_script(
+            "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
+        )
+
+        console_errors = [
+            entry
+            for entry in self.driver.get_log("browser")
+            if entry["level"] == "SEVERE"
+        ]
+        self.assertEqual([], console_errors)
+
 
 if __name__ == "__main__":
     unittest.main()

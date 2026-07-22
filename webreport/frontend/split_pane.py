@@ -24,6 +24,7 @@ export default function({ parentElement, data, setTriggerValue }) {
   state.emit = setTriggerValue;
 
   const setStyle = (element, property, value) => {
+    if (!element) return;
     if (value === null) {
       element.style.removeProperty(property);
       return;
