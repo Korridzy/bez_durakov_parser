@@ -53,6 +53,7 @@ export default function({ parentElement, data, setTriggerValue }) {
     divider.className = "split-pane-divider";
     divider.setAttribute("aria-label", "Изменить ширину панелей");
     divider.setAttribute("role", "separator");
+    divider.setAttribute("aria-orientation", "vertical");
     divider.tabIndex = 0;
     divider.innerHTML = "<span></span><span></span><span></span>";
     reportColumn.before(divider);

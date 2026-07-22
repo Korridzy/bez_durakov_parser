@@ -113,6 +113,10 @@ class ReportRenderTest(unittest.TestCase):
                     )
                 )
             )
+            divider = self.wait.until(
+                expected.presence_of_element_located((By.CSS_SELECTOR, ".split-pane-divider"))
+            )
+            self.assertEqual("vertical", divider.get_attribute("aria-orientation"))
             self.driver.execute_async_script(
                 "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
             )
