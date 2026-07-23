@@ -7,12 +7,15 @@ import os
 import sys
 import importlib
 import logging
+import re
 from datetime import datetime, date
 import json
 from textwrap import dedent
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+_MIN_TOP_TEAMS_LIMIT = 1
+_MAX_TOP_TEAMS_LIMIT = 1024
 
 # No need to add path, services is in same app
 from services.game_data_service import GameDataService
@@ -282,11 +285,29 @@ class ReportAgentSystem:
                 "description": "Get summary of all games",
             }
 
-        elif "топ команд" in message_lower or "top teams" in message_lower:
+        elif top_teams_match := re.search(r"топ\s*(\d+)?\s+команд", message_lower):
+            requested_limit_text = (top_teams_match.group(1) or "10").lstrip("0") or "0"
+            requested_limit = (
+                _MAX_TOP_TEAMS_LIMIT
+                if len(requested_limit_text) > len(str(_MAX_TOP_TEAMS_LIMIT))
+                else int(requested_limit_text)
+            )
+            return {
+                "method": "get_top_teams",
+                "params": {
+                    "limit": min(
+                        _MAX_TOP_TEAMS_LIMIT,
+                        max(_MIN_TOP_TEAMS_LIMIT, requested_limit),
+                    )
+                },
+                "description": "Get top teams by total points",
+            }
+
+        elif "top teams" in message_lower:
             return {
                 "method": "get_top_teams",
                 "params": {"limit": 10},
-                "description": "Get top 10 teams by total points",
+                "description": "Get top teams by total points",
             }
 
         elif any(
