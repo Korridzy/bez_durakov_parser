@@ -57,13 +57,13 @@ def _render_data(data: object) -> None:
     if isinstance(data, list) and data:
         dataframe = pd.DataFrame(data)
         st.markdown("#### Основные показатели")
-        total, points, dates = st.columns(3)
+        total, points, columns_count = st.columns(3)
         with total:
             st.metric("Всего записей", len(dataframe))
         with points:
             if "total_points" in dataframe.columns:
                 st.metric("Средние очки", f"{dataframe['total_points'].mean():.2f}")
-        with dates:
+        with columns_count:
             st.metric("Колонок", len(dataframe.columns))
         st.dataframe(dataframe, use_container_width=True, height=320)
         st.download_button(
