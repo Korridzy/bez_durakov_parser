@@ -117,6 +117,7 @@ class ReportRenderTest(unittest.TestCase):
                 expected.presence_of_element_located((By.CSS_SELECTOR, ".split-pane-divider"))
             )
             self.assertEqual("vertical", divider.get_attribute("aria-orientation"))
+            self.assertIsNone(divider.get_attribute("tabindex"))
             self.assertEqual("none", divider.value_of_css_property("resize"))
             self.driver.execute_async_script(
                 "const done = arguments[arguments.length - 1]; requestAnimationFrame(done);"
