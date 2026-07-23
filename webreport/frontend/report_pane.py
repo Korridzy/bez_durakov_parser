@@ -72,6 +72,8 @@ def _render_data(data: object) -> None:
             file_name=f"report_{datetime.now():%Y%m%d_%H%M%S}.csv",
             mime="text/csv",
         )
+        if dataframe.columns.empty:
+            return
         index_column = dataframe.columns[0]
         numeric_columns = [
             column
