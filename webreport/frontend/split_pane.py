@@ -226,8 +226,7 @@ export default function({ parentElement, data, setTriggerValue }) {
   overflow: hidden;
   transition: background-color 120ms ease;
 }
-.split-pane-divider:hover,
-.split-pane-divider:focus-visible {
+.split-pane-divider:hover {
   background: rgba(30, 136, 229, 0.28);
   outline: none;
 }
