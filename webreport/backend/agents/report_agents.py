@@ -14,6 +14,8 @@ from textwrap import dedent
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+_MIN_TOP_TEAMS_LIMIT = 1
+_MAX_TOP_TEAMS_LIMIT = 1024
 
 # No need to add path, services is in same app
 from services.game_data_service import GameDataService
@@ -284,9 +286,15 @@ class ReportAgentSystem:
             }
 
         elif top_teams_match := re.search(r"топ\s*(\d+)?\s+команд", message_lower):
+            requested_limit = int(top_teams_match.group(1) or 10)
             return {
                 "method": "get_top_teams",
-                "params": {"limit": int(top_teams_match.group(1) or 10)},
+                "params": {
+                    "limit": min(
+                        _MAX_TOP_TEAMS_LIMIT,
+                        max(_MIN_TOP_TEAMS_LIMIT, requested_limit),
+                    )
+                },
                 "description": "Get top teams by total points",
             }
 
