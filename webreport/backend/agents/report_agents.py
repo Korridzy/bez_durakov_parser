@@ -286,7 +286,12 @@ class ReportAgentSystem:
             }
 
         elif top_teams_match := re.search(r"топ\s*(\d+)?\s+команд", message_lower):
-            requested_limit = int(top_teams_match.group(1) or 10)
+            requested_limit_text = (top_teams_match.group(1) or "10").lstrip("0") or "0"
+            requested_limit = (
+                _MAX_TOP_TEAMS_LIMIT
+                if len(requested_limit_text) > len(str(_MAX_TOP_TEAMS_LIMIT))
+                else int(requested_limit_text)
+            )
             return {
                 "method": "get_top_teams",
                 "params": {
