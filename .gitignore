@@ -1,5 +1,6 @@
 # OpenCode stuff
 .sisyphus
+.ignore
 
 # AI/agent tooling
 .agents/
