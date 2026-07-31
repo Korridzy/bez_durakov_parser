@@ -8,6 +8,9 @@
 .codex/
 .omc/
 .omo/
+.opencode/*
+!.opencode/skills/
+!.opencode/skills/**
 .serena/
 .skillshare/
 
