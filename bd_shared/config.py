@@ -55,3 +55,17 @@ WEBREPORT_ALLOWED_ORIGINS = list(config["webreport"].get(
         f"http://127.0.0.1:{WEBREPORT_FRONTEND_PORT}",
     ],
 ))
+
+# Report agent configuration
+AGENT_RECURSION_LIMIT = int(config["webreport"].get("agent_recursion_limit", 8))
+AGENT_TIMEOUT_SECONDS = int(config["webreport"].get("agent_timeout_seconds", 60))
+AGENT_MAX_ROWS_PER_FETCH = int(config["webreport"].get("agent_max_rows_per_fetch", 256))
+AGENT_MAX_ROWS_PER_RUN = int(config["webreport"].get("agent_max_rows_per_run", 1024))
+CHECKPOINT_TTL_SECONDS = int(config["webreport"].get("checkpoint_ttl_seconds", 3600))
+LITELLM_BASE_URL = config["webreport"].get("litellm_base_url", "http://litellm:4000")
+AGENT_MODEL = config["webreport"].get("agent_model", "gpt-4o")
+
+# Use BD_CHECKPOINT_DB_PATH environment variable to override the checkpoint store location
+CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
+    "checkpoint_db_path", "/data/checkpoints.db"
+)

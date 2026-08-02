@@ -17,6 +17,14 @@ debug = false
 reload = true
 backend_debug_port = 5678
 frontend_debug_port = 5679
+agent_recursion_limit = 8
+agent_timeout_seconds = 60
+agent_max_rows_per_fetch = 256
+agent_max_rows_per_run = 1024
+checkpoint_ttl_seconds = 3600
+checkpoint_db_path = "/data/checkpoints.db"
+litellm_base_url = "http://litellm:4000"
+agent_model = "gpt-4o"
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
