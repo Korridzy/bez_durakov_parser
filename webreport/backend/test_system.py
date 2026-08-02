@@ -787,89 +787,251 @@ class TestStartupInitialization(unittest.TestCase):
         print("✅ Startup fails fast after bounded database retries")
 
 
-class TestSessionStore(unittest.TestCase):
-    """Unit tests for SessionStore LRU+TTL eviction."""
+class _FakeClock:
+    """Deterministic stand-in for the `time` module read by session_store.
 
-    def _make_store(self, max_size=4, ttl=60.0):
-        from session_store import SessionStore
-        return SessionStore(max_size=max_size, ttl=ttl)
+    Patched in as `session_store.time` so TTL behaviour is exercised without
+    sleeping, and without disturbing the global clock the event loop runs on.
+    """
 
-    def test_basic_set_get_contains(self):
-        store = self._make_store()
-        sentinel = object()
-        store["a"] = sentinel
-        self.assertIn("a", store)
-        self.assertIs(store["a"], sentinel)
+    def __init__(self, start: float = 1000.0):
+        self._now = start
 
-    def test_missing_key_not_in(self):
-        store = self._make_store()
-        self.assertNotIn("missing", store)
+    def monotonic(self) -> float:
+        return self._now
 
-    def test_lru_eviction_at_capacity(self):
-        store = self._make_store(max_size=3)
-        store["a"] = object()
-        store["b"] = object()
-        store["c"] = object()
-        _ = store["a"]  # touch "a" — makes "b" the LRU
-        store["d"] = object()
-        self.assertNotIn("b", store)
-        self.assertIn("a", store)
-        self.assertIn("c", store)
-        self.assertIn("d", store)
-        print("✅ SessionStore: LRU eviction evicts least-recently-used entry")
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
 
-    def test_ttl_expiry(self):
-        import time as time_mod
-        store = self._make_store(ttl=0.05)
-        store["x"] = object()
-        self.assertIn("x", store)
-        time_mod.sleep(0.1)
-        self.assertNotIn("x", store)
-        print("✅ SessionStore: expired session is evicted on next access")
 
-    def test_getitem_enforces_ttl(self):
-        import time as time_mod
-        store = self._make_store(ttl=0.05)
-        store["x"] = object()
-        time_mod.sleep(0.1)
-        with self.assertRaises(KeyError):
-            _ = store["x"]
-        self.assertNotIn("x", store._store)
-        print("✅ SessionStore: __getitem__ enforces TTL and drops expired entry")
+class TestSessionIndex(unittest.IsolatedAsyncioTestCase):
+    """Unit tests for the async SessionIndex (recency LRU + monotonic TTL).
 
-    def test_getitem_missing_raises_keyerror(self):
-        store = self._make_store()
-        with self.assertRaises(KeyError):
-            _ = store["missing"]
-        print("✅ SessionStore: __getitem__ raises KeyError for missing key")
+    Ported from the synchronous TestSessionStore suite. Two families of
+    assertions are INTENTIONALLY rewritten:
 
-    def test_overwrite_does_not_grow_store(self):
-        store = self._make_store(max_size=2)
-        store["a"] = object()
-        store["b"] = object()
-        store["a"] = object()
-        self.assertEqual(len(store._store), 2)
-        print("✅ SessionStore: overwriting an existing key does not grow the store")
+    * sentinel-value asserts (`store["a"] is sentinel`) become membership and
+      recency asserts — the index stores monotonic timestamps, never agent
+      objects (owner decision 2026-08-01);
+    * self-eviction asserts become caller-driven cap pressure — the index never
+      evicts by itself, the caller asks for a victim and drops it, so checkpoint
+      removal stays ordered delete-then-forget (spec D1).
+    """
 
-    def test_capacity_hard_cap(self):
-        store = self._make_store(max_size=10)
+    def _module(self):
+        import session_store
+        return session_store
+
+    def _index(self, max_size: int = 4, ttl: float = 60.0):
+        return self._module().SessionIndex(max_size=max_size, ttl=ttl)
+
+    def _patch_clock(self, start: float = 1000.0) -> "_FakeClock":
+        clock = _FakeClock(start)
+        patcher = patch.object(self._module(), "time", clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return clock
+
+    async def test_touch_admits_a_session(self):
+        """Given an empty index, When a sid is touched, Then that sid is live.
+
+        Replaces test_basic_set_get_contains: there is no stored value to
+        identity-check, liveness is the whole contract.
+        """
+        index = self._index()
+
+        await index.touch("a")
+
+        self.assertTrue(await index.is_live("a"))
+        self.assertEqual(len(index), 1)
+        print("✅ SessionIndex: touch admits a session id")
+
+    async def test_unknown_session_is_not_live(self):
+        """Given an empty index, When an unknown sid is probed, Then it is not live."""
+        index = self._index()
+
+        self.assertFalse(await index.is_live("missing"))
+        print("✅ SessionIndex: unknown session id is not live")
+
+    async def test_lru_victim_is_the_least_recently_touched(self):
+        """Given a, b, c touched and a re-touched, When a victim is asked for, Then b."""
+        index = self._index(max_size=3)
+        for sid in ("a", "b", "c"):
+            await index.touch(sid)
+
+        await index.touch("a")
+
+        self.assertEqual(await index.lru_victim({}), "b")
+        print("✅ SessionIndex: LRU victim is the least recently touched session")
+
+    async def test_expired_session_is_not_live(self):
+        """Given a touched sid, When the monotonic clock passes the TTL, Then not live."""
+        clock = self._patch_clock()
+        index = self._index(ttl=60.0)
+        await index.touch("x")
+
+        clock.advance(60.1)
+
+        self.assertFalse(await index.is_live("x"))
+        print("✅ SessionIndex: session stops being live once its TTL elapses")
+
+    async def test_expired_ids_lists_only_expired_sessions(self):
+        """Given one aged and one fresh sid, When expired_ids is read, Then only the aged one."""
+        clock = self._patch_clock()
+        index = self._index(ttl=60.0)
+        await index.touch("old")
+        clock.advance(30.0)
+        await index.touch("fresh")
+
+        clock.advance(40.0)
+
+        self.assertEqual(await index.expired_ids(), ["old"])
+        print("✅ SessionIndex: expired_ids reports only sessions past their TTL")
+
+    async def test_expiry_check_never_drops_entries(self):
+        """Given an expired sid, When it is inspected, Then it stays until the caller drops it.
+
+        The caller deletes the checkpoint thread first and only then forgets the
+        entry (spec D1), so the index must never self-purge on inspection.
+        """
+        clock = self._patch_clock()
+        index = self._index(ttl=60.0)
+        await index.touch("x")
+        clock.advance(61.0)
+
+        await index.expired_ids()
+        await index.is_live("x")
+
+        self.assertEqual(len(index), 1)
+        await index.drop("x")
+        self.assertEqual(len(index), 0)
+        print("✅ SessionIndex: expiry inspection leaves removal to the caller")
+
+    async def test_drop_of_unknown_session_is_a_noop(self):
+        """Given an unknown sid, When it is dropped, Then nothing raises and nothing changes.
+
+        Replaces test_getitem_missing_raises_keyerror: the index has no
+        __getitem__, and drop must stay idempotent so a failed thread deletion
+        can be retried on the next eviction (spec D1).
+        """
+        index = self._index()
+        await index.touch("a")
+
+        await index.drop("missing")
+
+        self.assertEqual(len(index), 1)
+        print("✅ SessionIndex: dropping an unknown session is a no-op")
+
+    async def test_repeated_touch_does_not_grow_the_index(self):
+        """Given a sid already present, When it is touched again, Then the size is unchanged."""
+        index = self._index(max_size=2)
+        await index.touch("a")
+        await index.touch("b")
+
+        await index.touch("a")
+
+        self.assertEqual(len(index), 2)
+        print("✅ SessionIndex: re-touching an existing session does not grow the index")
+
+    async def test_caller_driven_eviction_holds_the_cap(self):
+        """Given a full index, When the caller evicts the victim and admits one, Then len is capped.
+
+        Replaces test_capacity_hard_cap: eviction moved out of the index, so the
+        cap is proven through the caller's victim/drop/touch sequence.
+        """
+        index = self._index(max_size=10)
         for i in range(10):
-            store[str(i)] = object()
-        self.assertEqual(len(store._store), 10)
-        store["overflow"] = object()
-        self.assertEqual(len(store._store), 10)
-        print("✅ SessionStore: capacity hard cap is never exceeded")
+            await index.touch(str(i))
 
-    def test_max_1024_sessions(self):
-        from session_store import SessionStore, MAX_SESSIONS
-        self.assertEqual(MAX_SESSIONS, 1024)
-        store = SessionStore()
+        victim = await index.lru_victim({})
+        await index.drop(victim)
+        await index.touch("overflow")
+
+        self.assertEqual(victim, "0")
+        self.assertEqual(len(index), 10)
+        print("✅ SessionIndex: caller-driven eviction never exceeds the cap")
+
+    async def test_max_1024_sessions(self):
+        """Given the default index, When 1024 sids are admitted, Then the cap holds at 1024."""
+        session_store = self._module()
+        self.assertEqual(session_store.MAX_SESSIONS, 1024)
+        index = session_store.SessionIndex()
         for i in range(1024):
-            store[str(i)] = object()
-        self.assertEqual(len(store._store), 1024)
-        store["one_more"] = object()
-        self.assertEqual(len(store._store), 1024)
-        print("✅ SessionStore: default MAX_SESSIONS=1024 is enforced")
+            await index.touch(str(i))
+        self.assertEqual(len(index), 1024)
+
+        victim = await index.lru_victim({})
+        await index.drop(victim)
+        await index.touch("one_more")
+
+        self.assertEqual(len(index), 1024)
+        print("✅ SessionIndex: default MAX_SESSIONS=1024 is enforced by the caller loop")
+
+    async def test_lru_victim_skips_pinned_sessions(self):
+        """Given a pinned LRU sid, When a victim is asked for, Then the next unpinned sid.
+
+        `pinned` is a REFCOUNT mapping: a count above zero protects, a zero
+        count does not (in-flight requests, spec D3).
+        """
+        index = self._index(max_size=3)
+        for sid in ("a", "b", "c"):
+            await index.touch(sid)
+
+        victim = await index.lru_victim({"a": 2, "b": 0})
+
+        self.assertEqual(victim, "b")
+        print("✅ SessionIndex: pinned sessions are skipped as eviction victims")
+
+    async def test_lru_victim_returns_none_when_every_session_is_pinned(self):
+        """Given every sid pinned, When a victim is asked for, Then None (caller answers 503)."""
+        index = self._index(max_size=2)
+        await index.touch("a")
+        await index.touch("b")
+
+        self.assertIsNone(await index.lru_victim({"a": 1, "b": 3}))
+        print("✅ SessionIndex: all-pinned capacity yields no victim")
+
+    async def test_seed_installs_newest_first_ids_in_lru_order(self):
+        """Given newest-first ids, When seeded, Then the last one is the first victim."""
+        index = self._index(max_size=4)
+
+        await index.seed(["newest", "middle", "oldest"])
+
+        self.assertEqual(len(index), 3)
+        self.assertEqual(await index.lru_victim({}), "oldest")
+        print("✅ SessionIndex: seed installs newest-first input in oldest-first LRU order")
+
+    async def test_ttl_defaults_to_the_configured_checkpoint_ttl(self):
+        """Given no ttl argument, When the clock crosses CHECKPOINT_TTL_SECONDS, Then it expires.
+
+        Proves the single source of truth (AC-26): the old SESSION_TTL_SECONDS
+        literal is gone and the default comes from bd_shared.config.
+        """
+        import importlib
+        session_store = self._module()
+        ttl = importlib.import_module("bd_shared.config").CHECKPOINT_TTL_SECONDS
+        clock = self._patch_clock()
+        index = session_store.SessionIndex()
+        await index.touch("x")
+
+        clock.advance(ttl - 1)
+        self.assertTrue(await index.is_live("x"))
+        clock.advance(2)
+
+        self.assertFalse(await index.is_live("x"))
+        print("✅ SessionIndex: default TTL comes from bd_shared.config.CHECKPOINT_TTL_SECONDS")
+
+    def test_index_exposes_no_container_protocol(self):
+        """Given an index, When `in` is used on it, Then TypeError.
+
+        An async __contains__ would return a coroutine, which `in` coerces to a
+        truthy bool — every membership test would silently pass (oracle #5).
+        """
+        index = self._index()
+
+        with self.assertRaises(TypeError):
+            _ = "a" in index
+        print("✅ SessionIndex: no container protocol, liveness must be awaited")
 
 
 def run_tests():
@@ -884,7 +1046,7 @@ def run_tests():
     suite = unittest.TestSuite()
 
     # Add test classes
-    suite.addTests(loader.loadTestsFromTestCase(TestSessionStore))
+    suite.addTests(loader.loadTestsFromTestCase(TestSessionIndex))
     suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
     suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
     suite.addTests(loader.loadTestsFromTestCase(TestAPI))

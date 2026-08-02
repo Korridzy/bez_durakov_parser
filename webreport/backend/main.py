@@ -15,13 +15,13 @@ import sys
 
 sys.path.insert(0, '/')
 
-from bd_shared.config import WEBREPORT_ALLOWED_ORIGINS, WEBREPORT_DEBUG
+from bd_shared.config import CHECKPOINT_TTL_SECONDS, WEBREPORT_ALLOWED_ORIGINS, WEBREPORT_DEBUG
 
 logger = logging.getLogger(__name__)
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
-from session_store import SessionStore
+from session_store import SessionIndex
 
 
 # Pydantic models for request/response
@@ -69,7 +69,7 @@ app.add_middleware(
 # Global instances
 agent_system: Optional[ReportAgentSystem] = None
 data_service: Optional[GameDataService] = None
-sessions: SessionStore = SessionStore()
+sessions: SessionIndex = SessionIndex(ttl=CHECKPOINT_TTL_SECONDS)
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2

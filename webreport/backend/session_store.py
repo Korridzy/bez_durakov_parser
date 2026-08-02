@@ -1,50 +1,78 @@
+"""Bounded index of live chat sessions.
+
+The index stores recency timestamps only — never agents, never checkpoints.
+Eviction is driven by the caller: it picks a victim, deletes the checkpoint
+thread, and only then forgets the entry (delete-then-forget, spec D1).
+"""
 from collections import OrderedDict
-from typing import Dict
+from collections.abc import Iterable, Mapping
+from importlib import import_module
+import sys
 import time
 
+# Parent of the mounted bd_shared directory, same convention as main.py:16
+sys.path.insert(0, '/')
+
+# bd_shared resolves only through the path bootstrap above, so it is imported
+# dynamically rather than as a static resolution target.
+_config = import_module("bd_shared.config")
+
 MAX_SESSIONS = 1024
-SESSION_TTL_SECONDS = 3600
 
 
-class SessionStore:
-    """LRU + TTL bounded session cache."""
+class SessionIndex:
+    """Recency-ordered set of live session ids, bounded by the caller."""
 
-    def __init__(self, max_size: int = MAX_SESSIONS, ttl: float = float(SESSION_TTL_SECONDS)):
-        self._store: OrderedDict = OrderedDict()
-        self._accessed: Dict[str, float] = {}
-        self._max_size = max_size
-        self._ttl = ttl
+    def __init__(
+        self,
+        max_size: int = MAX_SESSIONS,
+        ttl: float = _config.CHECKPOINT_TTL_SECONDS,
+    ):
+        self._recency: "OrderedDict[str, float]" = OrderedDict()
+        self._max_size: int = max_size
+        self._ttl: float = ttl
 
-    def _expired(self, session_id: str) -> bool:
-        return time.monotonic() - self._accessed.get(session_id, 0.0) > self._ttl
+    def __len__(self) -> int:
+        return len(self._recency)
 
-    def __contains__(self, session_id: object) -> bool:
-        if not isinstance(session_id, str) or session_id not in self._store:
-            return False
-        if self._expired(session_id):
-            self._drop(session_id)
-            return False
-        return True
+    @property
+    def max_size(self) -> int:
+        """Capacity the caller enforces before admitting a new session."""
+        return self._max_size
 
-    def __getitem__(self, session_id: str):
-        if session_id not in self._store:
-            raise KeyError(session_id)
-        if self._expired(session_id):
-            self._drop(session_id)
-            raise KeyError(session_id)
-        self._store.move_to_end(session_id)
-        self._accessed[session_id] = time.monotonic()
-        return self._store[session_id]
+    async def touch(self, session_id: str) -> None:
+        """Admit the session id, or refresh the recency of one already indexed."""
+        self._recency.pop(session_id, None)
+        self._recency[session_id] = time.monotonic()
 
-    def __setitem__(self, session_id: str, value) -> None:
-        if session_id in self._store:
-            self._store.move_to_end(session_id)
-        elif len(self._store) >= self._max_size:
-            oldest, _ = self._store.popitem(last=False)
-            self._accessed.pop(oldest, None)
-        self._store[session_id] = value
-        self._accessed[session_id] = time.monotonic()
+    async def is_live(self, session_id: str) -> bool:
+        """Report whether the id is indexed and still inside its TTL."""
+        stamp = self._recency.get(session_id)
+        return stamp is not None and not self._is_expired(stamp)
 
-    def _drop(self, session_id: str) -> None:
-        self._store.pop(session_id, None)
-        self._accessed.pop(session_id, None)
+    async def drop(self, session_id: str) -> None:
+        """Forget the session id; unknown ids are ignored so retries stay safe."""
+        self._recency.pop(session_id, None)
+
+    async def expired_ids(self) -> list[str]:
+        """List ids past their TTL, oldest first. Removal is left to the caller."""
+        return [sid for sid, stamp in self._recency.items() if self._is_expired(stamp)]
+
+    async def lru_victim(self, pinned: Mapping[str, int]) -> str | None:
+        """Return the least recently touched unpinned id, or None when all are pinned.
+
+        `pinned` is a refcount mapping: an id with a positive count has a request
+        in flight and can never be evicted (spec D3).
+        """
+        for session_id in self._recency:
+            if pinned.get(session_id, 0) <= 0:
+                return session_id
+        return None
+
+    async def seed(self, newest_first_ids: Iterable[str]) -> None:
+        """Install newest-first ids oldest-first, restarting the TTL clock (spec D7)."""
+        for session_id in reversed(list(newest_first_ids)):
+            await self.touch(session_id)
+
+    def _is_expired(self, stamp: float) -> bool:
+        return time.monotonic() - stamp > self._ttl
