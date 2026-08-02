@@ -31,6 +31,7 @@ help:
 	@echo ""
 
 generate-env:
+	[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
 	poetry run python generate_env.py
 
 start: generate-env
