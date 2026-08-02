@@ -279,33 +279,6 @@ class GameDataService:
             'wins': wins_list
         }
 
-    def execute_custom_query(self, query_description: str, params: Dict[str, Any]) -> pd.DataFrame:
-        """
-        Execute a custom query based on description and parameters.
-        This method interprets common query patterns.
-
-        Args:
-            query_description: Description of what to query
-            params: Parameters for the query
-
-        Returns:
-            DataFrame with query results
-        """
-        # This is a simplified version - can be extended based on needs
-        if 'top' in query_description.lower() and 'team' in query_description.lower():
-            limit = params.get('limit', 10)
-            return self.get_top_teams(limit)
-        elif 'game' in query_description.lower() and 'date' in query_description.lower():
-            start_date = params.get('start_date')
-            end_date = params.get('end_date')
-            if start_date:
-                game_ids = self.get_games_by_date_range(start_date, end_date)
-                scores = self.get_team_game_scores()
-                return scores[scores['game_id'].isin(game_ids)]
-
-        # Default: return all team game scores
-        return self.get_team_game_scores()
-
     def get_top_teams(self, limit: int = 10) -> pd.DataFrame:
         """Get top teams by total points."""
         df = self.get_team_game_scores()
