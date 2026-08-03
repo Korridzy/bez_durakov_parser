@@ -95,6 +95,12 @@ env_files: dict[str, dict[str, str]] = {
         "OPENAI_API_KEY": dotenv_quote(
             cast(str, webreport_config.get("openai_api_key", ""))
         ),
+        "OPENROUTER_API_KEY": dotenv_quote(
+            cast(str, webreport_config.get("openrouter_api_key", ""))
+        ),
+        "OPENCODE_API_KEY": dotenv_quote(
+            cast(str, webreport_config.get("opencode_api_key", ""))
+        ),
     },
 }
 
