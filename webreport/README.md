@@ -94,6 +94,8 @@ cd webreport
 - `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
+`../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.
+
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
 
@@ -106,12 +108,13 @@ cd webreport
 | `.env.backend` | `BD_DOCKER` и debug/reload backend |
 | `.env.data_collector` | `BD_DOCKER` и timezone data collector |
 | `.env.frontend` | URL backend и debug/reload frontend |
+| `.env.litellm` | `OPENAI_API_KEY` для LiteLLM |
 
-Не редактируйте сгенерированные `.env*` вручную. Для изменения настроек обновите `../bd_shared/config.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
+Не редактируйте сгенерированные `.env*` вручную. Для изменения серверных настроек обновите `../bd_shared/config.local.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
 
 Запущенные на хосте `parse_data.py` и Alembic используют `[database].url`. Backend и data collector получают `[database].docker_url` через `bd_shared/config.py`, а контейнер MySQL — сгенерированные из этого URL значения `MYSQL_DATABASE`, `MYSQL_USER` и `MYSQL_PASSWORD`. Для совместимости dev-стека `MYSQL_ROOT_PASSWORD` получает тот же пароль из `docker_url`.
 
-MySQL применяет эти значения при первой инициализации каталога данных. Изменение `config.toml` не меняет пользователей и пароли в уже существующем `../vm/mysql/mysql_data`.
+MySQL применяет эти значения при первой инициализации каталога данных. Изменение `config.local.toml` не меняет пользователей и пароли в уже существующем `../vm/mysql/mysql_data`.
 
 `[webreport].allowed_origins` управляет CORS для backend. По умолчанию используются локальные frontend origins:
 
@@ -145,13 +148,13 @@ docker compose up -d
 
 ### API key и режим агента (опционально)
 
-Укажите ключ в секции `[webreport]` файла `bd_shared/config.toml`:
+Укажите ключ в секции `[webreport]` файла `bd_shared/config.local.toml`:
 
 ```toml
 openai_api_key = "your-api-key-here"
 ```
 
-`generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.toml` отслеживается Git, поэтому не коммитьте локальную правку с настоящим ключом.
+`generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.local.toml` игнорируется Git и предназначен для настоящих ключей.
 При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
 
 После изменения ключа перезапустите стек командой `make restart`.
@@ -243,7 +246,7 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 
 1. Проверьте логи: `make logs SERVICE=backend` или `docker compose logs backend`
 2. Проверьте статус сервисов: `docker compose ps`
-3. Проверьте настройки в `../bd_shared/config.toml`
+3. Проверьте настройки в `../bd_shared/config.local.toml`
 4. Проверьте, что контейнер `mysql` поднят и доступен в Compose-сети
 5. Проверьте подключение backend к MySQL-сервису:
    ```bash
@@ -267,7 +270,7 @@ Backend в Docker подключается к БД по имени хоста `m
 
 1. Проверьте логи backend на результат глубокого LiteLLM probe: `make logs SERVICE=backend`.
 2. Проверьте LiteLLM из Compose-сети по адресу `http://litellm:4000`, он не имеет host port.
-3. Укажите `openai_api_key` в секции `[webreport]` файла `../bd_shared/config.toml` и перезапустите backend через `make restart`.
+3. Укажите `openai_api_key` в секции `[webreport]` файла `../bd_shared/config.local.toml` и перезапустите backend через `make restart`.
 4. Без ключа или при неуспешном probe backend намеренно запускается в keyless `fallback` mode. Он не переключается в `agent` mode во время работы, перезапуск нужен для новой проверки.
 
 ### Порты заняты

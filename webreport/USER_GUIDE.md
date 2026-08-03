@@ -279,10 +279,10 @@ A:
 **Q: Как использовать с настоящими AI агентами?**
 
 A:
-1. Убедитесь, что `bd_shared/config.toml` настроен для WebReport
-2. Укажите ключ в `[webreport].openai_api_key` файла `bd_shared/config.toml`
+1. Создайте `bd_shared/config.local.toml` из `config.local.toml.example`
+2. Укажите ключ в `[webreport].openai_api_key` файла `bd_shared/config.local.toml`
 3. Запустите или перезапустите стек: `make start` / `make restart`
-4. Учтите, что Compose и service env-файлы генерируются `generate_env.py` из `bd_shared/config.toml`
+4. Учтите, что Compose и service env-файлы генерируются `generate_env.py` из объединённых `bd_shared/config.toml` и `config.local.toml`
 
 ### Вопросы по данным
 

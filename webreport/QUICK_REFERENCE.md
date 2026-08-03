@@ -100,11 +100,15 @@ pkill -f streamlit
 ```bash
 cat ../bd_shared/config.toml
 
+# Создать server-local overlay
+cp ../bd_shared/config.local.toml.example ../bd_shared/config.local.toml
+chmod 600 ../bd_shared/config.local.toml
+
 # Сгенерировать Compose/service env-файлы
 make generate-env
 ```
 
-Для LangGraph `agent` mode (опционально) добавьте в секцию `[webreport]`:
+Для LangGraph `agent` mode (опционально) добавьте в `[webreport]` файла `../bd_shared/config.local.toml`:
 
 ```toml
 openai_api_key = "your-openai-api-key-here"
@@ -112,7 +116,7 @@ openai_api_key = "your-openai-api-key-here"
 
 При запуске backend выполняет глубокий LiteLLM probe и один раз выбирает `agent` или keyless `fallback` mode. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
 
-### Секции в `bd_shared/config.toml`
+### Секции в `bd_shared/config.toml` и `config.local.toml`
 - `[database]` — настройки подключения к БД
 - `[application]` — общие флаги приложения
 - `[webreport]` — порты, CORS (`allowed_origins`), `openai_api_key` и debug-настройки WebReport
