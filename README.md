@@ -155,6 +155,12 @@ $ make webreport-start
 $ make webreport-stop
 ```
 
+Перезапуск WebReport с повторной генерацией service env-файлов:
+
+```bash
+$ make restart
+```
+
 #### Только база данных
 
 Если нужна только MySQL для работы с парсером (без WebReport):
