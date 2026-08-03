@@ -12,7 +12,7 @@ Central library providing ORM models, database operations, configuration, and ga
 | `bd_game.py` | `BdGame` dataclass — in-memory game representation, XLSM parser logic |
 | `db_helpers.py` | High-level helpers: `initialize_database()`, `save_game_to_database()` |
 | `config.py` | TOML config loader. Constants: `DATABASE_URL`, `DEFAULT_GAME_DATE`, `XLSM_FETCH_CONFIG` |
-| `config.toml` | Production config (DB URL, ports, app settings). Override via `BD_CONFIG_FILE` env var |
+| `config.toml` | Tracked base config. `config.local.toml` is an ignored server-local overlay; `BD_CONFIG_FILE` selects a complete alternate config |
 | `test_config.toml` | Test DB config — used by `test_alembic_migration.py` |
 
 ## WHERE TO LOOK
@@ -36,7 +36,7 @@ Central library providing ORM models, database operations, configuration, and ga
 - All DB queries go through `Database` class methods — never raw SQL
 - `normalize_team_name()` MUST be called before any team name storage/comparison
 - `BdGame._game_data` dict is the canonical in-memory representation; use `get_data()` to access
-- Config loading is eager (module-level) — importing `config.py` reads TOML immediately
+- Config loading is eager (module-level) — importing `config.py` loads `config.toml` and its optional `config.local.toml` overlay immediately
 - `db_helpers.py` re-exports `normalize_team_name` for backward compat
 
 ## ANTI-PATTERNS
