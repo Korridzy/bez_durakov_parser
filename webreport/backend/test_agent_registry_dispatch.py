@@ -68,6 +68,45 @@ class RegistryDispatchTests(RegistryCaseBase):
 
         self.assertNotEqual(self.service.call_threads, [threading.get_ident()])
 
+    async def test_execute_normalized_converts_off_the_event_loop(self):
+        """Given a DataFrame result, When execute_normalized runs, Then to_dict leaves the loop thread."""
+        conversion_threads = []
+
+        class RecordingFrame(self.pd.DataFrame):
+            @property
+            def _constructor(self):
+                return RecordingFrame
+
+            def to_dict(self, *args, **kwargs):
+                conversion_threads.append(threading.get_ident())
+                return super().to_dict(*args, **kwargs)
+
+        self.service.results["get_all_games_summary"] = RecordingFrame([{"game_id": 1}])
+
+        records, cols = await self.registry.execute_normalized("get_all_games_summary", {})
+
+        self.assertEqual(records, [{"game_id": 1}])
+        self.assertEqual(cols, ["game_id"])
+        self.assertEqual(len(conversion_threads), 1)
+        self.assertNotIn(threading.get_ident(), conversion_threads)
+
+    async def test_execute_response_converts_off_the_event_loop(self):
+        """Given a frame-like result, When execute_response runs, Then to_dict leaves the loop thread."""
+        conversion_threads = []
+
+        class RecordingResult:
+            def to_dict(self, orient):
+                conversion_threads.append(threading.get_ident())
+                return [{"team_name": "X", "orient": orient}]
+
+        self.service.results["get_top_teams"] = RecordingResult()
+
+        response = await self.registry.execute_response("get_top_teams", {"limit": 1})
+
+        self.assertEqual(response, [{"team_name": "X", "orient": "records"}])
+        self.assertEqual(len(conversion_threads), 1)
+        self.assertNotIn(threading.get_ident(), conversion_threads)
+
     async def test_execute_raw_resolves_the_method_late(self):
         """Given a method patched after construction, When execute_raw runs, Then the patch is used."""
         patched_calls = []

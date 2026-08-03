@@ -2,9 +2,10 @@
 import asyncio
 import importlib
 import inspect
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from typing import Any
 
 # Resolved at import time exactly like a static import - a missing package still
@@ -144,21 +145,36 @@ class ToolRegistry:
                     ) from error
         return adapted
 
-    async def execute_raw(self, name: str, args: Mapping[str, Any]) -> Any:
-        self.validate_args(name, args)
-        call_args = self._adapt_args(name, args)
-
+    def _call_and_convert(
+        self,
+        name: str,
+        call_args: Mapping[str, Any],
+        convert: Callable[[Any], Any],
+    ) -> Any:
         try:
             # Resolved per call so a method patched after construction still wins.
             method = getattr(self.service, name)
-            return await asyncio.to_thread(method, **call_args)
+            result = method(**call_args)
         except Exception as error:
             raise ToolError(f"Tool '{name}' failed: {error}") from error
+        # Converting here keeps every pandas traversal on the worker thread that
+        # already ran the query, instead of handing a frame back to the event loop.
+        return convert(result)
+
+    async def _execute(
+        self, name: str, args: Mapping[str, Any], convert: Callable[[Any], Any]
+    ) -> Any:
+        self.validate_args(name, args)
+        call_args = self._adapt_args(name, args)
+        return await asyncio.to_thread(self._call_and_convert, name, call_args, convert)
+
+    async def execute_raw(self, name: str, args: Mapping[str, Any]) -> Any:
+        return await self._execute(name, args, lambda result: result)
 
     async def execute_normalized(
         self, name: str, args: Mapping[str, Any]
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        return _normalize_result(name, await self.execute_raw(name, args))
+        return await self._execute(name, args, partial(_normalize_result, name))
 
     async def execute_response(self, name: str, args: Mapping[str, Any]) -> Any:
-        return _as_response(await self.execute_raw(name, args))
+        return await self._execute(name, args, _as_response)
