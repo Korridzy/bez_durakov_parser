@@ -25,6 +25,7 @@ registry_shapes = importlib.import_module("test_agent_registry_shapes")
 tools_commands = importlib.import_module("test_agent_tools_commands")
 tools_metadata = importlib.import_module("test_agent_tools_metadata")
 graph_cases = importlib.import_module("test_agent_graph")
+report_agent_cases = importlib.import_module("test_agent_report_agent")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
 
@@ -109,6 +110,10 @@ class TestTools(
 
 class TestGraph(graph_cases.GraphTests):
     """Bounded sequential ReAct graph exercised with an offline scripted model."""
+
+
+class TestReportAgentSystem(report_agent_cases.ReportAgentSystemTests):
+    """Fixed-mode report adapter with frozen fallback and checkpoint continuity."""
 
 
 if __name__ == "__main__":
