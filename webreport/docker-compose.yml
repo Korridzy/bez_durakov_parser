@@ -18,8 +18,9 @@ services:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: webreport-litellm
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    env_file:
+      - path: .env.litellm
+        required: false
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
     networks:
