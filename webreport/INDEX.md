@@ -47,8 +47,7 @@ webreport/
 └── docker-compose.yml   - Docker конфигурация
 ```
 
-Источник схемы конфигурации: `../bd_shared/config.toml`
-с секциями `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]`.
+Источник схемы конфигурации: отслеживаемый `../bd_shared/config.toml` с секциями `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]`. Серверные параметры задаются в игнорируемом `../bd_shared/config.local.toml`, который заменяет значения базового файла по секциям.
 
 ### Docker и утилиты
 ```

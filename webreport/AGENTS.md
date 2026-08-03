@@ -33,7 +33,7 @@ webreport/
 | Agent mode | `backend/main.py` | Startup LiteLLM probe elects `agent` or `fallback` |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
-| Source config | `../bd_shared/config.toml` | Sections: `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]` |
+| Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections |
 | Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives `openai_api_key` from `.env.litellm` |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
@@ -44,8 +44,8 @@ webreport/
 - **Startup-elected mode**: A deep LiteLLM probe selects `agent` mode when the configured model is available, otherwise keyless `fallback` mode. The selected mode is immutable for the process lifetime.
 - **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. Game data remains MySQL-only.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
-- **Config flow**: `bd_shared/config.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
-- **CORS config**: backend reads allowed origins from `bd_shared/config.toml` `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
+- **Config flow**: `bd_shared/config.toml` + optional `config.local.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
+- **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: Backend connects to MySQL at `mysql:3306` (Docker network), not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
 - **Dev container pattern**: backend, frontend, and data_collector install dependencies in the image and mount service code at runtime; code-only changes should not require image rebuilds

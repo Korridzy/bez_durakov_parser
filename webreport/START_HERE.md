@@ -255,11 +255,11 @@ docker compose logs -f
 ## ✅ Чеклист перед первым запуском
 
 - [ ] База данных доступна (MySQL)
-- [ ] bd_shared/config.toml настроен правильно
+- [ ] Создан `bd_shared/config.local.toml` для server-specific настроек
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
 - [ ] Выполнен `make start` из каталога `webreport/`
-- [ ] (Опционально) `openai_api_key` указан в `[webreport]` файла `bd_shared/config.toml`
+- [ ] (Опционально) `openai_api_key` указан в `[webreport]` файла `bd_shared/config.local.toml`
 
 ---
 
