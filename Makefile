@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help setup upgrade-db upgrade-code webreport-start webreport-stop mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -15,6 +15,7 @@ help:
 	@echo "WebReport stack:"
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
 	@echo "  make webreport-stop  - Stop WebReport stack"
+	@echo "  make restart         - Restart WebReport stack"
 	@echo "  make mysql-start     - Start only MySQL container"
 	@echo "  make mysql-stop      - Stop only MySQL container"
 	@echo ""
@@ -135,6 +136,9 @@ webreport-start:
 webreport-stop:
 	@echo "🛑 Остановка WebReport..."
 	cd webreport && $(MAKE) stop
+
+restart:
+	$(MAKE) -C webreport restart
 
 # MySQL only management
 mysql-start:
