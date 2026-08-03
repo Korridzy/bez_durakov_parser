@@ -259,7 +259,7 @@ docker compose logs -f
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
 - [ ] Выполнен `make start` из каталога `webreport/`
-- [ ] (Опционально) `OPENAI_API_KEY` экспортирован в shell
+- [ ] (Опционально) `openai_api_key` указан в `[webreport]` файла `bd_shared/config.toml`
 
 ---
 
