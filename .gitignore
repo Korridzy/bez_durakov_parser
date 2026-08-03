@@ -20,6 +20,7 @@ xlsm_archive/*
 
 # Secrets
 secret/
+bd_shared/config.local.toml
 
 # VM directory
 vm/
