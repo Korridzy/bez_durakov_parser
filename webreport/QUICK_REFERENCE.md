@@ -102,9 +102,12 @@ cat ../bd_shared/config.toml
 
 # Сгенерировать Compose/service env-файлы
 make generate-env
+```
 
-# Для LangGraph agent mode (опционально)
-export OPENAI_API_KEY=your-openai-api-key-here
+Для LangGraph `agent` mode (опционально) добавьте в секцию `[webreport]`:
+
+```toml
+openai_api_key = "your-openai-api-key-here"
 ```
 
 При запуске backend выполняет глубокий LiteLLM probe и один раз выбирает `agent` или keyless `fallback` mode. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
@@ -112,7 +115,7 @@ export OPENAI_API_KEY=your-openai-api-key-here
 ### Секции в `bd_shared/config.toml`
 - `[database]` — настройки подключения к БД
 - `[application]` — общие флаги приложения
-- `[webreport]` — порты, CORS (`allowed_origins`) и debug-настройки WebReport
+- `[webreport]` — порты, CORS (`allowed_origins`), `openai_api_key` и debug-настройки WebReport
 - `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
 Для `[xlsm_fetch].modes` используйте только `browser_selenium`.

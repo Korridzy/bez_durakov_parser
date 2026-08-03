@@ -145,15 +145,16 @@ docker compose up -d
 
 ### API key и режим агента (опционально)
 
-`OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не записывается ни в один сгенерированный env-файл.
+Укажите ключ в секции `[webreport]` файла `bd_shared/config.toml`:
+
+```toml
+openai_api_key = "your-api-key-here"
+```
+
+`generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.toml` отслеживается Git, поэтому не коммитьте локальную правку с настоящим ключом.
 При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
 
-Для `agent` mode экспортируйте ключ в shell перед запуском:
-
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-make start
-```
+После изменения ключа перезапустите стек командой `make restart`.
 
 LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 
@@ -266,7 +267,7 @@ Backend в Docker подключается к БД по имени хоста `m
 
 1. Проверьте логи backend на результат глубокого LiteLLM probe: `make logs SERVICE=backend`.
 2. Проверьте LiteLLM из Compose-сети по адресу `http://litellm:4000`, он не имеет host port.
-3. Для `agent` mode экспортируйте `OPENAI_API_KEY=your-key-here` и перезапустите backend через `make restart`.
+3. Укажите `openai_api_key` в секции `[webreport]` файла `../bd_shared/config.toml` и перезапустите backend через `make restart`.
 4. Без ключа или при неуспешном probe backend намеренно запускается в keyless `fallback` mode. Он не переключается в `agent` mode во время работы, перезапуск нужен для новой проверки.
 
 ### Порты заняты

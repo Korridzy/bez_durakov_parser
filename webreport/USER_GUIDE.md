@@ -280,7 +280,7 @@ A:
 
 A:
 1. Убедитесь, что `bd_shared/config.toml` настроен для WebReport
-2. Экспортируйте OpenAI API ключ в shell: `export OPENAI_API_KEY=ваш-ключ`
+2. Укажите ключ в `[webreport].openai_api_key` файла `bd_shared/config.toml`
 3. Запустите или перезапустите стек: `make start` / `make restart`
 4. Учтите, что Compose и service env-файлы генерируются `generate_env.py` из `bd_shared/config.toml`
 
