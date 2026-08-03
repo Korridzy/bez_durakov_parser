@@ -28,13 +28,14 @@ logger = logging.getLogger(__name__)
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
-from session_store import SessionIndex
+from session_store import MAX_SESSIONS, SessionIndex
 
 aiosqlite = importlib.import_module("aiosqlite")
 AsyncSqliteSaver = importlib.import_module(
     "langgraph.checkpoint.sqlite.aio"
 ).AsyncSqliteSaver
 requests = importlib.import_module("requests")
+langchain_messages = importlib.import_module("langchain_core.messages")
 
 
 # Pydantic models for request/response
@@ -50,7 +51,7 @@ class ChatResponse(BaseModel):
     session_id: str
     mode: str
     data: Optional[Any] = None
-    query_info: Optional[Dict[str, Any]] = None
+    query_info: list[Dict[str, Any]]
     message: str
     timestamp: str
     error: Optional[str] = None
@@ -98,7 +99,12 @@ checkpoint_connection = None
 checkpoint_saver = None
 data_service: Optional[GameDataService] = None
 llm_proxy_healthy: bool = False
-sessions: SessionIndex = SessionIndex(ttl=CHECKPOINT_TTL_SECONDS)
+sessions: SessionIndex = SessionIndex(
+    max_size=MAX_SESSIONS,
+    ttl=CHECKPOINT_TTL_SECONDS,
+)
+pinned: dict[str, int] = {}
+admission_lock = asyncio.Lock()
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2
@@ -282,41 +288,61 @@ async def chat(message: ChatMessage):
     Returns:
         Chat response with report data
     """
-    if not agent_system:
+    system = agent_system
+    saver = checkpoint_saver
+    if system is None or saver is None:
         raise HTTPException(status_code=503, detail="Agent system not available")
 
+    session_id = message.session_id or uuid.uuid4().hex
+    pinned_added = False
     try:
-        # Anonymous callers each get a fresh session so they never share
-        # conversation history or agent state with other clients.
-        session_id = message.session_id or uuid.uuid4().hex
-        if session_id not in sessions:
-            sessions[session_id] = ReportAgentSystem(service=data_service)
+        async with admission_lock:
+            for expired_id in await sessions.expired_ids():
+                if pinned.get(expired_id, 0) > 0:
+                    continue
+                await saver.adelete_thread(expired_id)
+                await sessions.drop(expired_id)
 
-        session_agent = sessions[session_id]
+            pinned[session_id] = pinned.get(session_id, 0) + 1
+            pinned_added = True
 
-        # Process the request
-        result = session_agent.process_user_request(message.message)
+            if not await sessions.is_live(session_id) and len(sessions) >= sessions.max_size:
+                victim = await sessions.lru_victim(pinned)
+                if victim is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Сервер перегружен, повторите позже",
+                    )
+                await saver.adelete_thread(victim)
+                await sessions.drop(victim)
 
-        if result.get("success"):
-            return ChatResponse(
-                success=True,
-                session_id=session_id,
-                data=result.get("data"),
-                query_info=result.get("query"),
-                message=result.get("message", "Report generated successfully"),
-                timestamp=result.get("timestamp", datetime.now().isoformat())
-            )
-        else:
-            return ChatResponse(
-                success=False,
-                session_id=session_id,
-                message="Failed to generate report",
-                error=result.get("error", "Unknown error"),
-                timestamp=result.get("timestamp", datetime.now().isoformat())
-            )
+            await sessions.touch(session_id)
 
+        result = await system.process_user_request(
+            message.message,
+            session_id=session_id,
+        )
+        return ChatResponse(
+            success=result["success"],
+            session_id=session_id,
+            mode=result["mode"],
+            data=result.get("data"),
+            query_info=result["query_info"],
+            message=result["message"],
+            timestamp=result["timestamp"],
+            error=result.get("error"),
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise _internal_error(e)
+    finally:
+        if pinned_added:
+            remaining_pins = pinned[session_id] - 1
+            if remaining_pins > 0:
+                pinned[session_id] = remaining_pins
+            else:
+                del pinned[session_id]
 
 
 @app.get("/api/history/{session_id}")
@@ -330,13 +356,41 @@ async def get_history(session_id: str):
     Returns:
         Conversation history
     """
-    if session_id not in sessions:
-        return {"history": []}
+    saver = checkpoint_saver
+    if saver is None:
+        raise HTTPException(status_code=503, detail="Checkpoint store not available")
 
-    return {
-        "session_id": session_id,
-        "history": sessions[session_id].get_conversation_history()
-    }
+    async with admission_lock:
+        if not await sessions.is_live(session_id):
+            await saver.adelete_thread(session_id)
+            await sessions.drop(session_id)
+            return {"history": []}
+
+        await sessions.touch(session_id)
+        checkpoint_tuple = await saver.aget_tuple(
+            {"configurable": {"thread_id": session_id}}
+        )
+
+    history = []
+    if checkpoint_tuple is not None:
+        stored_messages = checkpoint_tuple.checkpoint.get(
+            "channel_values", {}
+        ).get("messages", [])
+        for stored_message in stored_messages:
+            if isinstance(stored_message, langchain_messages.HumanMessage):
+                history.append(
+                    {"role": "user", "content": str(stored_message.content)}
+                )
+            elif (
+                isinstance(stored_message, langchain_messages.AIMessage)
+                and stored_message.content
+                and not stored_message.tool_calls
+            ):
+                history.append(
+                    {"role": "assistant", "content": str(stored_message.content)}
+                )
+
+    return {"session_id": session_id, "history": history}
 
 
 @app.post("/api/clear/{session_id}")
@@ -347,8 +401,13 @@ async def clear_history(session_id: str):
     Args:
         session_id: Session identifier
     """
-    if session_id in sessions:
-        sessions[session_id].clear_history()
+    saver = checkpoint_saver
+    if saver is None:
+        raise HTTPException(status_code=503, detail="Checkpoint store not available")
+
+    async with admission_lock:
+        await saver.adelete_thread(session_id)
+        await sessions.drop(session_id)
 
     return {
         "success": True,

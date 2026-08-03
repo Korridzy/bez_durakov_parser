@@ -5,6 +5,8 @@ Tests all components: services, agents, API.
 import sys
 import os
 import asyncio
+import importlib
+import json as json_module
 from typing import Any
 
 import unittest
@@ -15,7 +17,6 @@ from datetime import date, datetime
 testclient = None
 try:
     from main import app
-    import json as json_module
     from io import BytesIO
     
     class ASGITestClient:
@@ -134,10 +135,11 @@ try:
             """Make a POST request with optional JSON body."""
             return self._call("POST", path, json_data=json)
     
-    if any(
-        argument.startswith("test_system.TestStartupInitialization")
-        for argument in sys.argv
-    ):
+    startup_free_test_classes = (
+        "test_system.TestSessionLifecycleAPI",
+        "test_system.TestStartupInitialization",
+    )
+    if any(argument.startswith(startup_free_test_classes) for argument in sys.argv):
         testclient = None
     else:
         with patch("main.probe_llm_proxy", new=AsyncMock(return_value=False)):
@@ -489,6 +491,21 @@ class TestAPI(unittest.TestCase):
         """Set up test fixtures."""
         cls.client = testclient
 
+    def setUp(self):
+        main_module = importlib.import_module("main")
+        session_store = importlib.import_module("session_store")
+
+        setattr(
+            main_module,
+            "sessions",
+            session_store.SessionIndex(
+                max_size=session_store.MAX_SESSIONS,
+                ttl=getattr(main_module, "CHECKPOINT_TTL_SECONDS"),
+            ),
+        )
+        setattr(main_module, "pinned", {})
+        setattr(main_module, "admission_lock", asyncio.Lock())
+
     @classmethod
     def tearDownClass(cls):
         if cls.client is not None:
@@ -658,14 +675,17 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            def process_user_request(self, _msg):
-                return {"success": True, "message": "ok", "timestamp": "t"}
+            async def process_user_request(self, _msg, session_id):
+                return {
+                    "success": True,
+                    "data": None,
+                    "message": "ok",
+                    "mode": "fallback",
+                    "query_info": [],
+                    "timestamp": "t",
+                }
 
-        main_module.sessions._store.clear()
-        main_module.sessions._accessed.clear()
-
-        with patch.object(main_module, "agent_system", object()), \
-             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+        with patch.object(main_module, "agent_system", _StubAgent()):
             response = self.client.post("/api/chat", json={"message": "hi"})
 
         self.assertEqual(response.status_code, 200)
@@ -674,9 +694,14 @@ class TestAPI(unittest.TestCase):
         self.assertIsInstance(sid, str)
         self.assertTrue(sid, "Response must include a non-empty session_id")
         self.assertNotEqual(sid, "default", "Server must not fall back to the shared 'default' id")
-        self.assertNotIn("default", main_module.sessions._store,
-                         "Server must not create a shared 'default' session entry")
-        self.assertIn(sid, main_module.sessions._store, "Session must be stored under the assigned id")
+        self.assertFalse(
+            self.client.loop.run_until_complete(main_module.sessions.is_live("default")),
+            "Server must not create a shared 'default' session entry",
+        )
+        self.assertTrue(
+            self.client.loop.run_until_complete(main_module.sessions.is_live(sid)),
+            "Session must be stored under the assigned id",
+        )
         print("✅ API chat: assigns server-side session_id when client omits it")
 
     def test_regression_chat_without_session_id_yields_distinct_sessions(self):
@@ -687,14 +712,17 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            def process_user_request(self, _msg):
-                return {"success": True, "message": "ok", "timestamp": "t"}
+            async def process_user_request(self, _msg, session_id):
+                return {
+                    "success": True,
+                    "data": None,
+                    "message": "ok",
+                    "mode": "fallback",
+                    "query_info": [],
+                    "timestamp": "t",
+                }
 
-        main_module.sessions._store.clear()
-        main_module.sessions._accessed.clear()
-
-        with patch.object(main_module, "agent_system", object()), \
-             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+        with patch.object(main_module, "agent_system", _StubAgent()):
             r1 = self.client.post("/api/chat", json={"message": "a"})
             r2 = self.client.post("/api/chat", json={"message": "b"})
 
@@ -714,15 +742,19 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            def process_user_request(self, _msg):
-                return {"success": True, "message": "ok", "timestamp": "t"}
+            async def process_user_request(self, _msg, session_id):
+                return {
+                    "success": True,
+                    "data": None,
+                    "message": "ok",
+                    "mode": "fallback",
+                    "query_info": [],
+                    "timestamp": "t",
+                }
 
-        main_module.sessions._store.clear()
-        main_module.sessions._accessed.clear()
         explicit = "client-supplied-id-12345"
 
-        with patch.object(main_module, "agent_system", object()), \
-             patch.object(main_module, "ReportAgentSystem", lambda service=None: _StubAgent()):
+        with patch.object(main_module, "agent_system", _StubAgent()):
             response = self.client.post(
                 "/api/chat", json={"message": "hi", "session_id": explicit}
             )
@@ -730,8 +762,473 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("session_id"), explicit,
                          "Explicit client session_id must be preserved")
-        self.assertIn(explicit, main_module.sessions._store)
+        self.assertTrue(
+            self.client.loop.run_until_complete(main_module.sessions.is_live(explicit))
+        )
         print("✅ API chat: explicit client session_id is preserved")
+
+
+class _LifecycleCheckpointTuple:
+    def __init__(self, messages):
+        self.checkpoint = {"channel_values": {"messages": messages}}
+
+
+class _LifecycleSaver:
+    def __init__(self):
+        self.deleted = []
+        self.delete_failures = {}
+        self.threads = {}
+
+    async def adelete_thread(self, session_id):
+        self.deleted.append(session_id)
+        remaining_failures = self.delete_failures.get(session_id, 0)
+        if remaining_failures:
+            self.delete_failures[session_id] = remaining_failures - 1
+            raise RuntimeError(f"delete failed for {session_id}")
+        self.threads.pop(session_id, None)
+
+    async def aget_tuple(self, config):
+        session_id = config["configurable"]["thread_id"]
+        messages = self.threads.get(session_id)
+        if messages is None:
+            return None
+        return _LifecycleCheckpointTuple(messages)
+
+
+class _LifecycleAgent:
+    def __init__(
+        self,
+        result=None,
+        saver=None,
+        releases=None,
+        expected_starts=0,
+    ):
+        self.result = result or {
+            "success": True,
+            "data": None,
+            "message": "ok",
+            "mode": "fallback",
+            "query_info": [{"tool": "stub", "args": {}}],
+            "timestamp": "t",
+        }
+        self.saver = saver
+        self.releases = releases or {}
+        self.expected_starts = expected_starts
+        self.calls = []
+        self.all_started = asyncio.Event()
+
+    async def process_user_request(self, user_message, session_id):
+        self.calls.append((user_message, session_id))
+        if len(self.calls) >= self.expected_starts:
+            self.all_started.set()
+
+        if self.saver is not None:
+            message_module = importlib.import_module("langchain_core.messages")
+            self.saver.threads[session_id] = [
+                message_module.HumanMessage(content=user_message),
+                message_module.AIMessage(
+                    content="",
+                    tool_calls=[{"name": "stub", "args": {}, "id": "call-1"}],
+                ),
+                message_module.ToolMessage(content="tool data", tool_call_id="call-1"),
+                message_module.AIMessage(content="ok"),
+            ]
+
+        release = self.releases.get(user_message)
+        if release is not None:
+            await release.wait()
+        return dict(self.result)
+
+
+class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+        self.main: Any = None
+        self.session_store: Any = None
+        self.previous: dict[str, Any] = {}
+        self.saver = _LifecycleSaver()
+
+    async def asyncSetUp(self):
+        main_module = importlib.import_module("main")
+        session_store = importlib.import_module("session_store")
+
+        self.main = main_module
+        self.session_store = session_store
+        self.previous = {
+            "admission_lock": self.main.admission_lock,
+            "agent_system": self.main.agent_system,
+            "checkpoint_saver": self.main.checkpoint_saver,
+            "pinned": self.main.pinned,
+            "sessions": self.main.sessions,
+        }
+        self.main.admission_lock = asyncio.Lock()
+        self.main.pinned = {}
+        self.main.sessions = session_store.SessionIndex(max_size=4, ttl=60)
+        self.saver = _LifecycleSaver()
+        self.main.checkpoint_saver = self.saver
+        self.main.agent_system = _LifecycleAgent()
+
+    async def asyncTearDown(self):
+        for name, value in self.previous.items():
+            setattr(self.main, name, value)
+
+    def _set_capacity(self, max_size, ttl=60):
+        self.main.sessions = self.session_store.SessionIndex(
+            max_size=max_size,
+            ttl=ttl,
+        )
+
+    async def _request(self, method, path, payload=None):
+        headers = []
+        body = b""
+        if payload is not None:
+            headers.append((b"content-type", b"application/json"))
+            body = json_module.dumps(payload).encode("utf-8")
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "query_string": b"",
+            "root_path": "",
+            "headers": headers,
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 8000),
+            "state": {},
+        }
+        request_sent = False
+        response_status = None
+        response_parts = []
+
+        async def receive():
+            nonlocal request_sent
+            if not request_sent:
+                request_sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            nonlocal response_status
+            if message["type"] == "http.response.start":
+                response_status = message["status"]
+            elif message["type"] == "http.response.body":
+                response_parts.append(message.get("body", b""))
+
+        await self.main.app(scope, receive, send)
+        response_body = json_module.loads(b"".join(response_parts).decode("utf-8"))
+        return response_status, response_body
+
+    async def test_in_flight_session_is_never_evicted(self):
+        self._set_capacity(1)
+        release = asyncio.Event()
+        agent = _LifecycleAgent(releases={"hold": release}, expected_starts=1)
+        self.main.agent_system = agent
+
+        held_request = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "hold", "session_id": "held"},
+            )
+        )
+        await asyncio.wait_for(agent.all_started.wait(), timeout=1)
+        status, body = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "next", "session_id": "next"},
+        )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(body["detail"], "Сервер перегружен, повторите позже")
+        self.assertTrue(await self.main.sessions.is_live("held"))
+        self.assertFalse(await self.main.sessions.is_live("next"))
+        self.assertEqual(len(self.main.sessions), 1)
+
+        release.set()
+        held_status, _ = await held_request
+        self.assertEqual(held_status, 200)
+
+    async def test_delete_failure_retains_victim_and_retries_it(self):
+        self._set_capacity(1)
+        saver = self.saver
+        await self.main.sessions.touch("old")
+        saver.delete_failures["old"] = 1
+
+        failed_status, _ = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "first", "session_id": "first"},
+        )
+        self.assertEqual(failed_status, 500)
+        self.assertTrue(await self.main.sessions.is_live("old"))
+
+        retry_status, _ = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "second", "session_id": "second"},
+        )
+        self.assertEqual(retry_status, 200)
+        self.assertEqual(saver.deleted, ["old", "old"])
+        self.assertFalse(await self.main.sessions.is_live("old"))
+        self.assertTrue(await self.main.sessions.is_live("second"))
+
+    async def test_clear_unknown_session_returns_200(self):
+        status, body = await self._request("POST", "/api/clear/unknown")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(body["success"])
+        self.assertEqual(self.saver.deleted, ["unknown"])
+
+    async def test_all_pinned_capacity_returns_503_without_overshoot(self):
+        self._set_capacity(2)
+        await self.main.sessions.touch("one")
+        await self.main.sessions.touch("two")
+        self.main.pinned = {"one": 1, "two": 1}
+
+        status, body = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "new", "session_id": "new"},
+        )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(body["detail"], "Сервер перегружен, повторите позже")
+        self.assertEqual(len(self.main.sessions), 2)
+        self.assertNotIn("new", self.main.pinned)
+
+    async def test_two_requests_keep_same_session_pinned_until_both_finish(self):
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+        agent = _LifecycleAgent(
+            releases={"first": first_release, "second": second_release},
+            expected_starts=2,
+        )
+        self.main.agent_system = agent
+
+        first = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "first", "session_id": "shared"},
+            )
+        )
+        second = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "second", "session_id": "shared"},
+            )
+        )
+        await asyncio.wait_for(agent.all_started.wait(), timeout=1)
+        self.assertEqual(self.main.pinned["shared"], 2)
+
+        first_release.set()
+        first_status, _ = await first
+        self.assertEqual(first_status, 200)
+        self.assertEqual(self.main.pinned["shared"], 1)
+
+        second_release.set()
+        second_status, _ = await second
+        self.assertEqual(second_status, 200)
+        self.assertNotIn("shared", self.main.pinned)
+
+    async def test_simultaneous_admissions_never_double_pick_or_overshoot(self):
+        self._set_capacity(2)
+        await self.main.sessions.touch("old")
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+        agent = _LifecycleAgent(
+            releases={"first": first_release, "second": second_release},
+            expected_starts=2,
+        )
+        self.main.agent_system = agent
+
+        first = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "first", "session_id": "first"},
+            )
+        )
+        second = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "second", "session_id": "second"},
+            )
+        )
+        await asyncio.wait_for(agent.all_started.wait(), timeout=1)
+
+        self.assertEqual(len(self.main.sessions), 2)
+        self.assertEqual(self.saver.deleted, ["old"])
+        self.assertEqual(self.main.pinned, {"first": 1, "second": 1})
+
+        first_release.set()
+        second_release.set()
+        self.assertEqual((await first)[0], 200)
+        self.assertEqual((await second)[0], 200)
+
+    async def test_request_cancellation_always_unpins(self):
+        release = asyncio.Event()
+        agent = _LifecycleAgent(releases={"hold": release}, expected_starts=1)
+        self.main.agent_system = agent
+        request = asyncio.create_task(
+            self._request(
+                "POST",
+                "/api/chat",
+                {"message": "hold", "session_id": "cancelled"},
+            )
+        )
+        await asyncio.wait_for(agent.all_started.wait(), timeout=1)
+        self.assertEqual(self.main.pinned, {"cancelled": 1})
+
+        request.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await request
+
+        self.assertNotIn("cancelled", self.main.pinned)
+        self.assertTrue(await self.main.sessions.is_live("cancelled"))
+
+    async def test_expired_requested_session_is_deleted_then_readmitted(self):
+        clock = _FakeClock()
+        with patch.object(self.session_store, "time", clock):
+            self._set_capacity(1, ttl=1)
+            await self.main.sessions.touch("expired")
+            clock.advance(2)
+
+            status, _ = await self._request(
+                "POST",
+                "/api/chat",
+                {"message": "fresh", "session_id": "expired"},
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(self.saver.deleted, ["expired"])
+            self.assertTrue(await self.main.sessions.is_live("expired"))
+
+    async def test_failed_admission_deletion_leaves_no_pin(self):
+        self._set_capacity(1)
+        await self.main.sessions.touch("old")
+        self.saver.delete_failures["old"] = 1
+
+        status, _ = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "new", "session_id": "new"},
+        )
+
+        self.assertEqual(status, 500)
+        self.assertNotIn("new", self.main.pinned)
+        self.assertTrue(await self.main.sessions.is_live("old"))
+        self.assertFalse(await self.main.sessions.is_live("new"))
+
+    async def test_recursion_and_timeout_failures_are_200_json(self):
+        for name, error in (("recursion", "recursion_limit"), ("timeout", "timeout")):
+            with self.subTest(name=name):
+                self.main.agent_system = _LifecycleAgent(
+                    result={
+                        "success": False,
+                        "data": None,
+                        "error": error,
+                        "message": f"{name} failure",
+                        "mode": "agent",
+                        "query_info": [],
+                        "timestamp": "t",
+                    }
+                )
+                status, body = await self._request(
+                    "POST",
+                    "/api/chat",
+                    {"message": name, "session_id": name},
+                )
+
+                self.assertEqual(status, 200)
+                self.assertFalse(body["success"])
+                self.assertEqual(body["mode"], "agent")
+                self.assertEqual(body["query_info"], [])
+                self.assertEqual(body["error"], error)
+
+    async def test_both_modes_keep_list_shaped_query_info(self):
+        for mode in ("fallback", "agent"):
+            with self.subTest(mode=mode):
+                query_info = [{"tool": f"{mode}_tool", "args": {}}]
+                self.main.agent_system = _LifecycleAgent(
+                    result={
+                        "success": True,
+                        "data": None,
+                        "message": "ok",
+                        "mode": mode,
+                        "query_info": query_info,
+                        "timestamp": "t",
+                    }
+                )
+                status, body = await self._request(
+                    "POST",
+                    "/api/chat",
+                    {"message": mode, "session_id": mode},
+                )
+
+                self.assertEqual(status, 200)
+                self.assertIsInstance(body["query_info"], list)
+                self.assertEqual(body["query_info"], query_info)
+
+    async def test_chat_history_clear_history_flow(self):
+        saver = self.saver
+        self.main.agent_system = _LifecycleAgent(saver=saver)
+
+        chat_status, _ = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "hello", "session_id": "flow"},
+        )
+        history_status, history = await self._request("GET", "/api/history/flow")
+        clear_status, clear = await self._request("POST", "/api/clear/flow")
+        empty_status, empty = await self._request("GET", "/api/history/flow")
+
+        self.assertEqual(chat_status, 200)
+        self.assertEqual(history_status, 200)
+        self.assertEqual(
+            history["history"],
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "ok"},
+            ],
+        )
+        self.assertEqual(clear_status, 200)
+        self.assertTrue(clear["success"])
+        self.assertEqual(empty_status, 200)
+        self.assertEqual(empty["history"], [])
+        self.assertFalse(await self.main.sessions.is_live("flow"))
+
+    async def test_orphaned_history_is_deleted_on_sight(self):
+        message_module = importlib.import_module("langchain_core.messages")
+        self.saver.threads["orphan"] = [
+            message_module.HumanMessage(content="orphaned")
+        ]
+
+        status, body = await self._request("GET", "/api/history/orphan")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["history"], [])
+        self.assertEqual(self.saver.deleted, ["orphan"])
+
+    async def test_expired_history_is_deleted_on_sight(self):
+        clock = _FakeClock()
+        with patch.object(self.session_store, "time", clock):
+            self._set_capacity(1, ttl=1)
+            await self.main.sessions.touch("expired-history")
+            self.saver.threads["expired-history"] = []
+            clock.advance(2)
+
+            status, body = await self._request("GET", "/api/history/expired-history")
+
+            self.assertEqual(status, 200)
+            self.assertEqual(body["history"], [])
+            self.assertEqual(self.saver.deleted, ["expired-history"])
+            self.assertFalse(await self.main.sessions.is_live("expired-history"))
 
 
 class TestStartupInitialization(unittest.TestCase):
@@ -1273,6 +1770,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
     suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
     suite.addTests(loader.loadTestsFromTestCase(TestAPI))
+    suite.addTests(loader.loadTestsFromTestCase(TestSessionLifecycleAPI))
     suite.addTests(loader.loadTestsFromTestCase(TestStartupInitialization))
 
     # Run tests
