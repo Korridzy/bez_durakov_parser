@@ -108,7 +108,7 @@ cd webreport
 | `.env.backend` | `BD_DOCKER` и debug/reload backend |
 | `.env.data_collector` | `BD_DOCKER` и timezone data collector |
 | `.env.frontend` | URL backend и debug/reload frontend |
-| `.env.litellm` | `OPENAI_API_KEY` для LiteLLM |
+| `.env.litellm` | `OPENAI_API_KEY`, `OPENROUTER_API_KEY` и `OPENCODE_API_KEY` для LiteLLM |
 
 Не редактируйте сгенерированные `.env*` вручную. Для изменения серверных настроек обновите `../bd_shared/config.local.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
 
@@ -158,6 +158,30 @@ openai_api_key = "your-api-key-here"
 При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
 
 После изменения ключа перезапустите стек командой `make restart`.
+
+### OpenRouter: DeepSeek V4
+
+Для DeepSeek через OpenRouter добавьте в `bd_shared/config.local.toml` ключ OpenRouter и один из proxy aliases:
+
+```toml
+[webreport]
+openrouter_api_key = "your-openrouter-key"
+agent_model = "deepseek-v4-flash-latest" # или "deepseek-v4-pro"
+```
+
+`deepseek-v4-flash-latest` маршрутизируется к `~deepseek/deepseek-v4-flash-latest`, который всегда указывает на актуальную модель семейства DeepSeek V4 Flash. `deepseek-v4-pro` маршрутизируется к `deepseek/deepseek-v4-pro` через OpenRouter. Эти aliases доступны только в local overlay; отслеживаемый `agent_model = "gpt-4o"` не изменяется. После выбора модели выполните `make restart`.
+
+### OpenCode Zen: бесплатные модели
+
+Для OpenCode Zen добавьте ключ и выберите один из proxy aliases в `bd_shared/config.local.toml`:
+
+```toml
+[webreport]
+opencode_api_key = "your-opencode-key"
+agent_model = "opencode/big-pickle"
+```
+
+Доступны: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free` и `opencode/nemotron-3-ultra-free`. OpenCode помечает эти модели как временно бесплатные, поэтому при изменении каталога обновите конфигурацию. После изменения ключа или модели выполните `make restart`.
 
 LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 

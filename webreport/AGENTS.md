@@ -34,7 +34,7 @@ webreport/
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
 | Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections |
-| Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives `openai_api_key` from `.env.litellm` |
+| Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives OpenAI, OpenRouter, and OpenCode keys from `.env.litellm` |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
 ## CONVENTIONS
