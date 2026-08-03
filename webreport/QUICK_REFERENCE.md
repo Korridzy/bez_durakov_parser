@@ -103,9 +103,11 @@ cat ../bd_shared/config.toml
 # Сгенерировать Compose/service env-файлы
 make generate-env
 
-# Для полного AutoGen режима (опционально)
+# Для LangGraph agent mode (опционально)
 export OPENAI_API_KEY=your-openai-api-key-here
 ```
+
+При запуске backend выполняет глубокий LiteLLM probe и один раз выбирает `agent` или keyless `fallback` mode. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
 
 ### Секции в `bd_shared/config.toml`
 - `[database]` — настройки подключения к БД

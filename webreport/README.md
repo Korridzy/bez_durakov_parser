@@ -18,10 +18,10 @@
    - Отображение отчётов
    - Переключение между представлениями
 
-3. **Agents (AutoGen)** - система агентов
-   - DataCoder - генерирует запросы к данным
-   - DataAnalyst - анализирует результаты
-   - Организация диалога между агентами
+3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
+   - обращается к модели через внутренний LiteLLM proxy `litellm:4000`
+   - сохраняет state в service-local SQLite checkpoint store `../vm/backend/checkpoints`
+   - при запуске выбирает `agent` или `fallback` режим и не меняет его до перезапуска
 
 4. **Services** - сервисный слой
    - GameDataService - доступ к данным игр
@@ -33,7 +33,7 @@
 webreport/
 ├── backend/
 │   ├── agents/
-│   │   └── report_agents.py       # AutoGen / fallback agent system
+│   │   └── report_agents.py       # LangGraph / fallback agent system
 │   ├── services/
 │   │   └── game_data_service.py   # Access to bd_shared.Database methods
 │   ├── main.py                     # FastAPI application and API routes
@@ -143,15 +143,19 @@ poetry run python generate_env.py
 docker compose up -d
 ```
 
-### OpenAI API key (опционально)
+### API key и режим агента (опционально)
 
 `OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не записывается ни в один сгенерированный env-файл.
-Для полного AutoGen-режима экспортируйте его в shell перед запуском:
+При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
+
+Для `agent` mode экспортируйте ключ в shell перед запуском:
 
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
 make start
 ```
+
+LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 
 ### Доступ к системе
 
@@ -206,7 +210,9 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 - **Python 3.11+**
 - **FastAPI** - REST API framework
 - **Streamlit** - UI framework
-- **AutoGen** - Multi-agent framework
+- **LangGraph** - ReAct agent and checkpointed threads
+- **LiteLLM** - internal model proxy at `litellm:4000`
+- **SQLite** - backend checkpoint store at `../vm/backend/checkpoints`
 - **SQLAlchemy** - ORM для работы с БД
 - **Pandas** - обработка данных
 - **Uvicorn** - ASGI сервер
@@ -256,12 +262,12 @@ Backend в Docker подключается к БД по имени хоста `m
    docker compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
    ```
 
-### Агенты не работают (fallback mode)
+### Агенты не работают
 
-Система работает в fallback режиме без AutoGen. Для полной функциональности:
-1. Экспортируйте `OPENAI_API_KEY=your-key-here` в shell
-2. Убедитесь, что backend запущен через `make start` / `make restart`
-3. Перезапустите: `make restart`
+1. Проверьте логи backend на результат глубокого LiteLLM probe: `make logs SERVICE=backend`.
+2. Проверьте LiteLLM из Compose-сети по адресу `http://litellm:4000`, он не имеет host port.
+3. Для `agent` mode экспортируйте `OPENAI_API_KEY=your-key-here` и перезапустите backend через `make restart`.
+4. Без ключа или при неуспешном probe backend намеренно запускается в keyless `fallback` mode. Он не переключается в `agent` mode во время работы, перезапуск нужен для новой проверки.
 
 ### Порты заняты
 
@@ -308,14 +314,14 @@ docker compose down -v              # Остановить и удалить vol
 
 1. Добавьте метод в `GameDataService` (`backend/services/game_data_service.py`)
 2. Используйте ТОЛЬКО существующие методы из db.py и db_helpers.py
-3. Обновите `_interpret_request` в `ReportAgentSystem` для распознавания новых паттернов
+3. Обновите LangGraph tools или fallback interpreter для нужного маршрута
 4. При необходимости добавьте новый endpoint в API
 
 ### Расширение функциональности агентов
 
 1. Редактируйте system messages в `backend/agents/report_agents.py`
 2. Добавляйте новые инструменты (tools) для агентов
-3. Настройте параметры LLM в `llm_config`
+3. Настройте model and temperature through the configuration consumed by LiteLLM
 
 ## 📄 Лицензия
 

@@ -25,49 +25,24 @@
 └─────────┼──────────────────┼──────────────────────────────────┘
           │                  │
           ▼                  ▼
-┌─────────────────┐  ┌─────────────────────────────────┐
-│  AGENT SYSTEM   │  │      SERVICE LAYER              │
-│   (AutoGen)     │  │  (GameDataService)              │
-│                 │  │                                 │
-│ ┌─────────────┐ │  │ ┌─────────────────────────────┐ │
-│ │ DataCoder   │ │  │ │ get_all_games_summary()     │ │
-│ │   Agent     │ │  │ │ get_game_by_id()            │ │
-│ └─────────────┘ │  │ │ get_team_statistics()       │ │
-│                 │  │ │ get_team_game_scores()      │ │
-│ ┌─────────────┐ │  │ │ ...                         │ │
-│ │ DataAnalyst │ │  │ └────────────┬────────────────┘ │
-│ │   Agent     │ │  │              │                  │
-│ └─────────────┘ │  └──────────────┼──────────────────┘
-└─────────────────┘                 │
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │     DATABASE ACCESS           │
-                    │   (db.py, db_helpers.py)      │
-                    │                               │
-                    │ ┌──────────────────────────┐  │
-                    │ │ Database class           │  │
-                    │ │ - add_game()             │  │
-                    │ │ - get_game_data()        │  │
-                    │ │ - get_all_games()        │  │
-                    │ │ - get_or_create_team()   │  │
-                    │ └──────────┬───────────────┘  │
-                    └────────────┼──────────────────┘
-                                 ▼
-                    ┌─────────────────────────────┐
-                    │      DATABASE               │
-                    │   (MySQL/SQLAlchemy)        │
-                    │                             │
-                    │ Tables:                     │
-                    │ - games                     │
-                    │ - teams                     │
-                    │ - game_teams                │
-                    │ - vybor, chisla, pref       │
-                    │ - pairs, razobl, auction    │
-                    │ - mot                       │
-                    │                             │
-                    │ Views:                      │
-                    │ - team_game_scores          │
-                    └─────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                  BACKEND, ONE REPLICA ONLY                       │
+│  Startup: deep LiteLLM probe elects `agent` or `fallback` once  │
+│                                                                 │
+│  agent: LangGraph ReAct graph ────────┐                         │
+│  fallback: deterministic interpreter ─┼─> GameDataService      │
+│                                        │       │                │
+│  SQLite checkpoint store               │       ▼                │
+│  ../vm/backend/checkpoints             │  bd_shared.Database    │
+│  persists LangGraph thread state       │       │                │
+└───────────────────────────┬────────────┴───────┼────────────────┘
+                            │ HTTP model calls    │ game-data calls
+                            ▼                     ▼
+                 ┌──────────────────┐  ┌─────────────────────────┐
+                 │ LiteLLM proxy    │  │ MySQL game data         │
+                 │ litellm:4000     │  │ via SQLAlchemy          │
+                 │ internal only    │  └─────────────────────────┘
+                 └──────────────────┘
 ```
 
 ## Компоненты системы
@@ -104,7 +79,7 @@
 - `GET /api/teams` - список всех команд
 - `GET /api/scores` - очки команд
 
-### 3. Agent System (AutoGen)
+### 3. Agent system (LangGraph)
 **Файл**: `agents/report_agents.py`
 
 **Ответственность**:
@@ -113,16 +88,18 @@
 - Анализ результатов
 - Формирование ответов
 
-**Агенты**:
-- **DataCoder**: Преобразует требования в запросы к данным
-- **DataAnalyst**: Анализирует и интерпретирует результаты
-- **UserProxy**: Управляет диалогом
-
 **Режимы работы**:
-- **Full mode**: С OpenAI API и полной функциональностью AutoGen
-- **Fallback mode**: Без AutoGen, с простой интерпретацией запросов
+- **`agent`**: LangGraph ReAct graph вызывает инструменты `GameDataService` через LiteLLM на `litellm:4000`.
+- **`fallback`**: Keyless deterministic interpreter обрабатывает поддержанные запросы и сохраняет ход в checkpoint store.
 
-### 4. Service Layer
+При запуске backend выполняет глубокую проверку LiteLLM и выбирает один режим. Выбранный режим не меняется до перезапуска процесса.
+
+### 4. Checkpoint store
+Backend хранит состояние LangGraph по thread ID в service-local SQLite store: `../vm/backend/checkpoints`. Это отдельное состояние агентов, не замена MySQL для игровых данных.
+
+SQLite saver рассчитан на один backend replica. Горизонтальное масштабирование backend не поддерживается.
+
+### 5. Service Layer
 **Файл**: `services/game_data_service.py`
 
 **Ответственность**:
@@ -137,7 +114,7 @@
 - `get_team_game_scores()` - очки команд по играм
 - `get_all_teams()` - список всех команд
 
-### 5. Database Access Layer
+### 6. Database Access Layer
 **Файлы**: `db.py`, `db_helpers.py` (из основного проекта)
 
 **Ответственность**:
@@ -160,9 +137,9 @@
    ↓
 2. Frontend отправляет POST /api/chat
    ↓
-3. Backend передаёт запрос в ReportAgentSystem
+3. Backend передаёт запрос в startup-elected execution path
    ↓
-4. AgentSystem интерпретирует запрос
+4. LangGraph ReAct agent или fallback interpreter интерпретирует запрос
    ↓
 5. AgentSystem вызывает метод GameDataService
    ↓
@@ -197,7 +174,7 @@
 ### 2. Сервис-ориентированная архитектура (SOA)
 - Компоненты взаимодействуют через API
 - Независимое развёртывание компонентов
-- Возможность масштабирования отдельных частей
+- Frontend, data collector и MySQL имеют собственные границы ответственности
 
 ### 3. Слоистая архитектура (Layered Architecture)
 - Presentation Layer (Streamlit)
@@ -217,7 +194,8 @@
 |-----------|------------|------------|
 | Frontend | Streamlit | UI framework |
 | Backend | FastAPI | REST API framework |
-| Agents | AutoGen | Multi-agent orchestration |
+| Agents | LangGraph | ReAct graph and checkpointed threads |
+| Model proxy | LiteLLM | Internal model access at `litellm:4000` |
 | ORM | SQLAlchemy | Database abstraction |
 | Database | MySQL | Data storage |
 | HTTP Server | Uvicorn | ASGI server |
@@ -227,9 +205,8 @@
 ## Масштабируемость
 
 ### Горизонтальное масштабирование
-- Frontend и Backend могут масштабироваться независимо
-- Несколько инстансов Frontend могут использовать один Backend
-- Backend stateless (состояние в sessions dict)
+- Backend запускается в одном экземпляре. SQLite checkpoint store не поддерживает несколько backend replicas.
+- Frontend обращается к этому единственному backend через REST API.
 
 ### Вертикальное масштабирование
 - Увеличение ресурсов для компонентов с высокой нагрузкой
@@ -256,7 +233,7 @@
 1. **Новый тип отчёта**: Добавить метод в GameDataService
 2. **Новый endpoint**: Добавить в backend/main.py
 3. **Новая визуализация**: Добавить в frontend/main.py
-4. **Новый агент**: Добавить в agents/report_agents.py
+4. **Новый инструмент агента**: Добавить в LangGraph tool layer и сохранить доступ только через `GameDataService`
 
 ### Интеграция с другими системами
 - REST API позволяет интеграцию с любыми клиентами

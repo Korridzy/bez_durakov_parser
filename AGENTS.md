@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem (FastAPI + Streamlit + AutoGen AI agents).
+Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem with FastAPI, Streamlit, a LangGraph ReAct agent, LiteLLM, and SQLite checkpoints.
 
 ## STRUCTURE
 
@@ -19,8 +19,8 @@ parser/
 ├── migrations/         # Alembic DB migrations (MySQL)
 ├── range/              # Utility scripts for statistics/calendars (gitignored)
 ├── secret/             # Credentials (gitignored)
-├── vm/                 # MySQL data volume (gitignored)
-├── webreport/          # Web reporting system: FastAPI + Streamlit + AutoGen (see webreport/AGENTS.md)
+├── vm/                 # MySQL data volume and backend checkpoints (gitignored)
+├── webreport/          # Web reporting: FastAPI + Streamlit + LangGraph (see webreport/AGENTS.md)
 ├── xlsm_archive/       # Fetched XLSM files storage (gitignored)
 ├── parse_data.py       # CLI entry point: parse XLSM → DB
 ├── clear_database.py   # Utility: wipe all game data from DB
@@ -45,7 +45,8 @@ parser/
 ## CONVENTIONS
 
 - **Language**: Python 3.11+ only. All deps via Poetry (`poetry install --no-root`)
-- **DB**: MySQL 8.0 exclusively (SQLite support removed). Connection via `pymysql`
+- **Game-data DB**: MySQL 8.0 exclusively. SQLite is not supported for game data. Connection via `pymysql`
+- **Agent checkpoints**: SQLite is allowed only for the backend-owned checkpoint store at `../vm/backend/checkpoints`; it is not a game-data store.
 - **Config**: TOML-based (`bd_shared/config.toml`). Test config: `bd_shared/test_config.toml`
 - **Team names**: Always normalized via `normalize_team_name()` — NFC unicode, lowercase, whitespace-collapsed
 - **Game data**: All game data flows through `BdGame` dataclass. Never access raw XLSM directly after parsing
@@ -56,11 +57,11 @@ parser/
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
-- **DO NOT** add SQLite support — intentionally removed (see issue-61)
+- **DO NOT** add SQLite support for game data, which remains MySQL-only (see issue-61). SQLite is permitted only for agent checkpoints at `../vm/backend/checkpoints`.
 - **DO NOT** access DB directly from web components — always go through `bd_shared/db.py` and `bd_shared/db_helpers.py`
 - **DO NOT** bypass `normalize_team_name()` when storing/comparing team names
 - **DO NOT** write new DB query methods in webreport services — use existing `Database` class methods only
-- In AutoGen agents: agents must use existing `GameDataService` methods, never write raw SQL
+- LangGraph agent tools must use existing `GameDataService` methods, never write raw SQL. The only sanctioned exception is the checkpoint saver’s own thread-recency enumeration query against its `checkpoints` table.
 
 ## COMMANDS
 
@@ -86,4 +87,5 @@ make logs SERVICE=data_collector                 # Show all data_collector conta
 - `range/` is entirely gitignored — contains ad-hoc analysis scripts and reports
 - Game rounds: Выбор (vybor), Числа (chisla), Преферанс (pref), Пары (pairs), Разоблачение (razobl), Аукцион (auction), Момент Истины (mot)
 - Default game date `02.03.2022` in config triggers a warning — means date was not set in the source file
-- Web system has fallback mode without OpenAI API key — basic request interpretation without AutoGen
+- At backend startup, a deep LiteLLM probe elects either `agent` mode or keyless `fallback` mode. The process never switches modes after election.
+- LiteLLM is internal-only at `litellm:4000`. The checkpoint-backed backend is limited to one replica.

@@ -123,7 +123,9 @@ $ python four_buckets.py
 
 ### Web Report System
 
-Проект включает веб-систему для генерации отчётов с AI-агентом на базе AutoGen, FastAPI и Streamlit.
+Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и Streamlit. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
+
+При запуске backend выполняет глубокую проверку LiteLLM и один раз выбирает режим `agent` или `fallback`. Этот выбор действует до остановки процесса. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
 
 #### Запуск WebReport
 
