@@ -26,6 +26,7 @@ tools_commands = importlib.import_module("test_agent_tools_commands")
 tools_metadata = importlib.import_module("test_agent_tools_metadata")
 graph_cases = importlib.import_module("test_agent_graph")
 report_agent_cases = importlib.import_module("test_agent_report_agent")
+checkpointer_cases = importlib.import_module("test_agent_checkpointer")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
 
@@ -115,6 +116,13 @@ class TestGraph(graph_cases.GraphTests):
 class TestReportAgentSystem(report_agent_cases.ReportAgentSystemTests):
     """Fixed-mode report adapter with frozen fallback and checkpoint continuity."""
 
+
+class TestCheckpointer(checkpointer_cases.TestCheckpointerCases):
+    pass
+
+
+class TestPrompt(checkpointer_cases.TestPromptCases):
+    pass
 
 if __name__ == "__main__":
     unittest.main()
