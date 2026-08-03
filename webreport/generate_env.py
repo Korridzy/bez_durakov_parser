@@ -91,6 +91,11 @@ env_files: dict[str, dict[str, str]] = {
             cast(int, webreport_config.get("frontend_debug_port", 5679))
         ),
     },
+    ".env.litellm": {
+        "OPENAI_API_KEY": dotenv_quote(
+            cast(str, webreport_config.get("openai_api_key", ""))
+        ),
+    },
 }
 
 for env_file_name, env_values in env_files.items():
