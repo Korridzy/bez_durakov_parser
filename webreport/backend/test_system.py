@@ -15,6 +15,7 @@ from datetime import date, datetime
 
 _test_agent_support = importlib.import_module("test_agent_support")
 _test_agent_graph = importlib.import_module("test_agent_graph")
+_test_net_guard = importlib.import_module("test_net_guard")
 StubService = _test_agent_support.StubService
 ScriptedStub = _test_agent_graph.ScriptedModel
 
@@ -159,6 +160,11 @@ except Exception as e:
     testclient = None
 
 
+def setUpModule():
+    """Offline suite: only loopback and the Compose database host are reachable."""
+    _test_net_guard.install()
+
+
 class TestGameDataService(unittest.TestCase):
     """Test the GameDataService."""
 
@@ -167,14 +173,22 @@ class TestGameDataService(unittest.TestCase):
         """Set up test fixtures."""
         try:
             from services.game_data_service import GameDataService
-            cls.service = GameDataService()
+            service = GameDataService()
+            # SQLAlchemy connects lazily, so without this probe an unreachable
+            # database leaves every sibling's "Service not available" skip dead.
+            with service.db.engine.connect():
+                pass
+            cls.service = service
         except Exception as e:
             print(f"⚠️ Warning: Could not initialize GameDataService: {e}")
             cls.service = None
 
     def test_service_initialization(self):
         """Test that service initializes correctly."""
-        self.assertIsNotNone(self.service, "Service should be initialized")
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        self.assertIsNotNone(self.service.db, "Initialized service should own a database handle")
 
     def test_get_all_games_summary(self):
         """Test getting all games summary."""

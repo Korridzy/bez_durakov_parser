@@ -16,7 +16,7 @@ help:
 	@echo "  make rebuild     - Rebuild and restart services"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run tests (requires running containers)"
+	@echo "  make test        - Run the offline backend suite (no running stack needed)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean       - Clean temporary files"
@@ -75,7 +75,7 @@ rebuild: generate-env
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm backend python /app/test_system.py
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_top_team_limit.py"
 	@echo ""
 
 clean:

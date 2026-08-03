@@ -27,8 +27,14 @@ tools_metadata = importlib.import_module("test_agent_tools_metadata")
 graph_cases = importlib.import_module("test_agent_graph")
 report_agent_cases = importlib.import_module("test_agent_report_agent")
 checkpointer_cases = importlib.import_module("test_agent_checkpointer")
+net_guard = importlib.import_module("test_net_guard")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
+
+
+def setUpModule():
+    """Offline suite: only loopback and the Compose database host are reachable."""
+    net_guard.install()
 
 
 class TestAgentConfig(unittest.TestCase):

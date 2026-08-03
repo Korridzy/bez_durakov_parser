@@ -11,6 +11,12 @@ from services.game_data_service import GameDataService
 
 _checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
 _report_agents = importlib.import_module("agents.report_agents")
+_net_guard = importlib.import_module("test_net_guard")
+
+
+def setUpModule() -> None:
+    """Offline suite: only loopback and the Compose database host are reachable."""
+    _net_guard.install()
 
 
 class TopTeamLimitTest(unittest.IsolatedAsyncioTestCase):
