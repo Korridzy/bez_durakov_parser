@@ -13,6 +13,11 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from datetime import date, datetime
 
+_test_agent_support = importlib.import_module("test_agent_support")
+_test_agent_graph = importlib.import_module("test_agent_graph")
+StubService = _test_agent_support.StubService
+ScriptedStub = _test_agent_graph.ScriptedModel
+
 # Import the app and set up in-process ASGI testing
 testclient = None
 try:
@@ -136,13 +141,18 @@ try:
             return self._call("POST", path, json_data=json)
     
     startup_free_test_classes = (
+        "test_system.TestReportAgentSystem",
         "test_system.TestSessionLifecycleAPI",
         "test_system.TestStartupInitialization",
     )
     if any(argument.startswith(startup_free_test_classes) for argument in sys.argv):
         testclient = None
     else:
-        with patch("main.probe_llm_proxy", new=AsyncMock(return_value=False)):
+        startup_service = StubService()
+        with patch("main.probe_llm_proxy", new=AsyncMock(return_value=False)), patch(
+            "main.GameDataService", return_value=startup_service
+        ):
+            # One loop owns startup, the saver, all synchronous calls, and shutdown.
             testclient = ASGITestClient(app)
 except Exception as e:
     print(f"⚠️ Warning: Could not initialize in-process test client: {e}")
@@ -323,163 +333,192 @@ class TestGameDataService(unittest.TestCase):
         print("✅ Service get_team_statistics: missing team is re-raised")
 
 
-class TestReportAgentSystem(unittest.TestCase):
+class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
     """Test the ReportAgentSystem."""
 
     @classmethod
     def setUpClass(cls):
         """Set up test fixtures."""
-        try:
-            from agents.report_agents import ReportAgentSystem
-            cls.agent_system = ReportAgentSystem()
-        except Exception as e:
-            print(f"⚠️ Warning: Could not initialize ReportAgentSystem: {e}")
-            cls.agent_system = None
+        cls.checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
+        cls.messages = importlib.import_module("langchain_core.messages")
+        cls.report_module = importlib.import_module("agents.report_agents")
 
-    def test_agent_initialization(self):
+    async def test_agent_initialization(self):
         """Test that agent system initializes."""
-        self.assertIsNotNone(self.agent_system, "Agent system should be initialized")
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="fallback",
+                checkpointer=saver,
+            )
 
-    def test_regression_agents_enabled_with_api_key(self):
-        """Regression: explicit api_key should enable non-fallback agent path."""
-        try:
-            from agents.report_agents import ReportAgentSystem
-        except Exception as e:
-            self.fail(f"Could not import ReportAgentSystem: {e}")
+            self.assertIsNotNone(agent_system, "Agent system should be initialized")
 
-        enabled_system = ReportAgentSystem(api_key="dummy")
+    async def test_regression_agents_enabled_with_api_key(self):
+        scripted_message = "Report generated based on: покажи все игры"
+        model_client = ScriptedStub(
+            [self.messages.AIMessage(content=scripted_message)]
+        )
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            enabled_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="agent",
+                model_client=model_client,
+                checkpointer=saver,
+            )
 
-        self.assertTrue(enabled_system.agents_available,
-                        "agents_available must be True when api_key is provided and dependencies are present")
-        self.assertIsNotNone(enabled_system.coder_agent,
-                             "coder_agent must be initialized in enabled mode")
-        self.assertIsNotNone(enabled_system.model_client,
-                             "model_client must be initialized in enabled mode")
+            response = await enabled_system.process_user_request(
+                "покажи все игры", "enabled-mode"
+            )
+            self.assertIsInstance(response, dict, "Enabled mode response should be dictionary")
+            self.assertTrue(response.get("success"), "Enabled mode request should succeed")
+            self.assertEqual(response["mode"], "agent")
+            self.assertEqual(response["message"], scripted_message)
+            self.assertNotIn("fallback mode", response["message"].lower())
 
-        response = enabled_system.process_user_request("покажи все игры")
-        self.assertIsInstance(response, dict, "Enabled mode response should be dictionary")
-        self.assertTrue(response.get("success"), "Enabled mode request should succeed")
-        response_message = response.get("message", "")
-        self.assertIn("Report generated based on:", response_message,
-                      "Enabled mode should use non-fallback success message")
-        self.assertNotIn("fallback mode", response_message.lower(),
-                         "Enabled mode must not return fallback-mode message")
+            checkpoint_tuple = await saver.aget_tuple(
+                {"configurable": {"thread_id": "enabled-mode"}}
+            )
+            self.assertIsNotNone(checkpoint_tuple)
+            if checkpoint_tuple is None:
+                self.fail("Enabled mode must checkpoint its conversation")
+            history = checkpoint_tuple.checkpoint["channel_values"]["messages"]
+            self.assertIsInstance(history, list, "History should be list in enabled mode")
+            self.assertGreaterEqual(
+                len(history), 2,
+                "Enabled mode should record at least user+assistant history entries",
+            )
 
-        history = enabled_system.get_conversation_history()
-        self.assertIsInstance(history, list, "History should be list in enabled mode")
-        self.assertGreaterEqual(len(history), 2,
-                                "Enabled mode should record at least user+assistant history entries")
+    async def test_regression_agent_system_uses_injected_service(self):
+        injected_service = StubService()
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system = self.report_module.ReportAgentSystem(
+                service=injected_service,
+                mode="fallback",
+                checkpointer=saver,
+            )
 
-    def test_regression_agent_system_uses_injected_service(self):
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
-
-        from agents.report_agents import ReportAgentSystem
-
-        injected_service = object()
-        system = ReportAgentSystem(service=injected_service)
-
-        self.assertIs(system.service, injected_service)
+            self.assertIs(system.service, injected_service)
         print("✅ Agent system reuses injected data service")
 
-    def test_process_request_all_games(self):
+    async def test_process_request_all_games(self):
         """Test processing a request for all games."""
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="fallback",
+                checkpointer=saver,
+            )
 
-        response = self.agent_system.process_user_request("покажи все игры")
-        self.assertIsInstance(response, dict, "Should return dictionary")
-        self.assertIn("success", response, "Response should have success field")
+            response = await agent_system.process_user_request(
+                "покажи все игры", "all-games"
+            )
+            self.assertIsInstance(response, dict, "Should return dictionary")
+            self.assertIn("success", response, "Response should have success field")
         print(f"✅ Request processed: {response.get('message', 'No message')}")
 
-    def test_conversation_history(self):
+    async def test_conversation_history(self):
         """Test conversation history tracking."""
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="fallback",
+                checkpointer=saver,
+            )
+            config = {"configurable": {"thread_id": "history"}}
+            self.assertIsNone(await saver.aget_tuple(config))
 
-        self.agent_system.clear_history()
-        response = self.agent_system.process_user_request("тест")
-        history = self.agent_system.get_conversation_history()
-        self.assertIsInstance(history, list, "History should be a list")
-        # In fallback mode, history might be empty; just verify it's accessible
-        if len(history) > 0:
-            print(f"✅ Conversation history has {len(history)} entries")
-        else:
-            print(f"⚠️ Conversation history empty (fallback mode)")
+            await agent_system.process_user_request("тест", "history")
+            checkpoint_tuple = await saver.aget_tuple(config)
+            self.assertIsNotNone(checkpoint_tuple)
+            if checkpoint_tuple is None:
+                self.fail("Fallback mode must checkpoint its conversation")
+            history = checkpoint_tuple.checkpoint["channel_values"]["messages"]
+            self.assertIsInstance(history, list, "History should be a list")
+            self.assertGreaterEqual(len(history), 2)
+        print(f"✅ Conversation history has {len(history)} entries")
 
-    def test_regression_team_wins_2025(self):
-        """Regression test for historical failing prompt about team wins in 2025.
+    async def test_regression_team_wins_2025(self):
+        """Port the win route assertion to list-shaped ``query_info``.
         
         Previously failed with: 'No module named db' import error.
         Tests that get_team_wins() method correctly routes and executes
-        for the exact historical prompt.
+        for the exact historical prompt. The assertion-shape migration is
+        intentional: graph responses expose a list of tool calls.
         """
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="fallback",
+                checkpointer=saver,
+            )
+            user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
+            response = await agent_system.process_user_request(user_prompt, "team-wins")
 
-        # Exact historical prompt that previously failed
-        user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
-        response = self.agent_system.process_user_request(user_prompt)
-        
-        # Basic response structure validation
-        self.assertIsInstance(response, dict, "Should return dictionary")
-        self.assertIn("success", response, "Response should have success field")
-        
-        # Critical: response must NOT contain the historical import error
-        response_str = str(response)
-        self.assertNotIn("No module named 'db'", response_str,
-                         "Response should not contain import error 'No module named db'")
-        
-        # If successful, verify routing MUST be to get_team_wins (strict routing check)
-        if response.get("success"):
-            self.assertIn("query", response, "Successful response should have query field")
-            query_info = response.get("query", {})
-            # Must be routed to get_team_wins for win-oriented prompt (strict assertion)
-            method = query_info.get("method")
-            self.assertEqual(method, "get_team_wins",
-                           f"Win-oriented prompt MUST route to get_team_wins, got {method}")
-            print(f"✅ Team wins 2025 prompt: correctly routed to get_team_wins")
+            self.assertIsInstance(response, dict, "Should return dictionary")
+            self.assertIn("success", response, "Response should have success field")
+            self.assertTrue(response["success"])
+            self.assertNotIn(
+                "No module named 'db'",
+                str(response),
+                "Response should not contain import error 'No module named db'",
+            )
+            self.assertEqual(response["query_info"][0]["tool"], "get_team_wins")
+        print("✅ Team wins 2025 prompt: correctly routed to get_team_wins")
 
-    def test_regression_generic_team_statistics(self):
-        """Regression test for generic team-statistics path without year.
+    async def test_regression_generic_team_statistics(self):
+        """Port the team-statistics route assertion to list-shaped ``query_info``.
         
         Tests that team statistics prompts (without win keywords)
         correctly route to get_team_statistics and execute without errors.
+        The assertion-shape migration is intentional for graph tool traces.
         """
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=StubService(),
+                mode="fallback",
+                checkpointer=saver,
+            )
+            user_prompt = "статистика команды Однажды было дважды"
+            response = await agent_system.process_user_request(
+                user_prompt, "team-statistics"
+            )
 
-        # Generic team statistics prompt (without win keywords)
-        user_prompt = "статистика команды Однажды было дважды"
-        response = self.agent_system.process_user_request(user_prompt)
-        
-        # Basic response structure validation
-        self.assertIsInstance(response, dict, "Should return dictionary")
-        self.assertIn("success", response, "Response should have success field")
-        
-        # Critical: response must NOT contain the historical import error
-        response_str = str(response)
-        self.assertNotIn("No module named 'db'", response_str,
-                         "Response should not contain import error 'No module named db'")
-        
-        # If successful, verify routing to get_team_statistics
-        if response.get("success"):
-            self.assertIn("query", response, "Successful response should have query field")
-            query_info = response.get("query", {})
-            method = query_info.get("method")
-            self.assertEqual(method, "get_team_statistics",
-                             f"Generic team prompt should route to get_team_statistics, got {method}")
-            print(f"✅ Generic team statistics prompt: correctly routed to {method}")
+            self.assertIsInstance(response, dict, "Should return dictionary")
+            self.assertIn("success", response, "Response should have success field")
+            self.assertTrue(response["success"])
+            self.assertNotIn(
+                "No module named 'db'",
+                str(response),
+                "Response should not contain import error 'No module named db'",
+            )
+            self.assertEqual(
+                response["query_info"][0]["tool"], "get_team_statistics"
+            )
+        print("✅ Generic team statistics prompt: correctly routed to get_team_statistics")
 
-    def test_regression_team_statistics_missing_team_returns_error_response(self):
-        if self.agent_system is None:
-            self.skipTest("Agent system not available")
+    async def test_regression_team_statistics_missing_team_returns_error_response(self):
+        service = StubService()
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent_system = self.report_module.ReportAgentSystem(
+                service=service,
+                mode="fallback",
+                checkpointer=saver,
+            )
+            with patch.object(
+                service,
+                "get_team_statistics",
+                side_effect=ValueError("Team missing team not found"),
+            ):
+                response = await agent_system.process_user_request(
+                    "статистика команды missing team", "missing-team"
+                )
 
-        with patch.object(self.agent_system.service, "get_team_statistics", side_effect=ValueError("Team missing team not found")):
-            response = self.agent_system.process_user_request("статистика команды missing team")
-
-        self.assertFalse(response.get("success"), "Missing team should not look like a successful report")
-        self.assertIn("not found", response.get("error", "").lower())
+            self.assertFalse(
+                response.get("success"),
+                "Missing team should not look like a successful report",
+            )
+            self.assertIn("not found", response.get("error", "").lower())
         print("✅ Agent team statistics: missing team returns error response")
 
 
