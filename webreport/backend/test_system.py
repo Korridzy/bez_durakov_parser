@@ -4,17 +4,17 @@ Tests all components: services, agents, API.
 """
 import sys
 import os
+import asyncio
 from typing import Any
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from datetime import date, datetime
 
 # Import the app and set up in-process ASGI testing
 testclient = None
 try:
     from main import app
-    import asyncio
     import json as json_module
     from io import BytesIO
     
@@ -134,7 +134,14 @@ try:
             """Make a POST request with optional JSON body."""
             return self._call("POST", path, json_data=json)
     
-    testclient = ASGITestClient(app)
+    if any(
+        argument.startswith("test_system.TestStartupInitialization")
+        for argument in sys.argv
+    ):
+        testclient = None
+    else:
+        with patch("main.probe_llm_proxy", new=AsyncMock(return_value=False)):
+            testclient = ASGITestClient(app)
 except Exception as e:
     print(f"⚠️ Warning: Could not initialize in-process test client: {e}")
     testclient = None
@@ -728,10 +735,43 @@ class TestAPI(unittest.TestCase):
 
 
 class TestStartupInitialization(unittest.TestCase):
+    class ProbeResponse:
+        def __init__(self, healthy_endpoints, unhealthy_endpoints, status_code=200):
+            self.status_code = status_code
+            self._body = {
+                "healthy_endpoints": healthy_endpoints,
+                "unhealthy_endpoints": unhealthy_endpoints,
+            }
+
+        def json(self):
+            return self._body
+
     @staticmethod
     def _get_main_module():
         import main as main_module
         return main_module
+
+    @staticmethod
+    async def _reset_startup_state(main_module):
+        from session_store import SessionIndex
+
+        if main_module.checkpoint_connection is not None:
+            await main_module.checkpoint_connection.close()
+        main_module.agent_system = None
+        main_module.checkpoint_connection = None
+        main_module.checkpoint_saver = None
+        main_module.data_service = None
+        main_module.llm_proxy_healthy = False
+        main_module.sessions = SessionIndex(
+            ttl=main_module.CHECKPOINT_TTL_SECONDS,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        global testclient
+        if testclient is not None:
+            testclient.close()
+            testclient = None
 
     def test_regression_startup_retries_database_initialization(self):
         main_module = self._get_main_module()
@@ -754,18 +794,19 @@ class TestStartupInitialization(unittest.TestCase):
 
         async def run_test():
             with patch.object(main_module, "GameDataService", side_effect=fake_game_data_service), \
-                 patch.object(main_module, "ReportAgentSystem", side_effect=lambda service=None: created_agent_system), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=lambda **_kwargs: created_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=False)), \
                  patch.object(main_module.asyncio, "sleep") as mock_sleep:
-                main_module.data_service = None
-                main_module.agent_system = None
+                await self._reset_startup_state(main_module)
                 await main_module.startup_event()
 
             self.assertEqual(attempts["count"], 3)
             self.assertEqual(mock_sleep.await_count, 2)
             self.assertIs(main_module.data_service, created_service)
             self.assertIs(main_module.agent_system, created_agent_system)
+            await main_module.shutdown_event()
 
-        import asyncio
         asyncio.run(run_test())
         print("✅ Startup retries database initialization before succeeding")
 
@@ -782,9 +823,191 @@ class TestStartupInitialization(unittest.TestCase):
 
             self.assertEqual(mock_sleep.await_count, main_module.STARTUP_RETRY_ATTEMPTS - 1)
 
-        import asyncio
         asyncio.run(run_test())
         print("✅ Startup fails fast after bounded database retries")
+
+    def test_probe_failure_elects_fallback_and_health_reports_proxy_down(self):
+        """Given an offline proxy, When startup probes it, Then fallback mode is elected."""
+        main_module = self._get_main_module()
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        async def run_test():
+            probe_sleep = AsyncMock()
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "GameDataService", return_value=object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_sleep", probe_sleep), \
+                 patch.object(
+                     main_module.requests,
+                     "get",
+                     side_effect=main_module.requests.ConnectionError("offline"),
+                 ) as request_get:
+                await main_module.startup_event()
+                health = await main_module.health_check()
+
+            self.assertEqual(created_agents[0]["mode"], "fallback")
+            self.assertIs(created_agents[0]["checkpointer"], main_module.checkpoint_saver)
+            self.assertFalse(health["services"]["llm_proxy"])
+            self.assertEqual(request_get.call_count, main_module.PROBE_RETRY_ATTEMPTS)
+            self.assertEqual(probe_sleep.await_count, main_module.PROBE_RETRY_ATTEMPTS - 1)
+            await main_module.shutdown_event()
+
+        asyncio.run(run_test())
+
+    def test_healthy_probe_elects_agent_and_health_reports_proxy_up(self):
+        """Given a deeply healthy proxy, When startup probes it, Then agent mode is elected."""
+        main_module = self._get_main_module()
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        async def run_test():
+            probe_sleep = AsyncMock()
+            response = self.ProbeResponse(["gpt-4o"], [])
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "GameDataService", return_value=object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_sleep", probe_sleep), \
+                 patch.object(main_module.requests, "get", return_value=response) as request_get:
+                await main_module.startup_event()
+                health = await main_module.health_check()
+
+            self.assertEqual(created_agents[0]["mode"], "agent")
+            self.assertTrue(health["services"]["llm_proxy"])
+            self.assertEqual(request_get.call_count, 1)
+            self.assertEqual(probe_sleep.await_count, 0)
+            await main_module.shutdown_event()
+
+        asyncio.run(run_test())
+
+    def test_200_with_unhealthy_endpoints_elects_fallback(self):
+        """Given a shallow 200 with an unhealthy model, When probed, Then startup stays fallback."""
+        main_module = self._get_main_module()
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        async def run_test():
+            probe_sleep = AsyncMock()
+            response = self.ProbeResponse(["gpt-4o"], ["gpt-4o"])
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "GameDataService", return_value=object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_sleep", probe_sleep), \
+                 patch.object(main_module.requests, "get", return_value=response) as request_get:
+                await main_module.startup_event()
+
+            self.assertEqual(created_agents[0]["mode"], "fallback")
+            self.assertEqual(request_get.call_count, main_module.PROBE_RETRY_ATTEMPTS)
+            self.assertEqual(probe_sleep.await_count, main_module.PROBE_RETRY_ATTEMPTS - 1)
+            await main_module.shutdown_event()
+
+        asyncio.run(run_test())
+
+    def test_rebuild_trims_1026_threads_to_newest_1024(self):
+        """Given persisted overflow, When rebuilding, Then only the newest 1024 threads survive."""
+        import importlib
+
+        main_module = self._get_main_module()
+        checkpoint_module = importlib.import_module("langgraph.checkpoint.sqlite.aio")
+        checkpoint_base = importlib.import_module("langgraph.checkpoint.base")
+        session_store = importlib.import_module("session_store")
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            previous_saver = main_module.checkpoint_saver
+            previous_sessions = main_module.sessions
+            async with checkpoint_module.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+                await saver.setup()
+                for index in range(1026):
+                    checkpoint = checkpoint_base.empty_checkpoint()
+                    checkpoint["id"] = f"00000000-0000-6000-8000-{index:012d}"
+                    await saver.aput(
+                        {
+                            "configurable": {
+                                "thread_id": f"thread-{index:04d}",
+                                "checkpoint_ns": "",
+                            }
+                        },
+                        checkpoint,
+                        {},
+                        {},
+                    )
+
+                main_module.checkpoint_saver = saver
+                main_module.sessions = session_store.SessionIndex(max_size=1024)
+                with patch.object(
+                    saver,
+                    "adelete_thread",
+                    wraps=saver.adelete_thread,
+                ) as delete_thread:
+                    await main_module.rebuild_session_index()
+
+                self.assertEqual(len(main_module.sessions), 1024)
+                self.assertTrue(await main_module.sessions.is_live("thread-1025"))
+                self.assertTrue(await main_module.sessions.is_live("thread-0002"))
+                self.assertFalse(await main_module.sessions.is_live("thread-0001"))
+                self.assertFalse(await main_module.sessions.is_live("thread-0000"))
+                self.assertEqual(
+                    [call.args[0] for call in delete_thread.await_args_list],
+                    ["thread-0001", "thread-0000"],
+                )
+                self.assertIsNone(
+                    await saver.aget_tuple(
+                        {"configurable": {"thread_id": "thread-0000"}}
+                    )
+                )
+
+            main_module.checkpoint_saver = previous_saver
+            main_module.sessions = previous_sessions
+
+        asyncio.run(run_test())
+
+    def test_health_still_returns_503_without_data_service(self):
+        """Given no data service, When health is requested, Then readiness remains unavailable."""
+        main_module = self._get_main_module()
+
+        async def run_test():
+            with patch.object(main_module, "data_service", None):
+                with self.assertRaises(main_module.HTTPException) as raised:
+                    await main_module.health_check()
+
+            self.assertEqual(raised.exception.status_code, 503)
+
+        asyncio.run(run_test())
+
+    def test_shutdown_closes_checkpoint_connection(self):
+        """Given an initialized saver, When shutdown runs, Then its SQLite connection closes."""
+        main_module = self._get_main_module()
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "GameDataService", return_value=object()), \
+                 patch.object(main_module, "ReportAgentSystem", return_value=object()), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=False)):
+                await main_module.startup_event()
+
+            connection = getattr(main_module, "checkpoint_connection")
+            self.assertIsNotNone(connection)
+            await main_module.shutdown_event()
+
+            assert connection is not None
+            with self.assertRaises(ValueError):
+                await connection.execute("SELECT 1")
+
+        asyncio.run(run_test())
 
 
 class _FakeClock:

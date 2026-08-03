@@ -2,9 +2,10 @@
 FastAPI backend for the web reporting system.
 Provides REST API for chat and report generation.
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TypedDict
 from datetime import datetime
 import asyncio
+import importlib
 import logging
 import uuid
 from fastapi import FastAPI, HTTPException
@@ -15,13 +16,25 @@ import sys
 
 sys.path.insert(0, '/')
 
-from bd_shared.config import CHECKPOINT_TTL_SECONDS, WEBREPORT_ALLOWED_ORIGINS, WEBREPORT_DEBUG
+from bd_shared.config import (
+    CHECKPOINT_DB_PATH,
+    CHECKPOINT_TTL_SECONDS,
+    LITELLM_BASE_URL,
+    WEBREPORT_ALLOWED_ORIGINS,
+    WEBREPORT_DEBUG,
+)
 
 logger = logging.getLogger(__name__)
 
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
 from session_store import SessionIndex
+
+aiosqlite = importlib.import_module("aiosqlite")
+AsyncSqliteSaver = importlib.import_module(
+    "langgraph.checkpoint.sqlite.aio"
+).AsyncSqliteSaver
+requests = importlib.import_module("requests")
 
 
 # Pydantic models for request/response
@@ -35,6 +48,7 @@ class ChatResponse(BaseModel):
     """Chat response model."""
     success: bool
     session_id: str
+    mode: str
     data: Optional[Any] = None
     query_info: Optional[Dict[str, Any]] = None
     message: str
@@ -48,6 +62,18 @@ class ReportData(BaseModel):
     data: Any
     generated_at: str
     query: Dict[str, Any]
+
+
+class HealthServices(TypedDict):
+    database: bool
+    agents: bool
+    llm_proxy: bool
+
+
+class HealthResponse(TypedDict):
+    status: str
+    timestamp: str
+    services: HealthServices
 
 
 # Initialize FastAPI app
@@ -68,11 +94,17 @@ app.add_middleware(
 
 # Global instances
 agent_system: Optional[ReportAgentSystem] = None
+checkpoint_connection = None
+checkpoint_saver = None
 data_service: Optional[GameDataService] = None
+llm_proxy_healthy: bool = False
 sessions: SessionIndex = SessionIndex(ttl=CHECKPOINT_TTL_SECONDS)
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2
+PROBE_RETRY_ATTEMPTS = 5
+PROBE_RETRY_DELAY_SECONDS = 2
+probe_sleep = asyncio.sleep
 
 
 def _internal_error(e: Exception) -> HTTPException:
@@ -104,16 +136,104 @@ async def initialize_data_service_with_retry() -> GameDataService:
     raise last_error
 
 
+async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
+    for attempt in range(1, PROBE_RETRY_ATTEMPTS + 1):
+        try:
+            response = await asyncio.to_thread(
+                requests.get,
+                f"{LITELLM_BASE_URL}/health",
+                timeout=5,
+            )
+            body = response.json()
+            response_is_healthy = (
+                response.status_code == 200
+                and isinstance(body, dict)
+                and bool(body.get("healthy_endpoints"))
+                and not body.get("unhealthy_endpoints")
+            )
+        except (requests.RequestException, ValueError):
+            response_is_healthy = False
+
+        if response_is_healthy:
+            return True
+
+        if attempt < PROBE_RETRY_ATTEMPTS:
+            await sleep(PROBE_RETRY_DELAY_SECONDS)
+
+    return False
+
+
+async def rebuild_session_index() -> None:
+    saver = checkpoint_saver
+    assert saver is not None
+
+    # LangGraph checkpoint IDs are time-ordered UUIDs, so MAX + DESC is recency order.
+    async with saver.conn.execute(
+        """
+        SELECT thread_id, MAX(checkpoint_id) AS latest
+        FROM checkpoints
+        GROUP BY thread_id
+        ORDER BY latest DESC
+        """
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    newest_first_ids = [row[0] for row in rows]
+    retained_ids = newest_first_ids[:sessions.max_size]
+    excess_ids = newest_first_ids[sessions.max_size:]
+
+    for thread_id in excess_ids:
+        await saver.adelete_thread(thread_id)
+
+    await sessions.seed(retained_ids)
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global agent_system, data_service
+    global agent_system, checkpoint_connection, checkpoint_saver
+    global data_service, llm_proxy_healthy
 
     data_service = await initialize_data_service_with_retry()
 
-    agent_system = ReportAgentSystem(service=data_service)
+    connection = await aiosqlite.connect(CHECKPOINT_DB_PATH)
+    saver = AsyncSqliteSaver(connection)
+    startup_complete = False
+    try:
+        # Local checkpoint setup is intentionally not retried; an unwritable store aborts startup.
+        await saver.setup()
+        checkpoint_connection = connection
+        checkpoint_saver = saver
+
+        llm_proxy_healthy = await probe_llm_proxy(sleep=probe_sleep)
+        mode = "agent" if llm_proxy_healthy else "fallback"
+        logger.warning("LLM mode elected: %s", mode)
+
+        await rebuild_session_index()
+
+        agent_system = ReportAgentSystem(
+            service=data_service,
+            checkpointer=saver,
+            mode=mode,
+        )
+        startup_complete = True
+    finally:
+        if not startup_complete:
+            await connection.close()
+            checkpoint_connection = None
+            checkpoint_saver = None
 
     logger.info("Services initialized successfully")
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    global checkpoint_connection, checkpoint_saver
+
+    if checkpoint_connection is not None:
+        await checkpoint_connection.close()
+    checkpoint_connection = None
+    checkpoint_saver = None
 
 
 @app.get("/")
@@ -134,8 +254,8 @@ async def root():
     }
 
 
-@app.get("/health")
-async def health_check():
+@app.get("/health", response_model=None)
+async def health_check() -> HealthResponse:
     """Health check endpoint."""
     if data_service is None:
         raise HTTPException(status_code=503, detail="Data service not available")
@@ -145,7 +265,8 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "services": {
             "database": data_service is not None,
-            "agents": agent_system is not None
+            "agents": agent_system is not None,
+            "llm_proxy": llm_proxy_healthy,
         }
     }
 
