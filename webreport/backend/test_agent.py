@@ -24,6 +24,7 @@ registry_dispatch = importlib.import_module("test_agent_registry_dispatch")
 registry_shapes = importlib.import_module("test_agent_registry_shapes")
 tools_commands = importlib.import_module("test_agent_tools_commands")
 tools_metadata = importlib.import_module("test_agent_tools_metadata")
+graph_cases = importlib.import_module("test_agent_graph")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
 
@@ -104,6 +105,10 @@ class TestTools(
     tools_commands.ToolCommandTests,
 ):
     """Bounded LangGraph tools over ToolRegistry, exercised through ToolNode."""
+
+
+class TestGraph(graph_cases.GraphTests):
+    """Bounded sequential ReAct graph exercised with an offline scripted model."""
 
 
 if __name__ == "__main__":
