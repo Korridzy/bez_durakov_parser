@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from typing import TypeAlias
 
 # Using the standard tomllib module for Python 3.11+
 if sys.version_info >= (3, 11):
@@ -10,14 +11,29 @@ else:
     # pip install tomli
     import tomli as tomllib
 
+LocalConfigValue: TypeAlias = str | int | float | bool | list[str]
+
 # Path to the configuration file (relative to the project root)
-# Use BD_CONFIG_FILE environment variable to override config file name
+# Use BD_CONFIG_FILE environment variable to select a complete alternate config.
+config_directory = os.path.dirname(os.path.abspath(__file__))
 config_file_name = os.environ.get('BD_CONFIG_FILE', 'config.toml')
-config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), config_file_name)
+config_file_path = os.path.join(config_directory, config_file_name)
 
 # Loading the configuration
 with open(config_file_path, "rb") as f:
     config = tomllib.load(f)
+
+if 'BD_CONFIG_FILE' not in os.environ:
+    local_config_file_path = os.path.join(config_directory, 'config.local.toml')
+    if os.path.isfile(local_config_file_path):
+        with open(local_config_file_path, "rb") as f:
+            local_config: dict[str, LocalConfigValue | dict[str, LocalConfigValue]] = tomllib.load(f)
+        for section, local_value in local_config.items():
+            base_value = config.get(section)
+            if isinstance(base_value, dict) and isinstance(local_value, dict):
+                config[section] = {**base_value, **local_value}
+            else:
+                config[section] = local_value
 
 # Constants for convenient access
 SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
