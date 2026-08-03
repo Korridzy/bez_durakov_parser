@@ -22,6 +22,8 @@ sys.path.insert(0, '/')
 
 registry_dispatch = importlib.import_module("test_agent_registry_dispatch")
 registry_shapes = importlib.import_module("test_agent_registry_shapes")
+tools_commands = importlib.import_module("test_agent_tools_commands")
+tools_metadata = importlib.import_module("test_agent_tools_metadata")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
 
@@ -95,6 +97,13 @@ class TestRegistry(
     registry_shapes.RegistryShapeTests,
 ):
     """ToolRegistry: the single dispatch and normalization surface over GameDataService."""
+
+
+class TestTools(
+    tools_metadata.ToolMetadataTests,
+    tools_commands.ToolCommandTests,
+):
+    """Bounded LangGraph tools over ToolRegistry, exercised through ToolNode."""
 
 
 if __name__ == "__main__":
