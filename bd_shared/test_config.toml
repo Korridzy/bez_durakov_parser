@@ -24,6 +24,7 @@ checkpoint_ttl_seconds = 3600
 checkpoint_db_path = "/data/checkpoints.db"
 litellm_base_url = "http://litellm:4000"
 agent_model = "gpt-4o"
+openai_api_key = ""
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
