@@ -10,7 +10,7 @@ help:
 	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
-	@echo "  make restart     - Restart services"
+	@echo "  make restart     - Recreate LiteLLM, backend, and frontend"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
 	@echo "  make rebuild     - Rebuild and restart services"
@@ -54,9 +54,9 @@ stop:
 	@echo "✅ Containers stopped"
 
 restart: generate-env
-	@echo "🔄 Restarting services..."
-	$(DOCKER_COMPOSE) up -d
-	@echo "✅ Services restarted"
+	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
+	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
+	@echo "✅ Application services recreated"
 
 logs:
 	$(DOCKER_COMPOSE) logs -f $(SERVICE)
