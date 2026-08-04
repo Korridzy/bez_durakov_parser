@@ -15,7 +15,7 @@ help:
 	@echo "WebReport stack:"
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
 	@echo "  make webreport-stop  - Stop WebReport stack"
-	@echo "  make restart         - Restart WebReport stack"
+	@echo "  make restart         - Recreate LiteLLM, backend, and frontend"
 	@echo "  make mysql-start     - Start only MySQL container"
 	@echo "  make mysql-stop      - Stop only MySQL container"
 	@echo ""

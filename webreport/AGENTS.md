@@ -63,7 +63,7 @@ webreport/
 ```bash
 make start      # docker compose up -d (generates all env files first)
 make stop       # docker compose down
-make restart    # regenerate env files, then docker compose up -d
+make restart    # regenerate env files, then force-recreate LiteLLM, backend, and frontend
 make logs       # docker compose logs -f
 make build      # docker compose build
 make rebuild    # down + build + up

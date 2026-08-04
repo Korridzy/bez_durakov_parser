@@ -155,7 +155,7 @@ $ make webreport-start
 $ make webreport-stop
 ```
 
-Перезапуск WebReport с повторной генерацией service env-файлов:
+Перезапуск LiteLLM, backend и frontend с повторной генерацией service env-файлов. MySQL и data collector продолжают работать:
 
 ```bash
 $ make restart
