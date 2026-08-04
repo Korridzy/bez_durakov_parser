@@ -20,6 +20,7 @@ from bd_shared.config import (
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
     LITELLM_BASE_URL,
+    AGENT_MODEL,
     WEBREPORT_ALLOWED_ORIGINS,
     WEBREPORT_DEBUG,
 )
@@ -148,6 +149,7 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
             response = await asyncio.to_thread(
                 requests.get,
                 f"{LITELLM_BASE_URL}/health",
+                params={"model": AGENT_MODEL},
                 timeout=5,
             )
             body = response.json()
@@ -155,7 +157,6 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
                 response.status_code == 200
                 and isinstance(body, dict)
                 and bool(body.get("healthy_endpoints"))
-                and not body.get("unhealthy_endpoints")
             )
         except (requests.RequestException, ValueError):
             response_is_healthy = False

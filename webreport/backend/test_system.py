@@ -1438,8 +1438,7 @@ class TestStartupInitialization(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    def test_200_with_unhealthy_endpoints_elects_fallback(self):
-        """Given a shallow 200 with an unhealthy model, When probed, Then startup stays fallback."""
+    def test_unrelated_unhealthy_endpoints_still_elect_agent(self):
         main_module = self._get_main_module()
         created_agents = []
 
@@ -1449,18 +1448,23 @@ class TestStartupInitialization(unittest.TestCase):
 
         async def run_test():
             probe_sleep = AsyncMock()
-            response = self.ProbeResponse(["gpt-4o"], ["gpt-4o"])
+            response = self.ProbeResponse(["selected-model"], ["unrelated-model"])
             await self._reset_startup_state(main_module)
             with patch.object(main_module, "GameDataService", return_value=object()), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "AGENT_MODEL", "selected-model", create=True), \
                  patch.object(main_module, "probe_sleep", probe_sleep), \
                  patch.object(main_module.requests, "get", return_value=response) as request_get:
                 await main_module.startup_event()
 
-            self.assertEqual(created_agents[0]["mode"], "fallback")
-            self.assertEqual(request_get.call_count, main_module.PROBE_RETRY_ATTEMPTS)
-            self.assertEqual(probe_sleep.await_count, main_module.PROBE_RETRY_ATTEMPTS - 1)
+            self.assertEqual(created_agents[0]["mode"], "agent")
+            request_get.assert_called_once_with(
+                f"{main_module.LITELLM_BASE_URL}/health",
+                params={"model": "selected-model"},
+                timeout=5,
+            )
+            self.assertEqual(probe_sleep.await_count, 0)
             await main_module.shutdown_event()
 
         asyncio.run(run_test())
