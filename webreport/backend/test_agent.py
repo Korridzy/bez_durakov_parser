@@ -77,9 +77,41 @@ class TestAgentConfig(unittest.TestCase):
             "AGENT_MAX_ROWS_PER_FETCH",
             "AGENT_MAX_ROWS_PER_RUN",
             "CHECKPOINT_TTL_SECONDS",
+            "PROBE_RETRY_ATTEMPTS",
+            "PROBE_RETRY_DELAY_SECONDS",
+            "PROBE_REQUEST_TIMEOUT_SECONDS",
+            "LLM_MAX_RETRIES",
+            "LLM_REQUEST_TIMEOUT_SECONDS",
         ):
             with self.subTest(constant=name):
                 self.assertIsInstance(getattr(config_module, name), int)
+
+    def test_retry_policy_defaults(self):
+        """Given no overrides, When config loads, Then probe and LLM retry budgets are the spec integers."""
+        config_module = self._reload_config()
+
+        self.assertEqual(config_module.PROBE_RETRY_ATTEMPTS, 5)
+        self.assertEqual(config_module.PROBE_RETRY_DELAY_SECONDS, 2)
+        self.assertEqual(config_module.PROBE_REQUEST_TIMEOUT_SECONDS, 10)
+        self.assertEqual(config_module.LLM_MAX_RETRIES, 0)
+        self.assertEqual(config_module.LLM_REQUEST_TIMEOUT_SECONDS, 60)
+
+    def test_alternate_config_file_supplies_its_own_values(self):
+        """Given BD_CONFIG_FILE selects test_config.toml, When config reloads, Then that file's
+        values win over the in-code defaults, and BD_DOCKER picks its docker_url."""
+        config_module = self._reload_config(
+            {"BD_CONFIG_FILE": "test_config.toml", "BD_DOCKER": "true"}
+        )
+
+        self.assertEqual(config_module.PROBE_RETRY_ATTEMPTS, 4)
+        self.assertEqual(config_module.PROBE_RETRY_DELAY_SECONDS, 1)
+        self.assertEqual(config_module.PROBE_REQUEST_TIMEOUT_SECONDS, 9)
+        self.assertEqual(config_module.LLM_MAX_RETRIES, 1)
+        self.assertEqual(config_module.LLM_REQUEST_TIMEOUT_SECONDS, 59)
+        self.assertEqual(
+            config_module.DATABASE_URL,
+            "mysql+pymysql://root:devpass@mysql:3306/bez_durakov_test",
+        )
 
     def test_llm_proxy_defaults(self):
         """Given no overrides, When config loads, Then proxy URL and model match the spec."""

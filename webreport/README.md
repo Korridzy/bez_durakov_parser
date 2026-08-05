@@ -91,7 +91,7 @@ cd webreport
 
 - `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
 - `[application]` — `debug`, `log_level`, `default_game_date`
-- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
+- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 `../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.

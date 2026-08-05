@@ -1,6 +1,7 @@
 [database]
 # Fixed test database - no dynamic updates needed
 url = "mysql+pymysql://root:devpass@localhost:3306/bez_durakov_test"
+docker_url = "mysql+pymysql://root:devpass@mysql:3306/bez_durakov_test"
 sqlalchemy_logging = true
 
 [application]
@@ -18,12 +19,18 @@ backend_debug_port = 5678
 frontend_debug_port = 5679
 agent_recursion_limit = 8
 agent_timeout_seconds = 60
+chat_request_timeout_seconds = 150
 agent_max_rows_per_fetch = 256
 agent_max_rows_per_run = 1024
 checkpoint_ttl_seconds = 3600
 checkpoint_db_path = "/data/checkpoints.db"
 litellm_base_url = "http://litellm:4000"
 agent_model = "gpt-4o"
+probe_retry_attempts = 4
+probe_retry_delay_seconds = 1
+probe_request_timeout_seconds = 9
+llm_max_retries = 1
+llm_request_timeout_seconds = 59
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"

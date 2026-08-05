@@ -81,6 +81,13 @@ CHECKPOINT_TTL_SECONDS = int(config["webreport"].get("checkpoint_ttl_seconds", 3
 LITELLM_BASE_URL = config["webreport"].get("litellm_base_url", "http://litellm:4000")
 AGENT_MODEL = config["webreport"].get("agent_model", "gpt-4o")
 
+# Startup LiteLLM probe and LLM client retry policy
+PROBE_RETRY_ATTEMPTS = int(config["webreport"].get("probe_retry_attempts", 5))
+PROBE_RETRY_DELAY_SECONDS = int(config["webreport"].get("probe_retry_delay_seconds", 2))
+PROBE_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("probe_request_timeout_seconds", 10))
+LLM_MAX_RETRIES = int(config["webreport"].get("llm_max_retries", 0))
+LLM_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("llm_request_timeout_seconds", 60))
+
 # Use BD_CHECKPOINT_DB_PATH environment variable to override the checkpoint store location
 CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
     "checkpoint_db_path", "/data/checkpoints.db"
