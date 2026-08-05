@@ -62,7 +62,7 @@ class TestAgentConfig(unittest.TestCase):
         config_module = self._reload_config()
 
         self.assertEqual(config_module.AGENT_RECURSION_LIMIT, 8)
-        self.assertEqual(config_module.AGENT_TIMEOUT_SECONDS, 60)
+        self.assertEqual(config_module.AGENT_TIMEOUT_SECONDS, 120)
         self.assertEqual(config_module.AGENT_MAX_ROWS_PER_FETCH, 256)
         self.assertEqual(config_module.AGENT_MAX_ROWS_PER_RUN, 1024)
         self.assertEqual(config_module.CHECKPOINT_TTL_SECONDS, 3600)
