@@ -10,7 +10,7 @@ import json as json_module
 from typing import Any
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 from datetime import date, datetime
 
 _test_agent_support = importlib.import_module("test_agent_support")
@@ -1296,6 +1296,21 @@ class TestStartupInitialization(unittest.TestCase):
         def json(self):
             return self._body
 
+    class RawProbeResponse:
+        def __init__(self, body, status_code=200):
+            self.status_code = status_code
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class RaisingJsonResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            raise ValueError("invalid JSON")
+
     @staticmethod
     def _get_main_module():
         import main as main_module
@@ -1315,6 +1330,42 @@ class TestStartupInitialization(unittest.TestCase):
         main_module.sessions = SessionIndex(
             ttl=main_module.CHECKPOINT_TTL_SECONDS,
         )
+
+    def _run_probe_startup(self, main_module, request_effects):
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        async def run_test():
+            probe_sleep = AsyncMock()
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "GameDataService", return_value=object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_sleep", probe_sleep), \
+                 patch.object(main_module.requests, "get", side_effect=request_effects) as request_get, \
+                 self.assertLogs(main_module.logger, level="WARNING") as captured_logs:
+                await main_module.startup_event()
+
+            probe_logs = [
+                message
+                for message in captured_logs.output
+                if "LiteLLM probe classified" in message
+            ]
+            mode = created_agents[0]["mode"]
+            request_count = request_get.call_count
+            sleep_count = probe_sleep.await_count
+            await main_module.shutdown_event()
+            self.assertEqual(
+                probe_sleep.await_args_list,
+                [call(main_module.PROBE_RETRY_DELAY_SECONDS)] * sleep_count,
+            )
+            self.assertEqual(len(probe_logs), 1)
+            return mode, request_count, sleep_count, probe_logs[0]
+
+        return asyncio.run(run_test())
 
     @classmethod
     def tearDownClass(cls):
@@ -1439,6 +1490,7 @@ class TestStartupInitialization(unittest.TestCase):
         asyncio.run(run_test())
 
     def test_unrelated_unhealthy_endpoints_still_elect_agent(self):
+        config_module = importlib.import_module("bd_shared.config")
         main_module = self._get_main_module()
         created_agents = []
 
@@ -1458,16 +1510,197 @@ class TestStartupInitialization(unittest.TestCase):
                  patch.object(main_module.requests, "get", return_value=response) as request_get:
                 await main_module.startup_event()
 
+            await main_module.shutdown_event()
+
             self.assertEqual(created_agents[0]["mode"], "agent")
             request_get.assert_called_once_with(
                 f"{main_module.LITELLM_BASE_URL}/health",
                 params={"model": "selected-model"},
-                timeout=5,
+                timeout=config_module.PROBE_REQUEST_TIMEOUT_SECONDS,
             )
             self.assertEqual(probe_sleep.await_count, 0)
-            await main_module.shutdown_event()
 
         asyncio.run(run_test())
+
+    def test_probe_response_classifier_follows_decision_table(self):
+        main_module = self._get_main_module()
+        cases = (
+            ("direct permanent status", 401, "not-json", "permanent"),
+            (
+                "healthy wins over nested permanent",
+                200,
+                {
+                    "healthy_endpoints": ["model"],
+                    "unhealthy_endpoints": [{"exception_status": 401}],
+                },
+                "healthy",
+            ),
+            (
+                "nested permanent status",
+                503,
+                {
+                    "healthy_endpoints": [],
+                    "unhealthy_endpoints": [{"exception_status": 403}],
+                },
+                "permanent",
+            ),
+            (
+                "legacy unhealthy string",
+                503,
+                {"healthy_endpoints": [], "unhealthy_endpoints": ["401"]},
+                "transient",
+            ),
+            (
+                "truthy non-list healthy endpoints",
+                200,
+                {"healthy_endpoints": "model", "unhealthy_endpoints": []},
+                "transient",
+            ),
+            ("non-dict body", 503, "unavailable", "transient"),
+        )
+
+        for name, status_code, body, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    main_module._classify_probe_response(status_code, body),
+                    expected,
+                )
+
+    def test_permanent_nested_probe_failure_stops_after_one_attempt(self):
+        main_module = self._get_main_module()
+        attempts = main_module.PROBE_RETRY_ATTEMPTS
+
+        for exception_status in (400, 401, 403, 404):
+            with self.subTest(exception_status=exception_status):
+                response = self.ProbeResponse(
+                    [],
+                    [{"exception_status": exception_status}],
+                    status_code=503,
+                )
+                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                    main_module,
+                    [response] * attempts,
+                )
+
+                self.assertEqual(mode, "fallback")
+                self.assertEqual(request_count, 1)
+                self.assertEqual(sleep_count, 0)
+                self.assertIn("verdict=permanent", probe_log)
+                self.assertIn(f"exception_status={exception_status}", probe_log)
+
+    def test_permanent_direct_probe_failure_stops_after_one_attempt(self):
+        main_module = self._get_main_module()
+        attempts = main_module.PROBE_RETRY_ATTEMPTS
+
+        for status_code in (400, 401, 403, 404):
+            with self.subTest(status_code=status_code):
+                response = self.ProbeResponse([], [], status_code=status_code)
+                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                    main_module,
+                    [response] * attempts,
+                )
+
+                self.assertEqual(mode, "fallback")
+                self.assertEqual(request_count, 1)
+                self.assertEqual(sleep_count, 0)
+                self.assertIn("verdict=permanent", probe_log)
+                self.assertIn(f"status={status_code}", probe_log)
+
+    def test_transient_probe_failure_exhausts_retry_budget(self):
+        main_module = self._get_main_module()
+        attempts = main_module.PROBE_RETRY_ATTEMPTS
+        cases = (
+            (
+                "timeout",
+                [main_module.requests.Timeout("timed out") for _ in range(attempts)],
+            ),
+            ("rate limited", [self.ProbeResponse([], [], 429)] * attempts),
+            ("unmarked server error", [self.ProbeResponse([], [], 503)] * attempts),
+            ("non-dict body", [self.RawProbeResponse("unavailable", 503)] * attempts),
+            ("malformed JSON", [self.RaisingJsonResponse(503)] * attempts),
+            (
+                "legacy unhealthy string",
+                [self.ProbeResponse([], ["401"], 503)] * attempts,
+            ),
+        )
+
+        for name, request_effects in cases:
+            with self.subTest(name=name):
+                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                    main_module,
+                    request_effects,
+                )
+
+                self.assertEqual(mode, "fallback")
+                self.assertEqual(request_count, attempts)
+                self.assertEqual(sleep_count, attempts - 1)
+                self.assertIn("verdict=transient", probe_log)
+
+    def test_healthy_probe_wins_over_nested_permanent_failure(self):
+        main_module = self._get_main_module()
+        response = self.ProbeResponse(
+            ["model"],
+            [{"exception_status": 401}],
+            status_code=200,
+        )
+
+        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+            main_module,
+            [response],
+        )
+
+        self.assertEqual(mode, "agent")
+        self.assertEqual(request_count, 1)
+        self.assertEqual(sleep_count, 0)
+        self.assertIn("verdict=healthy", probe_log)
+
+    def test_transient_probe_recovers_on_next_attempt(self):
+        main_module = self._get_main_module()
+        responses = [
+            self.ProbeResponse([], ["unrelated"], 500),
+            self.ProbeResponse(["model"], [], 200),
+        ]
+
+        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+            main_module,
+            responses,
+        )
+
+        self.assertEqual(mode, "agent")
+        self.assertEqual(request_count, 2)
+        self.assertEqual(sleep_count, 1)
+        self.assertIn("verdict=healthy", probe_log)
+
+    def test_direct_401_stays_permanent_when_json_raises(self):
+        main_module = self._get_main_module()
+        attempts = main_module.PROBE_RETRY_ATTEMPTS
+        response = self.RaisingJsonResponse(401)
+
+        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+            main_module,
+            [response] * attempts,
+        )
+
+        self.assertEqual(mode, "fallback")
+        self.assertEqual(request_count, 1)
+        self.assertEqual(sleep_count, 0)
+        self.assertIn("verdict=permanent", probe_log)
+        self.assertIn("status=401", probe_log)
+
+    def test_truthy_non_list_healthy_endpoints_remains_transient(self):
+        main_module = self._get_main_module()
+        attempts = main_module.PROBE_RETRY_ATTEMPTS
+        responses = [self.ProbeResponse("model", [], 200)] * attempts
+
+        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+            main_module,
+            responses,
+        )
+
+        self.assertEqual(mode, "fallback")
+        self.assertEqual(request_count, attempts)
+        self.assertEqual(sleep_count, attempts - 1)
+        self.assertIn("verdict=transient", probe_log)
 
     def test_rebuild_trims_1026_threads_to_newest_1024(self):
         """Given persisted overflow, When rebuilding, Then only the newest 1024 threads survive."""

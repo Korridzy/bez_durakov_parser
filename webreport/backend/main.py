@@ -2,7 +2,7 @@
 FastAPI backend for the web reporting system.
 Provides REST API for chat and report generation.
 """
-from typing import Dict, Any, Optional, TypedDict
+from typing import Dict, Any, Literal, Optional, TypedDict, assert_never
 from datetime import datetime
 import asyncio
 import importlib
@@ -21,6 +21,9 @@ from bd_shared.config import (
     CHECKPOINT_TTL_SECONDS,
     LITELLM_BASE_URL,
     AGENT_MODEL,
+    PROBE_REQUEST_TIMEOUT_SECONDS,
+    PROBE_RETRY_ATTEMPTS,
+    PROBE_RETRY_DELAY_SECONDS,
     WEBREPORT_ALLOWED_ORIGINS,
     WEBREPORT_DEBUG,
 )
@@ -109,8 +112,7 @@ admission_lock = asyncio.Lock()
 
 STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2
-PROBE_RETRY_ATTEMPTS = 5
-PROBE_RETRY_DELAY_SECONDS = 2
+PERMANENT_PROBE_STATUSES = frozenset({400, 401, 403, 404})
 probe_sleep = asyncio.sleep
 
 
@@ -143,31 +145,94 @@ async def initialize_data_service_with_retry() -> GameDataService:
     raise last_error
 
 
+ProbeVerdict = Literal["healthy", "permanent", "transient"]
+
+
+def _probe_exception_status(body: Any) -> Optional[int]:
+    if not isinstance(body, dict):
+        return None
+
+    unhealthy_endpoints = body.get("unhealthy_endpoints")
+    if not isinstance(unhealthy_endpoints, list):
+        return None
+
+    first_status = None
+    for endpoint in unhealthy_endpoints:
+        if not isinstance(endpoint, dict):
+            continue
+        exception_status = endpoint.get("exception_status")
+        if type(exception_status) is not int:
+            continue
+        if exception_status in PERMANENT_PROBE_STATUSES:
+            return exception_status
+        if first_status is None:
+            first_status = exception_status
+
+    return first_status
+
+
+def _classify_probe_response(status_code: Optional[int], body: Any) -> ProbeVerdict:
+    if status_code in PERMANENT_PROBE_STATUSES:
+        return "permanent"
+
+    if status_code == 200 and isinstance(body, dict):
+        healthy_endpoints = body.get("healthy_endpoints")
+        if isinstance(healthy_endpoints, list) and healthy_endpoints:
+            return "healthy"
+
+    if _probe_exception_status(body) in PERMANENT_PROBE_STATUSES:
+        return "permanent"
+
+    return "transient"
+
+
 async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
+    status_code = None
+    body = None
+    verdict: ProbeVerdict = "transient"
+    proxy_is_healthy = False
+
     for attempt in range(1, PROBE_RETRY_ATTEMPTS + 1):
+        status_code = None
+        body = None
         try:
             response = await asyncio.to_thread(
                 requests.get,
                 f"{LITELLM_BASE_URL}/health",
                 params={"model": AGENT_MODEL},
-                timeout=5,
+                timeout=PROBE_REQUEST_TIMEOUT_SECONDS,
             )
-            body = response.json()
-            response_is_healthy = (
-                response.status_code == 200
-                and isinstance(body, dict)
-                and bool(body.get("healthy_endpoints"))
-            )
-        except (requests.RequestException, ValueError):
-            response_is_healthy = False
+            status_code = response.status_code
+            if status_code not in PERMANENT_PROBE_STATUSES:
+                try:
+                    body = response.json()
+                except (requests.RequestException, ValueError):
+                    body = None
+            verdict = _classify_probe_response(status_code, body)
+        except requests.RequestException:
+            verdict = "transient"
 
-        if response_is_healthy:
-            return True
+        match verdict:
+            case "healthy":
+                proxy_is_healthy = True
+                break
+            case "permanent":
+                break
+            case "transient":
+                if attempt < PROBE_RETRY_ATTEMPTS:
+                    await sleep(PROBE_RETRY_DELAY_SECONDS)
+                    continue
+                break
+            case unreachable:
+                assert_never(unreachable)
 
-        if attempt < PROBE_RETRY_ATTEMPTS:
-            await sleep(PROBE_RETRY_DELAY_SECONDS)
-
-    return False
+    logger.warning(
+        "LiteLLM probe classified verdict=%s status=%s exception_status=%s",
+        verdict,
+        status_code,
+        _probe_exception_status(body),
+    )
+    return proxy_is_healthy
 
 
 async def rebuild_session_index() -> None:
