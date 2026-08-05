@@ -25,7 +25,7 @@ class GenerateEnvTests(unittest.TestCase):
         # When: each free model route is inspected.
         configuration = configuration_path.read_text(encoding="utf-8")
 
-        # Then: every model uses OpenCode's OpenAI-compatible endpoint and credential.
+        # Then: every model uses OpenCode's endpoint, credential, and probe-bounded health check.
         for model_id in model_ids:
             with self.subTest(model_id=model_id):
                 self.assertIn(
@@ -35,6 +35,8 @@ class GenerateEnvTests(unittest.TestCase):
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
 """,
                     configuration,
                 )
@@ -52,6 +54,9 @@ class GenerateEnvTests(unittest.TestCase):
     litellm_params:
       model: openrouter/~deepseek/deepseek-v4-flash-latest
       api_key: os.environ/OPENROUTER_API_KEY
+      temperature: 0
+    model_info:
+      health_check_timeout: 8
 """,
             configuration,
         )

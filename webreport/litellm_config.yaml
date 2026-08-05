@@ -4,58 +4,88 @@ model_list:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: deepseek-v4-flash-latest
     litellm_params:
       model: openrouter/~deepseek/deepseek-v4-flash-latest
       api_key: os.environ/OPENROUTER_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: deepseek-v4-pro
     litellm_params:
       model: openrouter/deepseek/deepseek-v4-pro
       api_key: os.environ/OPENROUTER_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/big-pickle
     litellm_params:
       model: openai/big-pickle
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/deepseek-v4-flash-free
     litellm_params:
       model: openai/deepseek-v4-flash-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/mimo-v2.5-free
     litellm_params:
       model: openai/mimo-v2.5-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/laguna-s-2.1-free
     litellm_params:
       model: openai/laguna-s-2.1-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/ling-3.0-flash-free
     litellm_params:
       model: openai/ling-3.0-flash-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/north-mini-code-free
     litellm_params:
       model: openai/north-mini-code-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
   - model_name: opencode/nemotron-3-ultra-free
     litellm_params:
       model: openai/nemotron-3-ultra-free
       api_base: https://opencode.ai/zen/v1
       api_key: os.environ/OPENCODE_API_KEY
       temperature: 0
+    model_info:
+      health_check_timeout: 8
+
+router_settings:
+  timeout: 45
+  retry_policy:
+    AuthenticationErrorRetries: 0
+    BadRequestErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+    TimeoutErrorRetries: 0
+    RateLimitErrorRetries: 3
+    InternalServerErrorRetries: 2
 
 litellm_settings:
   num_retries: 2
