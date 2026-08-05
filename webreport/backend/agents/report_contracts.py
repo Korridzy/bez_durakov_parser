@@ -114,7 +114,15 @@ class MemoryModule(Protocol):
 
 
 class ChatModelFactory(Protocol):
-    def __call__(self, *, base_url: str, model: str, api_key: str) -> ModelClient: ...
+    def __call__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str,
+        max_retries: int,
+        timeout: float,
+    ) -> ModelClient: ...
 
 
 @runtime_checkable
@@ -127,6 +135,8 @@ class ConfigModule(AgentToolConfig, Protocol):
     AGENT_TIMEOUT_SECONDS: int
     LITELLM_BASE_URL: str
     AGENT_MODEL: str
+    LLM_MAX_RETRIES: int
+    LLM_REQUEST_TIMEOUT_SECONDS: int
 
 
 class InterpreterFactory(Protocol):

@@ -154,7 +154,11 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.make_system(self.memory.InMemorySaver(), mode="agent")
         chat_openai.assert_called_once_with(
-            base_url="http://litellm:4000", model="gpt-4o", api_key="sk-noop"
+            base_url="http://litellm:4000",
+            model="gpt-4o",
+            api_key="sk-noop",
+            max_retries=0,
+            timeout=60,
         )
         self.assertIs(graph_builder.call_args.args[0], client)
 

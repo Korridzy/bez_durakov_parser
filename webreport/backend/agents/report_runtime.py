@@ -132,6 +132,8 @@ def _new_model_client() -> ModelClient:
         base_url=CONFIG.LITELLM_BASE_URL,
         model=CONFIG.AGENT_MODEL,
         api_key="sk-noop",
+        max_retries=CONFIG.LLM_MAX_RETRIES,
+        timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
     )
 
 
