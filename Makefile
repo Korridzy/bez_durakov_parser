@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help setup upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -9,6 +9,7 @@ help:
 	@echo ""
 	@echo "Core:"
 	@echo "  make setup          - Create venv and install dependencies"
+	@echo "  make test           - Run the complete project test suite"
 	@echo "  make upgrade-db     - Apply Alembic migrations"
 	@echo "  make upgrade-code   - Pull updates from main safely"
 	@echo ""
@@ -65,6 +66,29 @@ setup:
 	poetry env use "$$python_found"; \
 	poetry install --no-root; \
 	poetry run python -V
+
+test:
+	@set -o pipefail; \
+	status=0; \
+	run() { \
+		echo ""; \
+		echo ">>> $$*"; \
+		"$$@" || status=$$?; \
+	}; \
+	run poetry run python test_alembic_migration.py; \
+	run poetry run python webreport/test_generate_env.py; \
+	run $(MAKE) -C webreport test; \
+	run bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py'; \
+	run bash -c 'set -e; set -a; source webreport/.env; source webreport/.env.frontend; set +a; export WEBREPORT_FRONTEND_URL="http://127.0.0.1:$$WEBREPORT_FRONTEND_PORT"; cd webreport/frontend; poetry run python -m unittest discover -s . -p "test_*.py"'; \
+	run $(MAKE) -C webreport test-e2e; \
+	if [ $$status -eq 0 ]; then \
+		echo ""; \
+		echo "✅ Full test suite passed"; \
+	else \
+		echo ""; \
+		echo "❌ Full test suite failed (exit $$status)"; \
+	fi; \
+	exit $$status
 
 upgrade-db:
 	@poetry run alembic upgrade head
