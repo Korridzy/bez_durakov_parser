@@ -35,7 +35,12 @@ def trace(messages: Sequence[StoredMessage]) -> list[QueryTrace]:
 
 
 def success(
-    message: str, mode: Mode, query_info: list[QueryTrace], data: object | None
+    message: str,
+    mode: Mode,
+    query_info: list[QueryTrace],
+    data: object | None,
+    *,
+    reasoning: str | None,
 ) -> ReportResponse:
     return {
         "success": True,
@@ -44,10 +49,13 @@ def success(
         "timestamp": datetime.now().isoformat(),
         "message": message,
         "mode": mode,
+        "reasoning": reasoning,
     }
 
 
-def failure(message: str, error: str, mode: Mode) -> ReportResponse:
+def failure(
+    message: str, error: str, mode: Mode, *, reasoning: str | None = None
+) -> ReportResponse:
     return {
         "success": False,
         "error": error,
@@ -56,4 +64,5 @@ def failure(message: str, error: str, mode: Mode) -> ReportResponse:
         "timestamp": datetime.now().isoformat(),
         "query_info": [],
         "data": None,
+        "reasoning": reasoning,
     }

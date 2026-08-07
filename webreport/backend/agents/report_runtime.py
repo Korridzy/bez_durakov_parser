@@ -3,13 +3,17 @@ from __future__ import annotations
 import importlib
 import logging
 from asyncio import wait_for
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     Final,
+    Protocol,
     TypeAlias,
     TypeGuard,
+    TypedDict,
     assert_never,
     final,
+    runtime_checkable,
 )
 
 from agent.graph import (
@@ -18,10 +22,11 @@ from agent.graph import (
     ModelClient,
     RECURSION_LIMIT_MARKER,
     StateUpdate,
+    ThreadConfig,
     arun,
     build_graph,
 )
-from agent.reasoning import OutboundReasoningFilter
+from agent.reasoning import OutboundReasoningFilter, current_turn_reasoning, extract_text
 from agent.registry import ToolRegistry
 from agent.tools import ToolArgs, build_tools
 from .report_contracts import (
@@ -70,6 +75,43 @@ def _load_runtime_modules() -> tuple[
 
 
 CONFIG, MESSAGES, MEMORY, LANGGRAPH, STATE = _load_runtime_modules()
+
+
+class CheckpointConfig(TypedDict):
+    configurable: ThreadConfig
+
+
+class CheckpointSaver(Protocol):
+    async def aget_tuple(self, config: CheckpointConfig) -> object: ...
+
+
+@runtime_checkable
+class CheckpointTuple(Protocol):
+    checkpoint: Mapping[str, object]
+
+
+def _is_checkpoint_saver(value: object) -> TypeGuard[CheckpointSaver]:
+    return callable(getattr(value, "aget_tuple", None))
+
+
+def _is_checkpoint_tuple(value: object) -> TypeGuard[CheckpointTuple]:
+    return isinstance(value, CheckpointTuple)
+
+
+def _is_checkpoint_channels(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _checkpoint_messages(value: object) -> Sequence[object] | None:
+    if not _is_checkpoint_tuple(value):
+        return None
+    channel_values = value.checkpoint.get("channel_values")
+    if not _is_checkpoint_channels(channel_values):
+        return None
+    messages = channel_values.get("messages")
+    if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes)):
+        return messages
+    return None
 DEFAULT_TIMEOUT_SECONDS: Final = CONFIG.AGENT_TIMEOUT_SECONDS
 logger = logging.getLogger(__name__)
 
@@ -182,6 +224,7 @@ class ReportAgentSystem:
         self._registry: ResponseRegistry = registry
         self._interpreter = _new_interpreter()
         saver = checkpointer if checkpointer is not None else MEMORY.InMemorySaver()
+        self._saver: object = saver
         match mode:
             case "fallback":
                 self._execution: Execution = FallbackExecution(_build_history_graph(saver))
@@ -218,12 +261,28 @@ class ReportAgentSystem:
         except Exception as error:
             mode = self.mode
             logger.exception("Report request failed", extra={"mode": mode})
-            message = (
-                "Не удалось сформировать отчёт с помощью агента."
-                if mode == "agent"
-                else "Не удалось сформировать отчёт."
+            match mode:
+                case "agent":
+                    message = "Не удалось сформировать отчёт с помощью агента."
+                    reasoning = await self._partial_reasoning(session_id)
+                case "fallback":
+                    message = "Не удалось сформировать отчёт."
+                    reasoning = None
+                case unreachable:
+                    assert_never(unreachable)
+            return failure(message, str(error), mode, reasoning=reasoning)
+
+    async def _partial_reasoning(self, session_id: str) -> str | None:
+        if not _is_checkpoint_saver(self._saver):
+            return None
+        try:
+            checkpoint_tuple = await self._saver.aget_tuple(
+                {"configurable": {"thread_id": session_id}}
             )
-            return failure(message, str(error), mode)
+        except Exception:
+            return None
+        messages = _checkpoint_messages(checkpoint_tuple)
+        return current_turn_reasoning(messages) if messages is not None else None
 
     async def _process_fallback(
         self, user_message: str, session_id: str, history_graph: HistoryGraph
@@ -242,7 +301,13 @@ class ReportAgentSystem:
             },
             {"configurable": {"thread_id": session_id}, "recursion_limit": 2},
         )
-        return success(message, "fallback", [{"tool": query["method"], "args": query["params"]}], data)
+        return success(
+            message,
+            "fallback",
+            [{"tool": query["method"], "args": query["params"]}],
+            data,
+            reasoning=None,
+        )
 
     async def _process_agent(
         self,
@@ -254,10 +319,18 @@ class ReportAgentSystem:
         try:
             result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
         except TimeoutError:
-            return failure("Время ожидания ответа агента истекло.", "timeout", "agent")
+            return failure(
+                "Время ожидания ответа агента истекло.",
+                "timeout",
+                "agent",
+                reasoning=await self._partial_reasoning(session_id),
+            )
         if "error" in result:
             return failure(
-                "Агент превысил допустимое число шагов.", RECURSION_LIMIT_MARKER, "agent"
+                "Агент превысил допустимое число шагов.",
+                RECURSION_LIMIT_MARKER,
+                "agent",
+                reasoning=await self._partial_reasoning(session_id),
             )
         turn_messages = current_turn_messages(result["messages"])
         query_trace = trace(turn_messages)
@@ -266,4 +339,10 @@ class ReportAgentSystem:
         if payload is not None:
             name, args = _parse_handle(payload)
             data = await self._registry.execute_response(name, args)
-        return success(turn_messages[-1].content, "agent", query_trace, data)
+        return success(
+            extract_text(turn_messages[-1].content),
+            "agent",
+            query_trace,
+            data,
+            reasoning=current_turn_reasoning(result["messages"]),
+        )
