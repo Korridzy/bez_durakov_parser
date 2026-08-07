@@ -21,6 +21,7 @@ from agent.graph import (
     arun,
     build_graph,
 )
+from agent.reasoning import OutboundReasoningFilter
 from agent.registry import ToolRegistry
 from agent.tools import ToolArgs, build_tools
 from .report_contracts import (
@@ -125,15 +126,18 @@ def _new_interpreter() -> Interpreter:
 
 
 def _new_model_client() -> ModelClient:
-    module: object = importlib.import_module("langchain_openai")
+    module: object = importlib.import_module("langchain_litellm")
     if not isinstance(module, ChatModelModule):
         raise RuntimeDependencyError("Invalid chat model module")
-    return module.ChatOpenAI(
-        base_url=CONFIG.LITELLM_BASE_URL,
-        model=CONFIG.AGENT_MODEL,
-        api_key="sk-noop",
-        max_retries=CONFIG.LLM_MAX_RETRIES,
-        timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+    # Anthropic-style thinking models are unsupported because thinking_blocks do not round-trip.
+    return OutboundReasoningFilter(
+        module.ChatLiteLLM(
+            model="litellm_proxy/" + CONFIG.AGENT_MODEL,
+            api_base=CONFIG.LITELLM_BASE_URL,
+            api_key="sk-noop",
+            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        )
     )
 
 

@@ -2,7 +2,15 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
 from typing import Literal, NotRequired, Protocol, TypeAlias, TypedDict, runtime_checkable
 
-from agent.graph import ConversationState, JsonValue, ModelClient, RunConfig, StateUpdate, ToolCall
+from agent.graph import (
+    ConversationState,
+    JsonValue,
+    MessageView,
+    ModelClient,
+    RunConfig,
+    StateUpdate,
+    ToolCall,
+)
 from agent.tools import AgentToolConfig, ToolArgs
 
 Mode: TypeAlias = Literal["agent", "fallback"]
@@ -55,7 +63,7 @@ class ResponseRegistry(Protocol):
 
 @runtime_checkable
 class StoredMessage(Protocol):
-    content: str
+    content: str | list[object]
     type: str
 
 
@@ -65,7 +73,7 @@ class ToolCallingMessage(StoredMessage, Protocol):
 
 
 class MessageFactory(Protocol):
-    def __call__(self, *, content: str) -> StoredMessage: ...
+    def __call__(self, *, content: str) -> MessageView: ...
 
 
 @runtime_checkable
@@ -117,17 +125,17 @@ class ChatModelFactory(Protocol):
     def __call__(
         self,
         *,
-        base_url: str,
         model: str,
+        api_base: str,
         api_key: str,
-        max_retries: int,
-        timeout: float,
+        request_timeout: int,
+        model_kwargs: Mapping[str, object],
     ) -> ModelClient: ...
 
 
 @runtime_checkable
 class ChatModelModule(Protocol):
-    ChatOpenAI: ChatModelFactory
+    ChatLiteLLM: ChatModelFactory
 
 
 @runtime_checkable

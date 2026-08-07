@@ -139,28 +139,31 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_agent_client_targets_litellm_without_real_key(self):
         client = FailingModel()
-        chat_openai = Mock(return_value=client)
-        proxy_module = type("ProxyModule", (), {"ChatOpenAI": chat_openai})()
+        chat_litellm = Mock(return_value=client)
+        proxy_module = type("ProxyModule", (), {"ChatLiteLLM": chat_litellm})()
         real_import = importlib.import_module
         with (
             patch.object(
                 self.runtime_module.importlib,
                 "import_module",
                 side_effect=lambda name: proxy_module
-                if name == "langchain_openai"
+                if name == "langchain_litellm"
                 else real_import(name),
             ),
             patch.object(self.runtime_module, "build_graph") as graph_builder,
         ):
             self.make_system(self.memory.InMemorySaver(), mode="agent")
-        chat_openai.assert_called_once_with(
-            base_url="http://litellm:4000",
-            model="gpt-4o",
+        chat_litellm.assert_called_once_with(
+            model="litellm_proxy/gpt-4o",
+            api_base="http://litellm:4000",
             api_key="sk-noop",
-            max_retries=0,
-            timeout=60,
+            request_timeout=60,
+            model_kwargs={"num_retries": 0},
         )
-        self.assertIs(graph_builder.call_args.args[0], client)
+        self.assertIsInstance(
+            graph_builder.call_args.args[0], self.runtime_module.OutboundReasoningFilter
+        )
+        self.assertIs(graph_builder.call_args.args[0].client, client)
 
     async def test_fallback_turn_is_checkpointed_as_human_assistant_pair(self):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
