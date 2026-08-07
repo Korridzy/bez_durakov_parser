@@ -77,7 +77,7 @@ rebuild: generate-env
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_top_team_limit.py"
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_top_team_limit.py && python /app/test_reasoning.py"
 	@echo ""
 
 test-e2e-setup:

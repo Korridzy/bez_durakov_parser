@@ -48,7 +48,7 @@ class TestAgentConfig(unittest.TestCase):
         """
         config_module = importlib.import_module("bd_shared.config")
 
-        with patch.dict(os.environ, env or {}):
+        with patch.dict(os.environ, {"BD_CONFIG_FILE": "config.toml", **(env or {})}):
             for name in unset:
                 os.environ.pop(name, None)
             return importlib.reload(config_module)

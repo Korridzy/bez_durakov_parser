@@ -1247,7 +1247,7 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
             history["history"],
             [
                 {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "ok"},
+                {"role": "assistant", "content": "ok", "reasoning": None},
             ],
         )
         self.assertEqual(clear_status, 200)
