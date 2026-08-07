@@ -2,7 +2,8 @@
 FastAPI backend for the web reporting system.
 Provides REST API for chat and report generation.
 """
-from typing import Dict, Any, Literal, Optional, TypedDict, assert_never
+from typing import Dict, Any, Literal, Optional, Protocol, TypedDict, TypeGuard, assert_never
+from collections.abc import Sequence
 from datetime import datetime
 import asyncio
 import importlib
@@ -30,6 +31,7 @@ from bd_shared.config import (
 
 logger = logging.getLogger(__name__)
 
+from agent.reasoning import extract_reasoning, extract_text
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
 from session_store import MAX_SESSIONS, SessionIndex
@@ -59,6 +61,7 @@ class ChatResponse(BaseModel):
     message: str
     timestamp: str
     error: Optional[str] = None
+    reasoning: Optional[str] = None
 
 
 class ReportData(BaseModel):
@@ -397,6 +400,7 @@ async def chat(message: ChatMessage):
             message=result["message"],
             timestamp=result["timestamp"],
             error=result.get("error"),
+            reasoning=result.get("reasoning"),
         )
     except HTTPException:
         raise
@@ -409,6 +413,57 @@ async def chat(message: ChatMessage):
                 pinned[session_id] = remaining_pins
             else:
                 del pinned[session_id]
+
+
+class QuestionMessage(Protocol):
+    """What the whitelist reads off a stored user message."""
+
+    content: object
+
+
+class AnswerMessage(Protocol):
+    """A stored model message: its content plus the tool calls it may carry."""
+
+    content: object
+    tool_calls: Sequence[object]
+
+
+def _is_question(message: object) -> TypeGuard[QuestionMessage]:
+    """The message classes arrive through importlib, so narrow them explicitly."""
+    return isinstance(message, langchain_messages.HumanMessage)
+
+
+def _is_answer(message: object) -> TypeGuard[AnswerMessage]:
+    return isinstance(message, langchain_messages.AIMessage)
+
+
+def _history_entries(stored_messages: Sequence[object]) -> list[dict[str, str | None]]:
+    """Whitelist the chat turns a client may replay from a checkpoint.
+
+    Tool calls and their results stay internal; only the user's questions and
+    the final answers are served. Reasoning accumulates across the AI messages
+    of a turn and rides on that turn's final answer.
+    """
+    entries: list[dict[str, str | None]] = []
+    turn: list[object] = []
+    for stored_message in stored_messages:
+        if _is_question(stored_message):
+            turn = []
+            entries.append(
+                {"role": "user", "content": extract_text(stored_message.content)}
+            )
+        elif _is_answer(stored_message):
+            turn.append(stored_message)
+            if stored_message.content and not stored_message.tool_calls:
+                entries.append(
+                    {
+                        "role": "assistant",
+                        "content": extract_text(stored_message.content),
+                        "reasoning": extract_reasoning(turn),
+                    }
+                )
+
+    return entries
 
 
 @app.get("/api/history/{session_id}")
@@ -439,22 +494,9 @@ async def get_history(session_id: str):
 
     history = []
     if checkpoint_tuple is not None:
-        stored_messages = checkpoint_tuple.checkpoint.get(
-            "channel_values", {}
-        ).get("messages", [])
-        for stored_message in stored_messages:
-            if isinstance(stored_message, langchain_messages.HumanMessage):
-                history.append(
-                    {"role": "user", "content": str(stored_message.content)}
-                )
-            elif (
-                isinstance(stored_message, langchain_messages.AIMessage)
-                and stored_message.content
-                and not stored_message.tool_calls
-            ):
-                history.append(
-                    {"role": "assistant", "content": str(stored_message.content)}
-                )
+        history = _history_entries(
+            checkpoint_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+        )
 
     return {"session_id": session_id, "history": history}
 
