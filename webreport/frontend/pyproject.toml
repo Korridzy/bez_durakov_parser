@@ -16,6 +16,8 @@ pydevd-pycharm = "~=252.27397.106"
 
 [tool.poetry.group.dev.dependencies]
 selenium = "^4.46.0"
+pytest = "^8.3.0"
+pytest-playwright = "^0.7.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
