@@ -19,7 +19,7 @@
    - Переключение между представлениями
 
 3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
-   - обращается к модели через внутренний LiteLLM proxy `litellm:4000`
+   - обращается к модели через `ChatLiteLLM` и внутренний LiteLLM proxy `litellm:4000`
    - сохраняет state в service-local SQLite checkpoint store `../vm/backend/checkpoints`
    - при запуске выбирает `agent` или `fallback` режим и не меняет его до перезапуска
 
@@ -77,6 +77,12 @@ webreport/
 - `data_collector/pyproject.toml`
 
 При обычном Docker-запуске вручную устанавливать их не нужно: Docker-образы устанавливают зависимости во время сборки.
+
+Backend использует `ChatLiteLLM` из `langchain-litellm` с диапазоном версий `>=0.7,<0.8`. LiteLLM SDK теперь входит в образ backend, что осознанно отменяет прежнее правило держать SDK вне образа. Proxy остаётся точкой маршрутизации и настройки моделей. После этой замены зависимости обязательно выполните `make rebuild`.
+
+В манифесте backend зависимость дополнена маркером Python `<3.15`: буквальная строка без маркера не разрешалась при текущей верхней границе Python проекта. Диапазон версий пакета сохранён, а образ backend использует Python 3.11.
+
+LiteLLM proxy использует moving tag `main-stable`, а `langchain-litellm` является молодым community-пакетом. Поэтому обновляйте образы осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop.
 
 ### Настройка конфигурации
 
@@ -185,6 +191,12 @@ agent_model = "opencode/big-pickle"
 
 LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 
+### Рассуждения модели
+
+Модели, которые передают reasoning через proxy, поддерживаются без отдельной настройки. Backend возвращает reasoning модели только в текущем пользовательском ходе, чтобы не отправлять reasoning из прежних ходов обратно в tool loop. Anthropic-style thinking models пока не поддерживаются, потому что `thinking_blocks` не проходят round-trip. Это ограничение текущей реализации.
+
+Непустое reasoning показано над ответом ассистента в свёрнутом блоке «Рассуждения». Если запрос завершился ошибкой, но доступна сохранённая часть reasoning, блок называется «Рассуждения (неполные)». При пустом или отсутствующем reasoning блока нет.
+
 ### Доступ к системе
 
 - **Frontend UI** (по умолчанию): http://localhost:28501
@@ -239,6 +251,7 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 - **FastAPI** - REST API framework
 - **Streamlit** - UI framework
 - **LangGraph** - ReAct agent and checkpointed threads
+- **ChatLiteLLM** (`langchain-litellm`) - model client for the internal LiteLLM proxy
 - **LiteLLM** - internal model proxy at `litellm:4000`
 - **SQLite** - backend checkpoint store at `../vm/backend/checkpoints`
 - **SQLAlchemy** - ORM для работы с БД
@@ -317,12 +330,14 @@ make stop           # Остановка
 make restart        # Перезапуск
 make logs           # Все логи (Ctrl+C для выхода)
 make test           # Тесты backend в Docker
+make test-e2e-setup # Один раз: установить e2e-зависимости и Chromium
+make test-e2e       # Offline Playwright e2e против stub backend
 make fetch-data     # Ручной запуск XLSM fetch
 make fetch-data-log # Логи data_collector с последнего fetch
 
 # Сборка
 make build          # Собрать образы
-make rebuild        # Пересобрать и перезапустить
+make rebuild        # Пересобрать и перезапустить, обязательно после замены зависимости backend
 
 # Отладка
 docker compose ps                    # Статус контейнеров

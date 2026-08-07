@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem with FastAPI, Streamlit, a LangGraph ReAct agent, LiteLLM, and SQLite checkpoints.
+Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem with FastAPI, Streamlit, a LangGraph ReAct agent, `ChatLiteLLM` and its LiteLLM SDK in the backend image, LiteLLM proxy, and SQLite checkpoints. `langchain-openai` is not a current backend dependency.
 
 ## STRUCTURE
 
@@ -39,7 +39,7 @@ parser/
 | Configuration | `bd_shared/config.toml` + `bd_shared/config.py` | TOML config loaded via `tomllib`. Override with `BD_CONFIG_FILE` env var |
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
-| Web reporting | `webreport/` | Separate subsystem with its own `AGENTS.md` |
+| Web reporting | `webreport/` | FastAPI + Streamlit + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
 | Analysis examples | `examples/four_buckets.py` | Shows ORM usage for custom analysis |
 
 ## CONVENTIONS
@@ -78,6 +78,9 @@ poetry run python parse_data.py <dir> --no-save # Parse without saving to DB
 make fetch-data                                  # Manually trigger XLSM fetch in data_collector container
 make fetch-data-log                              # Show logs since last fetch start
 make logs SERVICE=data_collector                 # Show all data_collector container logs
+cd webreport && make rebuild                     # Rebuild after backend dependency changes
+cd webreport && make test-e2e-setup              # One-time e2e dependency and Chromium setup
+cd webreport && make test-e2e                    # Offline Playwright reasoning-display tests
 ```
 
 ## NOTES
@@ -89,3 +92,6 @@ make logs SERVICE=data_collector                 # Show all data_collector conta
 - Default game date `02.03.2022` in config triggers a warning — means date was not set in the source file
 - At backend startup, a deep LiteLLM probe elects either `agent` mode or keyless `fallback` mode. The process never switches modes after election.
 - LiteLLM is internal-only at `litellm:4000`. The checkpoint-backed backend is limited to one replica.
+- ChatLiteLLM (`langchain-litellm >=0.7,<0.8`) is the backend model client. Its LiteLLM SDK is deliberately installed in the backend image, reversing the prior SDK-out-of-image rule. The manifest keeps that version range with a dependency-level Python `<3.15` marker because the literal range was not lockable under the project Python bound; the shipped image uses Python 3.11.
+- Reasoning round-trip is always on: `OutboundReasoningFilter` echoes reasoning only within the current user turn, while checkpoints retain all turns. `ChatResponse.reasoning` and `/api/history` carry it to the collapsed frontend labels «Рассуждения» and, for recovered failed requests, «Рассуждения (неполные)». No reasoning means no block.
+- Anthropic-style thinking models are unsupported because `thinking_blocks` do not round-trip. There is no configuration switch for this. LiteLLM's `main-stable` image tag and the young community package `langchain-litellm` can change behavior; the minor-range pin and AC-1 echo tripwire are the mitigations.

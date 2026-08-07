@@ -94,6 +94,21 @@
 
 При запуске backend выполняет глубокую проверку LiteLLM и выбирает один режим. Выбранный режим не меняется до перезапуска процесса.
 
+### 3.1. Модельный клиент и рассуждения
+Backend использует `ChatLiteLLM` из пакета `langchain-litellm` с диапазоном версий `>=0.7,<0.8` для вызовов через внутренний LiteLLM proxy. LiteLLM SDK теперь устанавливается в образ backend. Это осознанный разворот прежнего правила, по которому SDK не входил в образ. Proxy по-прежнему остаётся единой точкой маршрутизации и настройки моделей.
+
+В опубликованном backend-манифесте эта зависимость имеет маркер Python `<3.15`: буквальная строка плана без маркера не разрешалась при текущей границе Python проекта. Версионный диапазон пакета сохранён. Образ backend основан на Python 3.11, поэтому маркер не меняет текущую поставку.
+
+`OutboundReasoningFilter` возвращает reasoning content модели только в пределах текущего пользовательского хода. Checkpoint store сохраняет историю всех ходов, но reasoning из предыдущих ходов не отправляется модели повторно. Текст рассуждений попадает в `ChatResponse.reasoning` и записи ассистента в `/api/history`.
+
+Frontend показывает непустой reasoning в свёрнутом блоке «Рассуждения» над ответом ассистента. Если запрос завершился ошибкой, но удалось восстановить сохранённую часть reasoning, блок называется «Рассуждения (неполные)». При отсутствии reasoning блок не отображается.
+
+Anthropic-style thinking models пока не поддерживаются: backend не выполняет round-trip поля `thinking_blocks`. Это ограничение, а не настройка, которую можно включить в конфигурации.
+
+`LLM_MAX_RETRIES` передаётся LiteLLM как `model_kwargs={"num_retries": ...}`, поскольку `ChatLiteLLM.max_retries` не пересылает это значение в SDK.
+
+LiteLLM proxy использует moving tag `main-stable`, поэтому его поведение может меняться при обновлении образа. `langchain-litellm` также является молодым community-пакетом. Риск снижен minor-range pin и тестом AC-1, который фиксирует обязательный echo reasoning в tool loop.
+
 ### 4. Checkpoint store
 Backend хранит состояние LangGraph по thread ID в service-local SQLite store: `../vm/backend/checkpoints`. Это отдельное состояние агентов, не замена MySQL для игровых данных.
 
@@ -195,6 +210,7 @@ SQLite saver рассчитан на один backend replica. Горизонт�
 | Frontend | Streamlit | UI framework |
 | Backend | FastAPI | REST API framework |
 | Agents | LangGraph | ReAct graph and checkpointed threads |
+| Model client | ChatLiteLLM (`langchain-litellm`) | Calls the internal LiteLLM proxy and supports reasoning round-trip |
 | Model proxy | LiteLLM | Internal model access at `litellm:4000` |
 | ORM | SQLAlchemy | Database abstraction |
 | Database | MySQL | Data storage |
