@@ -1,5 +1,6 @@
 SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
+PYTHON_VERSION ?= 3.11
 
 .PHONY: help setup test upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
@@ -28,42 +29,43 @@ help:
 	@echo "Tip: make -C webreport help"
 
 setup:
-	@OS_TYPE=""; \
-	if [ "$(OS)" = "Windows_NT" ]; then \
-		OS_TYPE="WIN"; \
-		CMD_CHECK="where"; \
-		PY_PATH=".venv\\Scripts\\python"; \
+	@if [ "$(OS)" = "Windows_NT" ]; then \
+		PY_PATH=".venv/Scripts/python.exe"; \
 	else \
-		OS_TYPE="UNIX"; \
-		CMD_CHECK="command -v"; \
 		PY_PATH=".venv/bin/python"; \
 	fi; \
-	if ! $$CMD_CHECK poetry > /dev/null 2>&1; then \
+	if ! command -v poetry > /dev/null 2>&1; then \
 		echo "Poetry не найден, устанавливаю..."; \
-		pip install --user poetry; \
+		if command -v python3 > /dev/null 2>&1; then \
+			python3 -m pip install --user poetry; \
+		elif command -v python > /dev/null 2>&1; then \
+			python -m pip install --user poetry; \
+		else \
+			echo "Для установки Poetry нужен Python с pip."; \
+			exit 1; \
+		fi; \
+		export PATH="$$HOME/.local/bin:$$PATH"; \
 	fi; \
-	python_found=""; \
-	if [ "$$OS_TYPE" = "WIN" ]; then \
-		for py in $$(where python 2>nul); do \
-			if poetry env use "$${py}" > /dev/null 2>&1; then \
-				python_found=$$py; \
-				break; \
-			fi; \
-		done; \
-	else \
-		for py in python3 python $$(compgen -c | grep -E '^python[0-9]+\.[0-9]+$$' | sort -Vr); do \
-			if command -v "$$py" > /dev/null 2>&1 && poetry env use "$$py" > /dev/null 2>&1; then \
-				python_found=$$py; \
-				break; \
-			fi; \
-		done; \
-	fi; \
-	echo "Найден Python: $$python_found"; \
-	if [ -z "$$python_found" ]; then \
-		echo "Не найден Python, совместимый с pyproject.toml. Установите подходящую версию и добавьте в PATH."; \
+	if ! command -v poetry > /dev/null 2>&1; then \
+		echo "Poetry установлен, но не найден в PATH. Добавьте каталог пользовательских скриптов Python в PATH."; \
 		exit 1; \
 	fi; \
-	poetry env use "$$python_found"; \
+	if [ -d .venv ] && [ ! -x "$$PY_PATH" ]; then \
+		echo "Удаляю повреждённое виртуальное окружение..."; \
+		rm -rf .venv; \
+	fi; \
+	python_path=$$(poetry python list --managed | awk '$$1 == "$(PYTHON_VERSION)" || index($$1, "$(PYTHON_VERSION).") == 1 { print $$NF; exit }'); \
+	if [ -z "$$python_path" ]; then \
+		echo "Устанавливаю Python $(PYTHON_VERSION) через Poetry..."; \
+		poetry python install "$(PYTHON_VERSION)"; \
+		python_path=$$(poetry python list --managed | awk '$$1 == "$(PYTHON_VERSION)" || index($$1, "$(PYTHON_VERSION).") == 1 { print $$NF; exit }'); \
+	fi; \
+	if [ -z "$$python_path" ] || [ ! -x "$$python_path" ]; then \
+		echo "Poetry не смог установить Python $(PYTHON_VERSION)."; \
+		exit 1; \
+	fi; \
+	echo "Использую Python: $$python_path"; \
+	poetry env use "$$python_path"; \
 	poetry install --no-root; \
 	poetry run python -V
 
