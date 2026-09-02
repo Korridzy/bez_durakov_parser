@@ -65,6 +65,10 @@ def process_pending_request(send_message: Callable[[str], dict[str, object]]) ->
         "timestamp": datetime.now().isoformat(),
         "request_id": pending["id"],
     }
+    reasoning = response.get("reasoning")
+    if isinstance(reasoning, str) and reasoning:
+        assistant_message["reasoning"] = reasoning
+        assistant_message["reasoning_partial"] = response.get("success") is not True
     if response.get("success") is True:
         report_id = str(uuid4())
         assistant_message["report"] = {
@@ -83,6 +87,14 @@ def process_pending_request(send_message: Callable[[str], dict[str, object]]) ->
         assistant_message["error"] = _response_text(response, "Не удалось создать отчёт")
     st.session_state.chat_history.append(assistant_message)
     st.rerun()
+
+
+def reasoning_view(message: dict[str, object]) -> tuple[str, str] | None:
+    reasoning = message.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return None
+    label = "Рассуждения (неполные)" if message.get("reasoning_partial") else "Рассуждения"
+    return label, reasoning
 
 
 def _queue_request(content: str) -> None:
@@ -108,6 +120,11 @@ def _render_message(message: dict[str, object], selected_request_id: str | None)
     )
     with container:
         with st.chat_message("user" if role == "user" else "assistant"):
+            reasoning = reasoning_view(message)
+            if reasoning is not None:
+                label, text = reasoning
+                with st.expander(label, expanded=False):
+                    st.markdown(text)
             content = message.get("content")
             st.markdown(content if isinstance(content, str) else "")
             if is_active_request:

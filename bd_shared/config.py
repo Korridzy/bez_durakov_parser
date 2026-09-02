@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from typing import TypeAlias
 
 # Using the standard tomllib module for Python 3.11+
 if sys.version_info >= (3, 11):
@@ -10,14 +11,29 @@ else:
     # pip install tomli
     import tomli as tomllib
 
+LocalConfigValue: TypeAlias = str | int | float | bool | list[str]
+
 # Path to the configuration file (relative to the project root)
-# Use BD_CONFIG_FILE environment variable to override config file name
+# Use BD_CONFIG_FILE environment variable to select a complete alternate config.
+config_directory = os.path.dirname(os.path.abspath(__file__))
 config_file_name = os.environ.get('BD_CONFIG_FILE', 'config.toml')
-config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), config_file_name)
+config_file_path = os.path.join(config_directory, config_file_name)
 
 # Loading the configuration
 with open(config_file_path, "rb") as f:
     config = tomllib.load(f)
+
+if 'BD_CONFIG_FILE' not in os.environ:
+    local_config_file_path = os.path.join(config_directory, 'config.local.toml')
+    if os.path.isfile(local_config_file_path):
+        with open(local_config_file_path, "rb") as f:
+            local_config: dict[str, LocalConfigValue | dict[str, LocalConfigValue]] = tomllib.load(f)
+        for section, local_value in local_config.items():
+            base_value = config.get(section)
+            if isinstance(base_value, dict) and isinstance(local_value, dict):
+                config[section] = {**base_value, **local_value}
+            else:
+                config[section] = local_value
 
 # Constants for convenient access
 SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
@@ -55,3 +71,24 @@ WEBREPORT_ALLOWED_ORIGINS = list(config["webreport"].get(
         f"http://127.0.0.1:{WEBREPORT_FRONTEND_PORT}",
     ],
 ))
+
+# Report agent configuration
+AGENT_RECURSION_LIMIT = int(config["webreport"].get("agent_recursion_limit", 8))
+AGENT_TIMEOUT_SECONDS = int(config["webreport"].get("agent_timeout_seconds", 60))
+AGENT_MAX_ROWS_PER_FETCH = int(config["webreport"].get("agent_max_rows_per_fetch", 256))
+AGENT_MAX_ROWS_PER_RUN = int(config["webreport"].get("agent_max_rows_per_run", 1024))
+CHECKPOINT_TTL_SECONDS = int(config["webreport"].get("checkpoint_ttl_seconds", 3600))
+LITELLM_BASE_URL = config["webreport"].get("litellm_base_url", "http://litellm:4000")
+AGENT_MODEL = config["webreport"].get("agent_model", "gpt-4o")
+
+# Startup LiteLLM probe and LLM client retry policy
+PROBE_RETRY_ATTEMPTS = int(config["webreport"].get("probe_retry_attempts", 5))
+PROBE_RETRY_DELAY_SECONDS = int(config["webreport"].get("probe_retry_delay_seconds", 2))
+PROBE_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("probe_request_timeout_seconds", 10))
+LLM_MAX_RETRIES = int(config["webreport"].get("llm_max_retries", 0))
+LLM_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("llm_request_timeout_seconds", 60))
+
+# Use BD_CHECKPOINT_DB_PATH environment variable to override the checkpoint store location
+CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
+    "checkpoint_db_path", "/data/checkpoints.db"
+)

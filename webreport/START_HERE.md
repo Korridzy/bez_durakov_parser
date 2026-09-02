@@ -29,7 +29,7 @@ make start
 ### 🏗️ Архитектура (SOA)
 - ✅ **Frontend** - Streamlit UI с двумя представлениями (Чат и Отчёт)
 - ✅ **Backend** - FastAPI REST API
-- ✅ **Agents** - AutoGen агенты для обработки запросов
+- ✅ **Agents** - LangGraph ReAct agent с startup-elected `agent` или `fallback` mode
 - ✅ **Services** - Сервисный слой (использует только существующие методы db.py)
 
 ### 📁 Структура
@@ -107,10 +107,14 @@ webreport/
 - **Python 3.11+**
 - **Streamlit** - UI framework
 - **FastAPI** - REST API framework  
-- **AutoGen** - Multi-agent orchestration
+- **LangGraph** - ReAct agent и checkpointed threads
+- **LiteLLM** - internal model proxy `litellm:4000`
 - **SQLAlchemy** - ORM (из основного проекта)
 - **Pandas** - Data processing
-- **MySQL** - Database (из bd_shared/config.toml)
+- **MySQL** - game data database (из bd_shared/config.toml)
+- **SQLite** - backend checkpoint store `../vm/backend/checkpoints`
+
+Backend при запуске выполняет глубокий LiteLLM probe и выбирает один режим: `agent`, когда модель доступна, или keyless `fallback`. Выбор не меняется до перезапуска процесса. LiteLLM не публикует host port, он доступен только на `litellm:4000` внутри сети. Поддерживается только один backend replica.
 
 ---
 
@@ -251,11 +255,11 @@ docker compose logs -f
 ## ✅ Чеклист перед первым запуском
 
 - [ ] База данных доступна (MySQL)
-- [ ] bd_shared/config.toml настроен правильно
+- [ ] Создан `bd_shared/config.local.toml` для server-specific настроек
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
 - [ ] Выполнен `make start` из каталога `webreport/`
-- [ ] (Опционально) `OPENAI_API_KEY` экспортирован в shell
+- [ ] (Опционально) `openai_api_key` указан в `[webreport]` файла `bd_shared/config.local.toml`
 
 ---
 

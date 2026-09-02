@@ -1,6 +1,6 @@
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help generate-env test clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env test test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -10,13 +10,15 @@ help:
 	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
-	@echo "  make restart     - Restart services"
+	@echo "  make restart     - Recreate LiteLLM, backend, and frontend"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
 	@echo "  make rebuild     - Rebuild and restart services"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run tests (requires running containers)"
+	@echo "  make test           - Run the offline backend suite (no running stack needed)"
+	@echo "  make test-e2e-setup - One-time: install frontend dev deps and Chromium (needs network)"
+	@echo "  make test-e2e       - Run the offline stub-backed Playwright lane"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean       - Clean temporary files"
@@ -31,6 +33,7 @@ help:
 	@echo ""
 
 generate-env:
+	[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
 	poetry run python generate_env.py
 
 start: generate-env
@@ -53,9 +56,9 @@ stop:
 	@echo "✅ Containers stopped"
 
 restart: generate-env
-	@echo "🔄 Restarting services..."
-	$(DOCKER_COMPOSE) up -d
-	@echo "✅ Services restarted"
+	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
+	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
+	@echo "✅ Application services recreated"
 
 logs:
 	$(DOCKER_COMPOSE) logs -f $(SERVICE)
@@ -74,7 +77,17 @@ rebuild: generate-env
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm backend python /app/test_system.py
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_top_team_limit.py && python /app/test_reasoning.py"
+	@echo ""
+
+test-e2e-setup:
+	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."
+	cd frontend && PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring poetry install --with dev --no-root && poetry run playwright install chromium
+	@echo "✅ e2e lane ready. Run: make test-e2e"
+
+test-e2e:
+	@echo "🎭 Running the offline stub-backed Playwright lane..."
+	cd frontend && poetry run pytest tests_e2e -x -q
 	@echo ""
 
 clean:

@@ -1,205 +1,25 @@
-"""
-AutoGen-based agent system for generating reports.
-Uses AutoGen framework to orchestrate agent conversations.
-"""
-
-import os
-import sys
-import importlib
-import logging
 import re
-from datetime import datetime, date
-import json
-from textwrap import dedent
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Final, Optional, final
 
-logger = logging.getLogger(__name__)
-_MIN_TOP_TEAMS_LIMIT = 1
-_MAX_TOP_TEAMS_LIMIT = 1024
+from .report_contracts import QueryPlan
 
-# No need to add path, services is in same app
-from services.game_data_service import GameDataService
-
-try:
-    _agents_module = importlib.import_module("autogen_agentchat.agents")
-    AssistantAgent = getattr(_agents_module, "AssistantAgent")
-    UserProxyAgent = getattr(_agents_module, "UserProxyAgent")
-    agentchat_available = True
-except ImportError:
-    AssistantAgent = None
-    UserProxyAgent = None
-    agentchat_available = False
-
-try:
-    _openai_module = importlib.import_module("autogen_ext.models.openai")
-    OpenAIChatCompletionClient = getattr(_openai_module, "OpenAIChatCompletionClient")
-    openai_client_available = True
-except ImportError:
-    OpenAIChatCompletionClient = None
-    openai_client_available = False
+_MIN_TOP_TEAMS_LIMIT: Final = 1
+_MAX_TOP_TEAMS_LIMIT: Final = 1024
 
 
-class ReportAgentSystem:
-    """Agent system for generating data reports using AutoGen."""
-
-    def __init__(self, api_key: Optional[str] = None, service: Optional[GameDataService] = None):
-        self.service = service or GameDataService()
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.conversation_history = []
-        self.model_client = None
-        self.coder_agent = None
-        self.analyst_agent = None
-        self.user_proxy = None
-
-        if agentchat_available and self.api_key:
-            try:
-                self._setup_agents()
-            except Exception:
-                self.agents_available = False
-                logger.warning("Agent setup failed; using fallback mode", exc_info=True)
-        else:
-            self.agents_available = False
-            logger.info("Agents unavailable; using fallback mode")
-
-    def _setup_agents(self):
-        """Setup AutoGen agents."""
-
-        assistant_agent_cls = AssistantAgent
-        user_proxy_agent_cls = UserProxyAgent
-        model_client_cls = OpenAIChatCompletionClient
-
-        if not openai_client_available or model_client_cls is None:
-            raise RuntimeError(
-                "AutoGen AgentChat is installed, but OpenAI model client is unavailable"
-            )
-        if assistant_agent_cls is None or user_proxy_agent_cls is None:
-            raise RuntimeError("AutoGen AgentChat agents are unavailable")
-
-        self.model_client = model_client_cls(
-            model="gpt-4o",
-            api_key=self.api_key,
-            temperature=0.7,
-        )
-
-        # Coder agent - responsible for generating data queries
-        self.coder_agent = assistant_agent_cls(
-            name="DataCoder",
-            model_client=self.model_client,
-            system_message=dedent(
-                """\
-                You are a data analyst coder. Your job is to:
-                1. Understand user requirements for data reports
-                2. Use ONLY the available service methods to retrieve data
-                3. Return structured data queries
-
-                Available methods:
-                - get_all_games_summary(): Get all games summary
-                - get_game_by_id(game_id): Get specific game data
-                - get_games_by_date_range(start_date, end_date): Get games in date range
-                - get_team_game_scores(game_id=None): Get team scores
-                - get_all_teams(): Get all teams
-                - get_team_statistics(team_name): Get statistics for a team
-                - get_team_wins(team_name, year=None): Get games won by a team (optionally filtered by year)
-                - get_top_teams(limit=10): Get top teams by total points
-
-                When user asks for a report, respond with a JSON object containing:
-                {
-                    "method": "method_name",
-                    "params": {...},
-                    "description": "what this query does"
-                }
-
-                Be concise and only use existing methods. Do not write new code."""
-            ),
-        )
-
-        # Analyst agent - responsible for interpreting results
-        self.analyst_agent = assistant_agent_cls(
-            name="DataAnalyst",
-            model_client=self.model_client,
-            system_message=dedent(
-                """\
-                You are a data analyst. Your job is to:
-                1. Review the data retrieved by the coder
-                2. Provide insights and interpretations
-                3. Format results in a user-friendly way
-
-                Present your analysis in a clear, structured format.
-                Use tables, lists, and summaries as appropriate."""
-            ),
-        )
-
-        # User proxy - manages the conversation
-        self.user_proxy = user_proxy_agent_cls(
-            name="User",
-            description="System user proxy for non-interactive chat flow",
-        )
-
-        self.agents_available = True
-
-    def process_user_request(self, user_message: str) -> Dict[str, Any]:
-        """
-        Process user request and generate report.
-
-        Args:
-            user_message: User's request for a report
-
-        Returns:
-            Dictionary with report data and metadata
-        """
-        if not self.agents_available:
-            return self._fallback_process(user_message)
-
-        try:
-            # Store user message in history
-            self.conversation_history.append(
-                {
-                    "role": "user",
-                    "content": user_message,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-
-            # Parse the request to determine what data is needed
-            query_info = self._interpret_request(user_message)
-
-            # Execute the query
-            data = self._execute_query(query_info)
-
-            # Format the response
-            response = {
-                "success": True,
-                "query": query_info,
-                "data": data,
-                "timestamp": datetime.now().isoformat(),
-                "message": f"Report generated based on: {user_message}",
+@final
+@dataclass(frozen=True, slots=True)
+class FallbackInterpreter:
+    def interpret(self, user_message: str) -> QueryPlan:
+        if "очки" in user_message.lower() or "scores" in user_message.lower():
+            return {
+                "method": "get_team_game_scores",
+                "params": {},
+                "description": "Get all team game scores",
             }
-
-            # Store response in history
-            self.conversation_history.append(
-                {
-                    "role": "assistant",
-                    "content": response,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-
-            return response
-
-        except Exception as e:
-            error_response = {
-                "success": False,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat(),
-            }
-            self.conversation_history.append(
-                {
-                    "role": "assistant",
-                    "content": error_response,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-            return error_response
+        legacy_query: object = self._interpret_request(user_message)
+        return parse_legacy_query(legacy_query)
 
     def _extract_team_name_from_prompt(self, user_message: str) -> str:
         """
@@ -365,68 +185,5 @@ class ReportAgentSystem:
                 "description": "Get summary of all games",
             }
 
-    def _execute_query(self, query_info: Dict[str, Any]) -> Any:
-        """Execute the determined query."""
-        method_name = query_info.get("method")
-        if not isinstance(method_name, str):
-            raise ValueError(f"Invalid method name: {method_name}")
-        params = query_info.get("params", {})
 
-        # Map method names to service methods
-        method_map = {
-            "get_all_games_summary": self.service.get_all_games_summary,
-            "get_game_by_id": self.service.get_game_by_id,
-            "get_games_by_date_range": self.service.get_games_by_date_range,
-            "get_team_game_scores": self.service.get_team_game_scores,
-            "get_all_teams": self.service.get_all_teams,
-            "get_team_statistics": self.service.get_team_statistics,
-            "get_team_wins": self.service.get_team_wins,
-            "get_top_teams": self.service.get_top_teams,
-        }
-
-        method = method_map.get(method_name)
-        if not method:
-            raise ValueError(f"Unknown method: {method_name}")
-
-        # Execute method with params
-        result = method(**params)
-
-        # Convert DataFrame to dict if needed
-        if isinstance(result, (dict, list)) or result is None:
-            return result
-
-        to_dict_method = getattr(result, "to_dict", None)
-        if callable(to_dict_method):
-            return to_dict_method(orient="records")
-
-        return result
-
-    def _fallback_process(self, user_message: str) -> Dict[str, Any]:
-        """Fallback processing when AutoGen is not available."""
-        query_info = self._interpret_request(user_message)
-
-        try:
-            data = self._execute_query(query_info)
-            return {
-                "success": True,
-                "query": query_info,
-                "data": data,
-                "timestamp": datetime.now().isoformat(),
-                "message": f"Report generated (fallback mode): {user_message}",
-                "mode": "fallback",
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat(),
-                "mode": "fallback",
-            }
-
-    def get_conversation_history(self) -> List[Dict[str, Any]]:
-        """Get conversation history."""
-        return self.conversation_history
-
-    def clear_history(self):
-        """Clear conversation history."""
-        self.conversation_history = []
+from .report_runtime import ReportAgentSystem, parse_legacy_query

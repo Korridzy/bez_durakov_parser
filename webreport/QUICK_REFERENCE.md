@@ -100,17 +100,46 @@ pkill -f streamlit
 ```bash
 cat ../bd_shared/config.toml
 
+# Создать server-local overlay
+cp ../bd_shared/config.local.toml.example ../bd_shared/config.local.toml
+chmod 600 ../bd_shared/config.local.toml
+
 # Сгенерировать Compose/service env-файлы
 make generate-env
-
-# Для полного AutoGen режима (опционально)
-export OPENAI_API_KEY=your-openai-api-key-here
 ```
 
-### Секции в `bd_shared/config.toml`
+Для LangGraph `agent` mode (опционально) добавьте в `[webreport]` файла `../bd_shared/config.local.toml`:
+
+```toml
+openai_api_key = "your-openai-api-key-here"
+```
+
+Для DeepSeek V4 через OpenRouter добавьте в `../bd_shared/config.local.toml`:
+
+```toml
+[webreport]
+openrouter_api_key = "your-openrouter-key"
+agent_model = "deepseek-v4-flash-latest" # или "deepseek-v4-pro"
+```
+
+Затем выполните `make restart`. Алиасы LiteLLM: `deepseek-v4-flash-latest` и `deepseek-v4-pro`.
+
+Для бесплатных моделей OpenCode Zen добавьте:
+
+```toml
+[webreport]
+opencode_api_key = "your-opencode-key"
+agent_model = "opencode/big-pickle"
+```
+
+Алиасы LiteLLM: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free`, `opencode/nemotron-3-ultra-free`.
+
+При запуске backend выполняет глубокий LiteLLM probe и один раз выбирает `agent` или keyless `fallback` mode. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
+
+### Секции в `bd_shared/config.toml` и `config.local.toml`
 - `[database]` — настройки подключения к БД
 - `[application]` — общие флаги приложения
-- `[webreport]` — порты, CORS (`allowed_origins`) и debug-настройки WebReport
+- `[webreport]` — порты, CORS (`allowed_origins`), `openai_api_key` и debug-настройки WebReport
 - `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
 Для `[xlsm_fetch].modes` используйте только `browser_selenium`.

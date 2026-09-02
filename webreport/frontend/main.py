@@ -10,6 +10,7 @@ from split_pane import render_split_pane_controller
 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+CHAT_REQUEST_TIMEOUT_SECONDS = int(os.environ["CHAT_REQUEST_TIMEOUT_SECONDS"])
 
 st.set_page_config(
     page_title="Game Data Reports",
@@ -105,9 +106,25 @@ def send_chat_message(message: str) -> dict[str, object]:
         response = requests.post(
             f"{API_BASE_URL}/api/chat",
             json={"message": message, "session_id": st.session_state.session_id},
-            timeout=30,
+            timeout=CHAT_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
+    except requests.HTTPError as error:
+        try:
+            error_payload: object = error.response.json() if error.response is not None else None
+        except requests.exceptions.JSONDecodeError:
+            error_payload = None
+        detail: str | None = None
+        if isinstance(error_payload, dict):
+            raw_detail = error_payload.get("detail")
+            if isinstance(raw_detail, str):
+                detail = raw_detail
+        message = detail or str(error)
+        return {
+            "success": False,
+            "error": message,
+            "message": message,
+        }
     except requests.RequestException as error:
         return {
             "success": False,

@@ -1,5 +1,6 @@
 # OpenCode stuff
 .sisyphus
+.ignore
 
 # AI/agent tooling
 .agents/
@@ -7,6 +8,10 @@
 .codex/
 .omc/
 .omo/
+.opencode/*
+!.opencode/skills/
+!.opencode/skills/**
+.serena/
 .skillshare/
 
 #all fetched xlsm files will be here
@@ -15,6 +20,7 @@ xlsm_archive/*
 
 # Secrets
 secret/
+bd_shared/config.local.toml
 
 # VM directory
 vm/

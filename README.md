@@ -33,13 +33,20 @@
 
 На этом этапе будет создана виртуальная среда в каталоге `/your/comfortable/path/bez_durakov_parser/.venv`, и в неё будут установлены все необходимые зависимости.
 
-Далее необходимо прописать в `bd_shared/config.toml` параметры доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
+`bd_shared/config.toml` хранит отслеживаемые в Git значения по умолчанию. Для параметров конкретного сервера создайте игнорируемый overlay:
+
+```bash
+$ cp bd_shared/config.local.toml.example bd_shared/config.local.toml
+$ chmod 600 bd_shared/config.local.toml
+```
+
+Далее пропишите в `bd_shared/config.local.toml` параметры доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
 
 ```bash
 $ make mysql-start
 ```
 
-Строка подключения в `bd_shared/config.toml`:
+Строка подключения в `bd_shared/config.local.toml`:
 
 ```toml
 [database]
@@ -78,7 +85,7 @@ $ source .venv/bin/activate
 $make upgrade-code
 ```
 
-Если ваш локальный `bd_shared/config.toml` отличается от лежащего в репозитории, то он будет сохранён, а все остальные файлы обновлены. Если вы изменили ещё какие-то файлы, то автоматического обновления не произойдёт.
+Локальный `bd_shared/config.local.toml` не отслеживается Git и сохраняется при обновлении кода. Если вы изменили ещё какие-то отслеживаемые файлы, то автоматического обновления не произойдёт.
 
 
 
@@ -123,7 +130,9 @@ $ python four_buckets.py
 
 ### Web Report System
 
-Проект включает веб-систему для генерации отчётов с AI-агентом на базе AutoGen, FastAPI и Streamlit.
+Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и Streamlit. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
+
+При запуске backend выполняет глубокую проверку LiteLLM и один раз выбирает режим `agent` или `fallback`. Этот выбор действует до остановки процесса. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
 
 #### Запуск WebReport
 
@@ -144,6 +153,12 @@ $ make webreport-start
 
 ```bash
 $ make webreport-stop
+```
+
+Перезапуск LiteLLM, backend и frontend с повторной генерацией service env-файлов. MySQL и data collector продолжают работать:
+
+```bash
+$ make restart
 ```
 
 #### Только база данных

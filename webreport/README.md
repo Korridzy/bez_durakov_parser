@@ -18,10 +18,10 @@
    - Отображение отчётов
    - Переключение между представлениями
 
-3. **Agents (AutoGen)** - система агентов
-   - DataCoder - генерирует запросы к данным
-   - DataAnalyst - анализирует результаты
-   - Организация диалога между агентами
+3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
+   - обращается к модели через `ChatLiteLLM` и внутренний LiteLLM proxy `litellm:4000`
+   - сохраняет state в service-local SQLite checkpoint store `../vm/backend/checkpoints`
+   - при запуске выбирает `agent` или `fallback` режим и не меняет его до перезапуска
 
 4. **Services** - сервисный слой
    - GameDataService - доступ к данным игр
@@ -33,7 +33,7 @@
 webreport/
 ├── backend/
 │   ├── agents/
-│   │   └── report_agents.py       # AutoGen / fallback agent system
+│   │   └── report_agents.py       # LangGraph / fallback agent system
 │   ├── services/
 │   │   └── game_data_service.py   # Access to bd_shared.Database methods
 │   ├── main.py                     # FastAPI application and API routes
@@ -78,6 +78,12 @@ webreport/
 
 При обычном Docker-запуске вручную устанавливать их не нужно: Docker-образы устанавливают зависимости во время сборки.
 
+Backend использует `ChatLiteLLM` из `langchain-litellm` с диапазоном версий `>=0.7,<0.8`. LiteLLM SDK теперь входит в образ backend, что осознанно отменяет прежнее правило держать SDK вне образа. Proxy остаётся точкой маршрутизации и настройки моделей. После этой замены зависимости обязательно выполните `make rebuild`.
+
+В манифесте backend зависимость дополнена маркером Python `<3.15`: буквальная строка без маркера не разрешалась при текущей верхней границе Python проекта. Диапазон версий пакета сохранён, а образ backend использует Python 3.11.
+
+LiteLLM proxy использует moving tag `main-stable`, а `langchain-litellm` является молодым community-пакетом. Поэтому обновляйте образы осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop.
+
 ### Настройка конфигурации
 
 ```bash
@@ -91,8 +97,10 @@ cd webreport
 
 - `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
 - `[application]` — `debug`, `log_level`, `default_game_date`
-- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
+- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
 - `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
+
+`../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.
 
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
@@ -106,12 +114,13 @@ cd webreport
 | `.env.backend` | `BD_DOCKER` и debug/reload backend |
 | `.env.data_collector` | `BD_DOCKER` и timezone data collector |
 | `.env.frontend` | URL backend и debug/reload frontend |
+| `.env.litellm` | `OPENAI_API_KEY`, `OPENROUTER_API_KEY` и `OPENCODE_API_KEY` для LiteLLM |
 
-Не редактируйте сгенерированные `.env*` вручную. Для изменения настроек обновите `../bd_shared/config.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
+Не редактируйте сгенерированные `.env*` вручную. Для изменения серверных настроек обновите `../bd_shared/config.local.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
 
 Запущенные на хосте `parse_data.py` и Alembic используют `[database].url`. Backend и data collector получают `[database].docker_url` через `bd_shared/config.py`, а контейнер MySQL — сгенерированные из этого URL значения `MYSQL_DATABASE`, `MYSQL_USER` и `MYSQL_PASSWORD`. Для совместимости dev-стека `MYSQL_ROOT_PASSWORD` получает тот же пароль из `docker_url`.
 
-MySQL применяет эти значения при первой инициализации каталога данных. Изменение `config.toml` не меняет пользователей и пароли в уже существующем `../vm/mysql/mysql_data`.
+MySQL применяет эти значения при первой инициализации каталога данных. Изменение `config.local.toml` не меняет пользователей и пароли в уже существующем `../vm/mysql/mysql_data`.
 
 `[webreport].allowed_origins` управляет CORS для backend. По умолчанию используются локальные frontend origins:
 
@@ -143,15 +152,50 @@ poetry run python generate_env.py
 docker compose up -d
 ```
 
-### OpenAI API key (опционально)
+### API key и режим агента (опционально)
 
-`OPENAI_API_KEY` не хранится в `bd_shared/config.toml` и не записывается ни в один сгенерированный env-файл.
-Для полного AutoGen-режима экспортируйте его в shell перед запуском:
+Укажите ключ в секции `[webreport]` файла `bd_shared/config.local.toml`:
 
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-make start
+```toml
+openai_api_key = "your-api-key-here"
 ```
+
+`generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.local.toml` игнорируется Git и предназначен для настоящих ключей.
+При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
+
+После изменения ключа перезапустите стек командой `make restart`.
+
+### OpenRouter: DeepSeek V4
+
+Для DeepSeek через OpenRouter добавьте в `bd_shared/config.local.toml` ключ OpenRouter и один из proxy aliases:
+
+```toml
+[webreport]
+openrouter_api_key = "your-openrouter-key"
+agent_model = "deepseek-v4-flash-latest" # или "deepseek-v4-pro"
+```
+
+`deepseek-v4-flash-latest` маршрутизируется к `~deepseek/deepseek-v4-flash-latest`, который всегда указывает на актуальную модель семейства DeepSeek V4 Flash. `deepseek-v4-pro` маршрутизируется к `deepseek/deepseek-v4-pro` через OpenRouter. Эти aliases доступны только в local overlay; отслеживаемый `agent_model = "gpt-4o"` не изменяется. После выбора модели выполните `make restart`.
+
+### OpenCode Zen: бесплатные модели
+
+Для OpenCode Zen добавьте ключ и выберите один из proxy aliases в `bd_shared/config.local.toml`:
+
+```toml
+[webreport]
+opencode_api_key = "your-opencode-key"
+agent_model = "opencode/big-pickle"
+```
+
+Доступны: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free` и `opencode/nemotron-3-ultra-free`. OpenCode помечает эти модели как временно бесплатные, поэтому при изменении каталога обновите конфигурацию. После изменения ключа или модели выполните `make restart`.
+
+LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
+
+### Рассуждения модели
+
+Модели, которые передают reasoning через proxy, поддерживаются без отдельной настройки. Backend возвращает reasoning модели только в текущем пользовательском ходе, чтобы не отправлять reasoning из прежних ходов обратно в tool loop. Anthropic-style thinking models пока не поддерживаются, потому что `thinking_blocks` не проходят round-trip. Это ограничение текущей реализации.
+
+Непустое reasoning показано над ответом ассистента в свёрнутом блоке «Рассуждения». Если запрос завершился ошибкой, но доступна сохранённая часть reasoning, блок называется «Рассуждения (неполные)». При пустом или отсутствующем reasoning блока нет.
 
 ### Доступ к системе
 
@@ -206,7 +250,10 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 - **Python 3.11+**
 - **FastAPI** - REST API framework
 - **Streamlit** - UI framework
-- **AutoGen** - Multi-agent framework
+- **LangGraph** - ReAct agent and checkpointed threads
+- **ChatLiteLLM** (`langchain-litellm`) - model client for the internal LiteLLM proxy
+- **LiteLLM** - internal model proxy at `litellm:4000`
+- **SQLite** - backend checkpoint store at `../vm/backend/checkpoints`
 - **SQLAlchemy** - ORM для работы с БД
 - **Pandas** - обработка данных
 - **Uvicorn** - ASGI сервер
@@ -236,7 +283,7 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 
 1. Проверьте логи: `make logs SERVICE=backend` или `docker compose logs backend`
 2. Проверьте статус сервисов: `docker compose ps`
-3. Проверьте настройки в `../bd_shared/config.toml`
+3. Проверьте настройки в `../bd_shared/config.local.toml`
 4. Проверьте, что контейнер `mysql` поднят и доступен в Compose-сети
 5. Проверьте подключение backend к MySQL-сервису:
    ```bash
@@ -256,12 +303,12 @@ Backend в Docker подключается к БД по имени хоста `m
    docker compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
    ```
 
-### Агенты не работают (fallback mode)
+### Агенты не работают
 
-Система работает в fallback режиме без AutoGen. Для полной функциональности:
-1. Экспортируйте `OPENAI_API_KEY=your-key-here` в shell
-2. Убедитесь, что backend запущен через `make start` / `make restart`
-3. Перезапустите: `make restart`
+1. Проверьте логи backend на результат глубокого LiteLLM probe: `make logs SERVICE=backend`.
+2. Проверьте LiteLLM из Compose-сети по адресу `http://litellm:4000`, он не имеет host port.
+3. Укажите `openai_api_key` в секции `[webreport]` файла `../bd_shared/config.local.toml` и перезапустите backend через `make restart`.
+4. Без ключа или при неуспешном probe backend намеренно запускается в keyless `fallback` mode. Он не переключается в `agent` mode во время работы, перезапуск нужен для новой проверки.
 
 ### Порты заняты
 
@@ -283,12 +330,14 @@ make stop           # Остановка
 make restart        # Перезапуск
 make logs           # Все логи (Ctrl+C для выхода)
 make test           # Тесты backend в Docker
+make test-e2e-setup # Один раз: установить e2e-зависимости и Chromium
+make test-e2e       # Offline Playwright e2e против stub backend
 make fetch-data     # Ручной запуск XLSM fetch
 make fetch-data-log # Логи data_collector с последнего fetch
 
 # Сборка
 make build          # Собрать образы
-make rebuild        # Пересобрать и перезапустить
+make rebuild        # Пересобрать и перезапустить, обязательно после замены зависимости backend
 
 # Отладка
 docker compose ps                    # Статус контейнеров
@@ -308,14 +357,14 @@ docker compose down -v              # Остановить и удалить vol
 
 1. Добавьте метод в `GameDataService` (`backend/services/game_data_service.py`)
 2. Используйте ТОЛЬКО существующие методы из db.py и db_helpers.py
-3. Обновите `_interpret_request` в `ReportAgentSystem` для распознавания новых паттернов
+3. Обновите LangGraph tools или fallback interpreter для нужного маршрута
 4. При необходимости добавьте новый endpoint в API
 
 ### Расширение функциональности агентов
 
 1. Редактируйте system messages в `backend/agents/report_agents.py`
 2. Добавляйте новые инструменты (tools) для агентов
-3. Настройте параметры LLM в `llm_config`
+3. Настройте model and temperature through the configuration consumed by LiteLLM
 
 ## 📄 Лицензия
 

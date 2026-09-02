@@ -35,7 +35,7 @@
 ```
 webreport/
 ├── backend/main.py                       - REST API (FastAPI)
-├── backend/agents/report_agents.py       - Система агентов (AutoGen)
+├── backend/agents/report_agents.py       - LangGraph ReAct agent и fallback adapter
 ├── backend/services/game_data_service.py - Сервис данных
 └── frontend/main.py                      - UI (Streamlit)
 ```
@@ -47,8 +47,7 @@ webreport/
 └── docker-compose.yml   - Docker конфигурация
 ```
 
-Источник схемы конфигурации: `../bd_shared/config.toml`
-с секциями `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]`.
+Источник схемы конфигурации: отслеживаемый `../bd_shared/config.toml` с секциями `[database]`, `[application]`, `[webreport]`, `[xlsm_fetch]`. Серверные параметры задаются в игнорируемом `../bd_shared/config.local.toml`, который заменяет значения базового файла по секциям.
 
 ### Docker и утилиты
 ```
@@ -97,18 +96,18 @@ python3 validate_setup.py # Проверка файлов
     ↓ (вводит требования)
 Frontend (Streamlit)
     ↓ (HTTP/REST)
-Backend (FastAPI)
-    ↓ (координирует)
-Agents (AutoGen) ← → Services (GameDataService)
-    ↓                      ↓
-    ↓                  db.py & db_helpers.py
-    ↓                      ↓
-    ↓                  Database (MySQL)
-    ↓                      ↑
-    └──────────────────────┘
-            ↓
-        Отчёт
+Backend (FastAPI, one replica)
+    ↓ (startup election)
+LangGraph ReAct agent or fallback
+    ↓                ↘
+LiteLLM `litellm:4000`   SQLite checkpoints
+    ↓                    `../vm/backend/checkpoints`
+GameDataService
+    ↓
+Database (MySQL game data)
 ```
+
+Backend performs the LiteLLM probe once at startup, then keeps its elected `agent` or `fallback` mode until restart. LangGraph thread state lives in `../vm/backend/checkpoints`. Run one backend replica only; horizontal backend scaling is not supported.
 
 ## 🛠️ Технологии
 
@@ -116,7 +115,9 @@ Agents (AutoGen) ← → Services (GameDataService)
 |------|------------|
 | Frontend | Streamlit |
 | Backend | FastAPI |
-| Agents | AutoGen |
+| Agents | LangGraph ReAct |
+| Model proxy | LiteLLM at `litellm:4000` |
+| Agent state | SQLite checkpoints |
 | Services | Python + Pandas |
 | ORM | SQLAlchemy |
 | Database | MySQL |
@@ -173,7 +174,7 @@ curl http://localhost:28000/health
 - ✅ 28/28 проверок пройдено
 - ✅ Frontend (Streamlit)
 - ✅ Backend (FastAPI)
-- ✅ Agents (AutoGen)
+- ✅ LangGraph agents with startup-elected `agent` or `fallback` mode
 - ✅ Services
 - ✅ Документация
 - ✅ Тесты

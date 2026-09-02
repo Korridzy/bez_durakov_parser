@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import importlib
+import sys
 import unittest
 from unittest.mock import patch
 
-from agents.report_agents import ReportAgentSystem
+sys.path.insert(0, "/")
+
 from services.game_data_service import GameDataService
 
+_checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
+_report_agents = importlib.import_module("agents.report_agents")
+_net_guard = importlib.import_module("test_net_guard")
 
-class TopTeamLimitTest(unittest.TestCase):
-    def test_fallback_clamps_requested_top_team_limit(self) -> None:
+
+def setUpModule() -> None:
+    """Offline suite: only loopback and the Compose database host are reachable."""
+    _net_guard.install()
+
+
+class TopTeamLimitTest(unittest.IsolatedAsyncioTestCase):
+    async def test_fallback_clamps_requested_top_team_limit(self) -> None:
         service = object.__new__(GameDataService)
         limits: list[int] = []
 
@@ -16,18 +28,27 @@ class TopTeamLimitTest(unittest.TestCase):
             limits.append(limit)
             return []
 
-        system = ReportAgentSystem(service=service)
-        system.agents_available = False
+        async with _checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system = _report_agents.ReportAgentSystem(
+                service=service,
+                mode="fallback",
+                checkpointer=saver,
+            )
+            self.assertEqual(system.mode, "fallback")
 
-        with patch.object(GameDataService, "get_top_teams", side_effect=record_limit):
-            oversized_response = system.process_user_request("топ 1000000 команд")
-            zero_response = system.process_user_request("топ 0 команд")
+            with patch.object(GameDataService, "get_top_teams", side_effect=record_limit):
+                oversized_response = await system.process_user_request(
+                    "топ 1000000 команд", "oversized-limit"
+                )
+                zero_response = await system.process_user_request(
+                    "топ 0 команд", "zero-limit"
+                )
 
-        self.assertTrue(oversized_response["success"])
-        self.assertTrue(zero_response["success"])
+            self.assertTrue(oversized_response["success"])
+            self.assertTrue(zero_response["success"])
         self.assertEqual([1024, 1], limits)
 
-    def test_fallback_skips_int_for_oversized_top_team_limit(self) -> None:
+    async def test_fallback_skips_int_for_oversized_top_team_limit(self) -> None:
         service = object.__new__(GameDataService)
         limits: list[int] = []
 
@@ -35,21 +56,29 @@ class TopTeamLimitTest(unittest.TestCase):
             limits.append(limit)
             return []
 
-        system = ReportAgentSystem(service=service)
-        system.agents_available = False
         oversized_limit = "9" * 10_000
 
-        with (
-            patch.object(GameDataService, "get_top_teams", side_effect=record_limit),
-            patch(
-                "agents.report_agents.int",
-                side_effect=AssertionError("oversized limits must not be parsed"),
-                create=True,
-            ),
-        ):
-            response = system.process_user_request(f"топ {oversized_limit} команд")
+        async with _checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system = _report_agents.ReportAgentSystem(
+                service=service,
+                mode="fallback",
+                checkpointer=saver,
+            )
+            self.assertEqual(system.mode, "fallback")
 
-        self.assertTrue(response["success"])
+            with (
+                patch.object(GameDataService, "get_top_teams", side_effect=record_limit),
+                patch(
+                    "agents.report_agents.int",
+                    side_effect=AssertionError("oversized limits must not be parsed"),
+                    create=True,
+                ),
+            ):
+                response = await system.process_user_request(
+                    f"топ {oversized_limit} команд", "unparsed-limit"
+                )
+
+            self.assertTrue(response["success"])
         self.assertEqual([1024], limits)
 
 
