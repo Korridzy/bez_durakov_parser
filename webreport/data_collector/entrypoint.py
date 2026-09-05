@@ -1,5 +1,3 @@
-__import__("sys").path.insert(0, "/")
-
 import logging
 import signal
 from datetime import datetime

@@ -2,15 +2,10 @@
 Database service layer for accessing game data.
 Uses existing db.py and db_helpers.py methods.
 """
-import sys
-import os
 import logging
 from typing import List, Dict, Optional, Any
-from datetime import date, datetime
+from datetime import date
 import pandas as pd
-
-# Add parent of mounted bd_shared directory to path so we can import bd_shared as package
-sys.path.insert(0, '/')
 
 from bd_shared.db import normalize_team_name
 from bd_shared.db_helpers import initialize_database

@@ -6,16 +6,9 @@ thread, and only then forgets the entry (delete-then-forget, spec D1).
 """
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
-from importlib import import_module
-import sys
 import time
 
-# Parent of the mounted bd_shared directory, same convention as main.py:16
-sys.path.insert(0, '/')
-
-# bd_shared resolves only through the path bootstrap above, so it is imported
-# dynamically rather than as a static resolution target.
-_config = import_module("bd_shared.config")
+from bd_shared.config import CHECKPOINT_TTL_SECONDS
 
 MAX_SESSIONS = 1024
 
@@ -26,7 +19,7 @@ class SessionIndex:
     def __init__(
         self,
         max_size: int = MAX_SESSIONS,
-        ttl: float = _config.CHECKPOINT_TTL_SECONDS,
+        ttl: float = CHECKPOINT_TTL_SECONDS,
     ):
         self._recency: "OrderedDict[str, float]" = OrderedDict()
         self._max_size: int = max_size

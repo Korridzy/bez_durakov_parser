@@ -3,14 +3,10 @@
 Generate environment files for WebReport from config.toml.
 """
 import os
-import sys
 from pathlib import Path
 from typing import cast
 
 from sqlalchemy.engine import make_url
-
-# Add parent directory to path to import bd_shared package
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from bd_shared.config import get_config
 

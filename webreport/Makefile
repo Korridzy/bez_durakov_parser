@@ -34,7 +34,7 @@ help:
 
 generate-env:
 	[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
-	poetry run python generate_env.py
+	PYTHONPATH="$(abspath ..)" poetry run python generate_env.py
 
 start: generate-env
 	@echo "🐳 Starting services with Docker Compose..."

@@ -3,18 +3,15 @@
 Adapted from root xlsm_fetch.py for use as an importable module
 called by APScheduler. Exposes run_fetch() as the main entry point.
 """
-import sys
-sys.path.insert(0, '/')  # bd_shared is mounted at /bd_shared in Docker; / on sys.path lets `import bd_shared` resolve the package
-
 import logging
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from xlsm_fetch import SeleniumFetcher
-from bd_shared.config import XLSM_FETCH_CONFIG
 from bd_shared.bd_game import BdGame
+from bd_shared.config import XLSM_FETCH_CONFIG
 from bd_shared.db_helpers import initialize_database, save_game_to_database
+from xlsm_fetch import SeleniumFetcher
 
 
 logger = logging.getLogger(__name__)

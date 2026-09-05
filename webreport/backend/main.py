@@ -13,10 +13,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-import sys
-
-sys.path.insert(0, '/')
-
 from bd_shared.config import (
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
