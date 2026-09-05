@@ -1,0 +1,6 @@
+11	F401	[*] unused-import
+10	E402	[ ] module-import-not-at-top-of-file
+ 9	F541	[*] f-string-missing-placeholders
+ 2	F841	[-] unused-variable
+Found 32 errors.
+[*] 21 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

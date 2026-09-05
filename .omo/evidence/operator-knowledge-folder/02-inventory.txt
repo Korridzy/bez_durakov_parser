@@ -1,0 +1,34 @@
+bd_shared/bd_game.py:114:28: F841 [*] Local variable `e` is assigned to but never used
+bd_shared/bd_game.py:115:33: F541 [*] f-string without any placeholders
+bd_shared/bd_game.py:402:25: F841 Local variable `has_conflicts` is assigned to but never used
+bd_shared/db.py:1:8: F401 [*] `os` imported but unused
+bd_shared/db.py:3:101: F401 [*] `sqlalchemy.func` imported but unused
+clear_database.py:42:15: F541 [*] f-string without any placeholders
+migrations/versions/a1b2c3d4e5f6_change_team_name_collation_to_binary.py:11:22: F401 [*] `sqlalchemy` imported but unused
+parse_data.py:83:11: F541 [*] f-string without any placeholders
+webreport/backend/agents/report_agents.py:189:1: E402 Module level import not at top of file
+webreport/backend/agents/report_agents.py:189:29: F401 [*] `.report_runtime.ReportAgentSystem` imported but unused
+webreport/backend/main.py:34:1: E402 Module level import not at top of file
+webreport/backend/main.py:35:1: E402 Module level import not at top of file
+webreport/backend/main.py:36:1: E402 Module level import not at top of file
+webreport/backend/main.py:37:1: E402 Module level import not at top of file
+webreport/backend/services/game_data_service.py:6:8: F401 [*] `os` imported but unused
+webreport/backend/services/game_data_service.py:9:28: F401 [*] `datetime.datetime` imported but unused
+webreport/backend/test_system.py:6:8: F401 [*] `os` imported but unused
+webreport/backend/test_system.py:14:22: F401 [*] `datetime.date` imported but unused
+webreport/backend/test_system.py:14:28: F401 [*] `datetime.datetime` imported but unused
+webreport/backend/test_system.py:335:15: F541 [*] f-string without any placeholders
+webreport/backend/test_system.py:629:19: F541 [*] f-string without any placeholders
+webreport/backend/test_system.py:666:19: F541 [*] f-string without any placeholders
+webreport/data_collector/entrypoint.py:3:1: E402 Module level import not at top of file
+webreport/data_collector/entrypoint.py:4:1: E402 Module level import not at top of file
+webreport/data_collector/entrypoint.py:5:1: E402 Module level import not at top of file
+webreport/data_collector/entrypoint.py:6:1: E402 Module level import not at top of file
+webreport/data_collector/test_entrypoint.py:10:1: E402 Module level import not at top of file
+webreport/data_collector/xlsm_fetch/base_fetcher.py:4:26: F401 [*] `typing.Dict` imported but unused
+webreport/data_collector/xlsm_fetch/selenium_fetcher.py:6:26: F401 [*] `typing.Dict` imported but unused
+webreport/data_collector/xlsm_fetch/selenium_fetcher.py:400:19: F541 [*] f-string without any placeholders
+webreport/data_collector/xlsm_fetch/selenium_fetcher.py:464:23: F541 [*] f-string without any placeholders
+webreport/validate_setup.py:94:11: F541 [*] f-string without any placeholders
+Found 32 errors.
+[*] 21 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

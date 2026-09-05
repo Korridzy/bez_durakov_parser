@@ -1,0 +1,47 @@
+E402 Module level import not at top of file
+  --> webreport/backend/main.py:34:1
+   |
+32 | logger = logging.getLogger(__name__)
+33 |
+34 | from agent.reasoning import extract_reasoning, extract_text
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+35 | from agents.report_agents import ReportAgentSystem
+36 | from services.game_data_service import GameDataService
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> webreport/backend/main.py:35:1
+   |
+34 | from agent.reasoning import extract_reasoning, extract_text
+35 | from agents.report_agents import ReportAgentSystem
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+36 | from services.game_data_service import GameDataService
+37 | from session_store import MAX_SESSIONS, SessionIndex
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> webreport/backend/main.py:36:1
+   |
+35 | from agents.report_agents import ReportAgentSystem
+36 | from services.game_data_service import GameDataService
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+37 | from session_store import MAX_SESSIONS, SessionIndex
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> webreport/backend/main.py:37:1
+   |
+35 | from agents.report_agents import ReportAgentSystem
+36 | from services.game_data_service import GameDataService
+37 | from session_store import MAX_SESSIONS, SessionIndex
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+38 |
+39 | aiosqlite = importlib.import_module("aiosqlite")
+   |
+help: Move module level imports to top of file
+
+Found 4 errors.
+exit=1

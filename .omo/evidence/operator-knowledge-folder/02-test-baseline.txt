@@ -1,0 +1,418 @@
+ Container webreport-backend-run-3e6cee0d6a1a Creating 
+ Container webreport-backend-run-3e6cee0d6a1a Created 
+WARNING:main:LLM mode elected: fallback
+INFO:main:Services initialized successfully
+test_caller_driven_eviction_holds_the_cap (__main__.TestSessionIndex.test_caller_driven_eviction_holds_the_cap)
+Given a full index, When the caller evicts the victim and admits one, Then len is capped. ... ok
+test_drop_of_unknown_session_is_a_noop (__main__.TestSessionIndex.test_drop_of_unknown_session_is_a_noop)
+Given an unknown sid, When it is dropped, Then nothing raises and nothing changes. ... ok
+test_expired_ids_lists_only_expired_sessions (__main__.TestSessionIndex.test_expired_ids_lists_only_expired_sessions)
+Given one aged and one fresh sid, When expired_ids is read, Then only the aged one. ... ok
+test_expired_session_is_not_live (__main__.TestSessionIndex.test_expired_session_is_not_live)
+Given a touched sid, When the monotonic clock passes the TTL, Then not live. ... ok
+test_expiry_check_never_drops_entries (__main__.TestSessionIndex.test_expiry_check_never_drops_entries)
+Given an expired sid, When it is inspected, Then it stays until the caller drops it. ... ok
+test_index_exposes_no_container_protocol (__main__.TestSessionIndex.test_index_exposes_no_container_protocol)
+Given an index, When `in` is used on it, Then TypeError. ... ok
+test_lru_victim_is_the_least_recently_touched (__main__.TestSessionIndex.test_lru_victim_is_the_least_recently_touched)
+Given a, b, c touched and a re-touched, When a victim is asked for, Then b. ... ok
+test_lru_victim_returns_none_when_every_session_is_pinned (__main__.TestSessionIndex.test_lru_victim_returns_none_when_every_session_is_pinned)
+Given every sid pinned, When a victim is asked for, Then None (caller answers 503). ... ok
+test_lru_victim_skips_pinned_sessions (__main__.TestSessionIndex.test_lru_victim_skips_pinned_sessions)
+Given a pinned LRU sid, When a victim is asked for, Then the next unpinned sid. ... ok
+test_max_1024_sessions (__main__.TestSessionIndex.test_max_1024_sessions)
+Given the default index, When 1024 sids are admitted, Then the cap holds at 1024. ... ok
+test_repeated_touch_does_not_grow_the_index (__main__.TestSessionIndex.test_repeated_touch_does_not_grow_the_index)
+Given a sid already present, When it is touched again, Then the size is unchanged. ... ok
+test_seed_installs_newest_first_ids_in_lru_order (__main__.TestSessionIndex.test_seed_installs_newest_first_ids_in_lru_order)
+Given newest-first ids, When seeded, Then the last one is the first victim. ... ok
+test_touch_admits_a_session (__main__.TestSessionIndex.test_touch_admits_a_session)
+Given an empty index, When a sid is touched, Then that sid is live. ... ok
+test_ttl_defaults_to_the_configured_checkpoint_ttl (__main__.TestSessionIndex.test_ttl_defaults_to_the_configured_checkpoint_ttl)
+Given no ttl argument, When the monotonic clock crosses CHECKPOINT_TTL_SECONDS, Then it expires. ... ok
+test_unknown_session_is_not_live (__main__.TestSessionIndex.test_unknown_session_is_not_live)
+Given an empty index, When an unknown sid is probed, Then it is not live. ... ok
+INFO:bd_shared.db_helpers:Database connection established
+test_get_all_games_summary (__main__.TestGameDataService.test_get_all_games_summary)
+Test getting all games summary. ... ok
+test_get_all_teams (__main__.TestGameDataService.test_get_all_teams)
+Test getting all teams. ... ok
+test_get_team_game_scores (__main__.TestGameDataService.test_get_team_game_scores)
+Test getting team game scores. ... ok
+test_regression_get_team_game_scores_filters_zero_game_id (__main__.TestGameDataService.test_regression_get_team_game_scores_filters_zero_game_id) ... ok
+test_regression_service_get_game_by_id_reraises_unexpected_errors (__main__.TestGameDataService.test_regression_service_get_game_by_id_reraises_unexpected_errors) ... ERROR:services.game_data_service:Error getting game 123
+Traceback (most recent call last):
+  File "/app/services/game_data_service.py", line 56, in get_game_by_id
+    bd_game = self.db.get_game_data(game_id)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+RuntimeError: db exploded
+ok
+test_regression_service_get_game_by_id_returns_none_for_missing_game (__main__.TestGameDataService.test_regression_service_get_game_by_id_returns_none_for_missing_game) ... ok
+test_regression_service_get_team_statistics (__main__.TestGameDataService.test_regression_service_get_team_statistics)
+Regression test for get_team_statistics() service method. ... ok
+test_regression_service_get_team_statistics_reraises_missing_team (__main__.TestGameDataService.test_regression_service_get_team_statistics_reraises_missing_team) ... ok
+test_regression_service_get_team_wins (__main__.TestGameDataService.test_regression_service_get_team_wins)
+Regression test for get_team_wins() service method. ... ok
+test_regression_service_get_team_wins_with_year (__main__.TestGameDataService.test_regression_service_get_team_wins_with_year)
+Regression test for get_team_wins() with year parameter. ... ok
+test_service_initialization (__main__.TestGameDataService.test_service_initialization)
+Test that service initializes correctly. ... ok
+test_agent_initialization (__main__.TestReportAgentSystem.test_agent_initialization)
+Test that agent system initializes. ... ok
+test_conversation_history (__main__.TestReportAgentSystem.test_conversation_history)
+Test conversation history tracking. ... ok
+test_process_request_all_games (__main__.TestReportAgentSystem.test_process_request_all_games)
+Test processing a request for all games. ... ok
+test_regression_agent_system_uses_injected_service (__main__.TestReportAgentSystem.test_regression_agent_system_uses_injected_service) ... ok
+test_regression_agents_enabled_with_api_key (__main__.TestReportAgentSystem.test_regression_agents_enabled_with_api_key) ... ok
+test_regression_generic_team_statistics (__main__.TestReportAgentSystem.test_regression_generic_team_statistics)
+Port the team-statistics route assertion to list-shaped ``query_info``. ... ok
+test_regression_team_statistics_missing_team_returns_error_response (__main__.TestReportAgentSystem.test_regression_team_statistics_missing_team_returns_error_response) ... ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agent/registry.py", line 157, in _call_and_convert
+    result = method(**call_args)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+ValueError: Team missing team not found
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 256, in process_user_request
+    return await self._process_fallback(user_message, session_id, history_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 291, in _process_fallback
+    data = await self._registry.execute_response(query["method"], query["params"])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/registry.py", line 180, in execute_response
+    return await self._execute(name, args, _as_response)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/registry.py", line 169, in _execute
+    return await asyncio.to_thread(self._call_and_convert, name, call_args, convert)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/registry.py", line 159, in _call_and_convert
+    raise ToolError(f"Tool '{name}' failed: {error}") from error
+agent.registry.ToolError: Tool 'get_team_statistics' failed: Team missing team not found
+ok
+test_regression_team_wins_2025 (__main__.TestReportAgentSystem.test_regression_team_wins_2025)
+Port the win route assertion to list-shaped ``query_info``. ... ok
+test_health_endpoint (__main__.TestAPI.test_health_endpoint)
+Test the health check endpoint. ... ok
+test_regression_api_generic_team_statistics (__main__.TestAPI.test_regression_api_generic_team_statistics)
+Regression test for API endpoint with generic team statistics prompt. ... ok
+test_regression_api_get_game_returns_404_for_missing_game (__main__.TestAPI.test_regression_api_get_game_returns_404_for_missing_game) ... ok
+test_regression_api_get_game_returns_500_for_unexpected_error (__main__.TestAPI.test_regression_api_get_game_returns_500_for_unexpected_error) ... ERROR:main:Unexpected error in API handler
+Traceback (most recent call last):
+  File "/app/main.py", line 568, in get_game
+    data = data_service.get_game_by_id(game_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+RuntimeError: db exploded
+ok
+test_regression_api_team_stats_returns_404_for_missing_team (__main__.TestAPI.test_regression_api_team_stats_returns_404_for_missing_team) ... ok
+test_regression_api_team_wins_2025 (__main__.TestAPI.test_regression_api_team_wins_2025)
+Regression test for API endpoint with historical team wins 2025 prompt. ... ok
+test_regression_chat_with_explicit_session_id_is_preserved (__main__.TestAPI.test_regression_chat_with_explicit_session_id_is_preserved)
+Client-supplied session_id must be echoed back unchanged. ... ok
+test_regression_chat_without_session_id_assigns_unique_id (__main__.TestAPI.test_regression_chat_without_session_id_assigns_unique_id)
+Chat without session_id must mint a fresh server-side id, not the literal "default". ... ok
+test_regression_chat_without_session_id_yields_distinct_sessions (__main__.TestAPI.test_regression_chat_without_session_id_yields_distinct_sessions)
+Two anonymous chat calls must not collide on a shared session. ... ok
+test_regression_health_returns_503_without_data_service (__main__.TestAPI.test_regression_health_returns_503_without_data_service) ... ok
+test_root_endpoint (__main__.TestAPI.test_root_endpoint)
+Test the root endpoint. ... ok
+test_all_pinned_capacity_returns_503_without_overshoot (__main__.TestSessionLifecycleAPI.test_all_pinned_capacity_returns_503_without_overshoot) ... ok
+test_both_modes_keep_list_shaped_query_info (__main__.TestSessionLifecycleAPI.test_both_modes_keep_list_shaped_query_info) ... ok
+test_chat_history_clear_history_flow (__main__.TestSessionLifecycleAPI.test_chat_history_clear_history_flow) ... ok
+test_clear_unknown_session_returns_200 (__main__.TestSessionLifecycleAPI.test_clear_unknown_session_returns_200) ... ok
+test_delete_failure_retains_victim_and_retries_it (__main__.TestSessionLifecycleAPI.test_delete_failure_retains_victim_and_retries_it) ... ERROR:main:Unexpected error in API handler
+Traceback (most recent call last):
+  File "/app/main.py", line 385, in chat
+    await saver.adelete_thread(victim)
+  File "/app/test_system.py", line 840, in adelete_thread
+    raise RuntimeError(f"delete failed for {session_id}")
+RuntimeError: delete failed for old
+ok
+test_expired_history_is_deleted_on_sight (__main__.TestSessionLifecycleAPI.test_expired_history_is_deleted_on_sight) ... ok
+test_expired_requested_session_is_deleted_then_readmitted (__main__.TestSessionLifecycleAPI.test_expired_requested_session_is_deleted_then_readmitted) ... ok
+test_failed_admission_deletion_leaves_no_pin (__main__.TestSessionLifecycleAPI.test_failed_admission_deletion_leaves_no_pin) ... ERROR:main:Unexpected error in API handler
+Traceback (most recent call last):
+  File "/app/main.py", line 385, in chat
+    await saver.adelete_thread(victim)
+  File "/app/test_system.py", line 840, in adelete_thread
+    raise RuntimeError(f"delete failed for {session_id}")
+RuntimeError: delete failed for old
+ok
+test_in_flight_session_is_never_evicted (__main__.TestSessionLifecycleAPI.test_in_flight_session_is_never_evicted) ... ok
+test_orphaned_history_is_deleted_on_sight (__main__.TestSessionLifecycleAPI.test_orphaned_history_is_deleted_on_sight) ... ok
+test_recursion_and_timeout_failures_are_200_json (__main__.TestSessionLifecycleAPI.test_recursion_and_timeout_failures_are_200_json) ... ok
+test_request_cancellation_always_unpins (__main__.TestSessionLifecycleAPI.test_request_cancellation_always_unpins) ... ok
+test_simultaneous_admissions_never_double_pick_or_overshoot (__main__.TestSessionLifecycleAPI.test_simultaneous_admissions_never_double_pick_or_overshoot) ... ok
+test_two_requests_keep_same_session_pinned_until_both_finish (__main__.TestSessionLifecycleAPI.test_two_requests_keep_same_session_pinned_until_both_finish) ... ok
+test_direct_401_stays_permanent_when_json_raises (__main__.TestStartupInitialization.test_direct_401_stays_permanent_when_json_raises) ... ok
+test_health_still_returns_503_without_data_service (__main__.TestStartupInitialization.test_health_still_returns_503_without_data_service)
+Given no data service, When health is requested, Then readiness remains unavailable. ... ok
+test_healthy_probe_elects_agent_and_health_reports_proxy_up (__main__.TestStartupInitialization.test_healthy_probe_elects_agent_and_health_reports_proxy_up) ... WARNING:main:LiteLLM probe classified verdict=healthy status=200 exception_status=None
+WARNING:main:LLM mode elected: agent
+INFO:main:Services initialized successfully
+ok
+test_healthy_probe_wins_over_nested_permanent_failure (__main__.TestStartupInitialization.test_healthy_probe_wins_over_nested_permanent_failure) ... ok
+test_permanent_direct_probe_failure_stops_after_one_attempt (__main__.TestStartupInitialization.test_permanent_direct_probe_failure_stops_after_one_attempt) ... ok
+test_permanent_nested_probe_failure_stops_after_one_attempt (__main__.TestStartupInitialization.test_permanent_nested_probe_failure_stops_after_one_attempt) ... ok
+test_probe_failure_elects_fallback_and_health_reports_proxy_down (__main__.TestStartupInitialization.test_probe_failure_elects_fallback_and_health_reports_proxy_down) ... WARNING:main:LiteLLM probe classified verdict=transient status=None exception_status=None
+WARNING:main:LLM mode elected: fallback
+INFO:main:Services initialized successfully
+ok
+test_probe_response_classifier_follows_decision_table (__main__.TestStartupInitialization.test_probe_response_classifier_follows_decision_table) ... ok
+test_rebuild_trims_1026_threads_to_newest_1024 (__main__.TestStartupInitialization.test_rebuild_trims_1026_threads_to_newest_1024)
+Given persisted overflow, When rebuilding, Then only the newest 1024 threads survive. ... ok
+test_regression_startup_reraises_after_retry_exhaustion (__main__.TestStartupInitialization.test_regression_startup_reraises_after_retry_exhaustion) ... WARNING:main:Database initialization attempt 1/5 failed: db not ready
+WARNING:main:Database initialization attempt 2/5 failed: db not ready
+WARNING:main:Database initialization attempt 3/5 failed: db not ready
+WARNING:main:Database initialization attempt 4/5 failed: db not ready
+WARNING:main:Database initialization attempt 5/5 failed: db not ready
+ok
+test_regression_startup_retries_database_initialization (__main__.TestStartupInitialization.test_regression_startup_retries_database_initialization) ... WARNING:main:Database initialization attempt 1/5 failed: db not ready
+WARNING:main:Database initialization attempt 2/5 failed: db not ready
+WARNING:main:LLM mode elected: fallback
+INFO:main:Services initialized successfully
+ok
+test_shutdown_closes_checkpoint_connection (__main__.TestStartupInitialization.test_shutdown_closes_checkpoint_connection) ... WARNING:main:LLM mode elected: fallback
+INFO:main:Services initialized successfully
+ok
+test_transient_probe_failure_exhausts_retry_budget (__main__.TestStartupInitialization.test_transient_probe_failure_exhausts_retry_budget) ... ok
+test_transient_probe_recovers_on_next_attempt (__main__.TestStartupInitialization.test_transient_probe_recovers_on_next_attempt) ... ok
+test_truthy_non_list_healthy_endpoints_remains_transient (__main__.TestStartupInitialization.test_truthy_non_list_healthy_endpoints_remains_transient) ... ok
+test_unrelated_unhealthy_endpoints_still_elect_agent (__main__.TestStartupInitialization.test_unrelated_unhealthy_endpoints_still_elect_agent) ... WARNING:main:LiteLLM probe classified verdict=healthy status=200 exception_status=None
+WARNING:main:LLM mode elected: agent
+INFO:main:Services initialized successfully
+ok
+
+----------------------------------------------------------------------
+Ran 75 tests in 0.841s
+
+OK
+================================================================================
+🧪 Running Web Reporting System Tests
+================================================================================
+
+✅ SessionIndex: caller-driven eviction never exceeds the cap
+✅ SessionIndex: dropping an unknown session is a no-op
+✅ SessionIndex: expired_ids reports only sessions past their TTL
+✅ SessionIndex: session stops being live once its TTL elapses
+✅ SessionIndex: expiry inspection leaves removal to the caller
+✅ SessionIndex: no container protocol, liveness must be awaited
+✅ SessionIndex: LRU victim is the least recently touched session
+✅ SessionIndex: all-pinned capacity yields no victim
+✅ SessionIndex: pinned sessions are skipped as eviction victims
+✅ SessionIndex: default MAX_SESSIONS=1024 is enforced by the caller loop
+✅ SessionIndex: re-touching an existing session does not grow the index
+✅ SessionIndex: seed installs newest-first input in oldest-first LRU order
+✅ SessionIndex: touch admits a session id
+✅ SessionIndex: default TTL comes from bd_shared.config.CHECKPOINT_TTL_SECONDS
+✅ SessionIndex: unknown session id is not live
+✅ Found 148 games in database
+✅ Found 284 teams in database
+✅ Found 1196 team game score records
+✅ Service get_team_game_scores: game_id=0 still applies filtering
+✅ Service get_game_by_id: unexpected errors are re-raised
+✅ Service get_game_by_id: missing game returns None
+✅ Service get_team_statistics executed successfully
+✅ Service get_team_statistics: missing team is re-raised
+✅ Service get_team_wins: 25 wins in 130 games
+✅ Service get_team_wins(year=2025): 3 wins
+✅ Conversation history has 2 entries
+✅ Request processed: Report generated (fallback mode): покажи все игры
+✅ Agent system reuses injected data service
+✅ Generic team statistics prompt: correctly routed to get_team_statistics
+✅ Agent team statistics: missing team returns error response
+✅ Team wins 2025 prompt: correctly routed to get_team_wins
+✅ API health check passed: healthy
+✅ API generic team statistics prompt: returned successfully
+✅ API get_game: missing game returns 404
+✅ API get_game: unexpected errors return a generic 500 response
+✅ API team stats: missing team returns 404
+✅ API team wins 2025 prompt: returned successfully
+✅ API chat: explicit client session_id is preserved
+✅ API chat: assigns server-side session_id when client omits it
+✅ API chat: anonymous callers get distinct session ids
+✅ API health: returns 503 when data service is unavailable
+✅ API root endpoint: Game Data Report API
+✅ Startup fails fast after bounded database retries
+✅ Startup retries database initialization before succeeding
+
+================================================================================
+📊 Test Summary
+================================================================================
+Tests run: 75
+Successes: 75
+Failures: 0
+Errors: 0
+Skipped: 0
+....................................../bd_shared/db.py:19: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+..............ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 258, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 320, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 179, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 127, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_agent_report_agent.py", line 23, in ainvoke
+    raise ScriptedModelError("scripted model failure")
+test_agent_report_agent.ScriptedModelError: scripted model failure
+During task with name 'agent' and id '357e4aae-b98a-7ff5-7750-cb8ffd42e597'
+.......................
+----------------------------------------------------------------------
+Ran 75 tests in 5.127s
+
+OK
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.057s
+
+OK
+/app/main.py:266: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+/usr/local/lib/python3.11/site-packages/fastapi/applications.py:4675: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/)
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+/app/main.py:304: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/)
+        
+  @app.on_event("shutdown")
+.............................ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 258, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 320, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 179, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 127, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_reasoning_partial.py", line 84, in ainvoke
+    raise _ScriptedFailure("model exploded")
+test_reasoning_partial._ScriptedFailure: model exploded
+During task with name 'agent' and id 'ce2d8c71-da7a-b324-b2c0-2357f75bb9e3'
+.ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 258, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 320, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 179, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 127, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_reasoning_partial.py", line 84, in ainvoke
+    raise _ScriptedFailure("model exploded")
+test_reasoning_partial._ScriptedFailure: model exploded
+During task with name 'agent' and id 'cc6de806-1de2-fabd-fe21-40690845e025'
+............................WARNING:asyncio:Executing <Task pending name='Task-725' coro=<TestReasoningPropagation.test_success_normalizes_block_list_final_answer() running at /app/test_reasoning_partial.py:178> wait_for=<Future pending cb=[Task.task_wakeup()] created at /usr/local/lib/python3.11/asyncio/runners.py:428> cb=[_run_until_complete_cb() at /usr/local/lib/python3.11/asyncio/runners.py:428] created at /usr/local/lib/python3.11/asyncio/runners.py:428> took 0.128 seconds
+.
+----------------------------------------------------------------------
+Ran 59 tests in 1.866s
+
+OK
+exit=0
