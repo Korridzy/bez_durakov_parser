@@ -88,6 +88,13 @@ PROBE_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("probe_request_timeo
 LLM_MAX_RETRIES = int(config["webreport"].get("llm_max_retries", 0))
 LLM_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("llm_request_timeout_seconds", 60))
 
+KNOWLEDGE_MAX_TITLE_CHARS = int(config["webreport"].get("knowledge_max_title_chars", 80))
+KNOWLEDGE_MAX_SUMMARY_CHARS = int(config["webreport"].get("knowledge_max_summary_chars", 200))
+KNOWLEDGE_MAX_PERSONA_CHARS = int(config["webreport"].get("knowledge_max_persona_chars", 2000))
+KNOWLEDGE_MAX_TOPICS = int(config["webreport"].get("knowledge_max_topics", 50))
+KNOWLEDGE_MAX_DOC_BYTES = int(config["webreport"].get("knowledge_max_doc_bytes", 65536))
+KNOWLEDGE_DIR = config["webreport"].get("knowledge_dir") or None
+
 # Use BD_CHECKPOINT_DB_PATH environment variable to override the checkpoint store location
 CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
     "checkpoint_db_path", "/data/checkpoints.db"

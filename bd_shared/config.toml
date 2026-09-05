@@ -34,6 +34,12 @@ llm_request_timeout_seconds = 60
 openai_api_key = ""
 openrouter_api_key = ""
 opencode_api_key = ""
+knowledge_dir = "knowledge/bez_durakov"
+knowledge_max_title_chars = 80
+knowledge_max_summary_chars = 200
+knowledge_max_persona_chars = 2000
+knowledge_max_topics = 50
+knowledge_max_doc_bytes = 65536
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
