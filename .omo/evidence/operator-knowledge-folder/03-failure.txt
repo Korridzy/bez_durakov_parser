@@ -1,0 +1,52 @@
+Wave 0 Todo 3 - failure sensitivity QA
+
+The scratch copy /tmp/main_regress.py was created from main.py and the logger assignment was reinserted above the four module-level imports.
+
+Command: poetry run ruff check /tmp/main_regress.py --select E402
+Exit: 1
+Output:
+E402 Module level import not at top of file
+  --> /tmp/main_regress.py:35:1
+   |
+35 | from agent.reasoning import extract_reasoning, extract_text
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+36 | from agents.report_agents import ReportAgentSystem
+37 | from services.game_data_service import GameDataService
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> /tmp/main_regress.py:36:1
+   |
+35 | from agent.reasoning import extract_reasoning, extract_text
+36 | from agents.report_agents import ReportAgentSystem
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+37 | from services.game_data_service import GameDataService
+38 | from session_store import MAX_SESSIONS, SessionIndex
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> /tmp/main_regress.py:37:1
+   |
+36 | from agents.report_agents import ReportAgentSystem
+37 | from services.game_data_service import GameDataService
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+38 | from session_store import MAX_SESSIONS, SessionIndex
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> /tmp/main_regress.py:38:1
+   |
+37 | from services.game_data_service import GameDataService
+38 | from session_store import MAX_SESSIONS, SessionIndex
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+39 |
+40 | aiosqlite = importlib.import_module("aiosqlite")
+   |
+help: Move module level imports to top of file
+
+Found 4 errors.
+
+Assertion: Reintroducing the original logger placement restores all four E402 diagnostics, proving the check is sensitive to this exact relocation.

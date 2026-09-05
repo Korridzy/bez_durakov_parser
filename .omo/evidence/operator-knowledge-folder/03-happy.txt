@@ -1,0 +1,16 @@
+Wave 0 Todo 3 - happy QA
+
+Command: poetry run ruff check webreport/backend/main.py --select E402
+Exit: 0
+Output:
+All checks passed!
+
+Assertion: The logger-block E402 diagnostics at the former delayed-import lines 34-37 are gone.
+
+Command: cd webreport && docker compose run --rm --no-deps backend python -c "import main"
+Exit: 0
+Output:
+ Container webreport-backend-run-79b683ea702d Creating
+ Container webreport-backend-run-79b683ea702d Created
+
+Assertion: The backend imports main cleanly in the backend container.

@@ -29,7 +29,6 @@ from bd_shared.config import (
     WEBREPORT_DEBUG,
 )
 
-logger = logging.getLogger(__name__)
 
 from agent.reasoning import extract_reasoning, extract_text
 from agents.report_agents import ReportAgentSystem
@@ -42,6 +41,7 @@ AsyncSqliteSaver = importlib.import_module(
 ).AsyncSqliteSaver
 requests = importlib.import_module("requests")
 langchain_messages = importlib.import_module("langchain_core.messages")
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models for request/response
