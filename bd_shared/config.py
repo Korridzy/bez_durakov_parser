@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import TypeAlias
 
 # Using the standard tomllib module for Python 3.11+
@@ -93,7 +94,17 @@ KNOWLEDGE_MAX_SUMMARY_CHARS = int(config["webreport"].get("knowledge_max_summary
 KNOWLEDGE_MAX_PERSONA_CHARS = int(config["webreport"].get("knowledge_max_persona_chars", 2000))
 KNOWLEDGE_MAX_TOPICS = int(config["webreport"].get("knowledge_max_topics", 50))
 KNOWLEDGE_MAX_DOC_BYTES = int(config["webreport"].get("knowledge_max_doc_bytes", 65536))
-KNOWLEDGE_DIR = config["webreport"].get("knowledge_dir") or None
+_knowledge_dir_value = config["webreport"].get("knowledge_dir") or None
+if _knowledge_dir_value is None:
+    _knowledge_dir_path = None
+else:
+    _knowledge_dir_path = Path(_knowledge_dir_value)
+    _knowledge_dir_path = (
+        _knowledge_dir_path
+        if _knowledge_dir_path.is_absolute()
+        else Path(config_directory) / _knowledge_dir_path
+    )
+KNOWLEDGE_DIR = _knowledge_dir_path
 
 # Use BD_CHECKPOINT_DB_PATH environment variable to override the checkpoint store location
 CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
