@@ -75,6 +75,63 @@ class KnowledgeConfigTests(unittest.TestCase):
 
         self.assertEqual(config_module.KNOWLEDGE_MAX_TOPICS, 7)
 
+    def test_knowledge_dir_relative_value_resolves_against_bd_shared_directory(self):
+        """Given a relative knowledge_dir, When config loads, Then it resolves against the bd_shared package directory."""
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                Path("/bd_shared/test_config.toml")
+                .read_text()
+                .replace("[webreport]\n", '[webreport]\nknowledge_dir = "some/relative/dir"\n', 1)
+            )
+            config_module = self._reload_config({"BD_CONFIG_FILE": str(config_path)})
+
+        expected = Path(config_module.config_directory) / "some/relative/dir"
+        self.assertEqual(config_module.KNOWLEDGE_DIR, expected)
+
+    def test_knowledge_dir_absolute_value_is_returned_unchanged(self):
+        """Given an absolute knowledge_dir, When config loads, Then it is used unchanged."""
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                Path("/bd_shared/test_config.toml")
+                .read_text()
+                .replace("[webreport]\n", '[webreport]\nknowledge_dir = "/some/absolute/dir"\n', 1)
+            )
+            config_module = self._reload_config({"BD_CONFIG_FILE": str(config_path)})
+
+        self.assertEqual(config_module.KNOWLEDGE_DIR, Path("/some/absolute/dir"))
+
+    def test_knowledge_dir_resolved_value_is_always_an_absolute_path(self):
+        """Given either a relative or absolute knowledge_dir, When config loads, Then KNOWLEDGE_DIR is always an absolute pathlib.Path."""
+        for raw_value in ("relative/dir", "/absolute/dir"):
+            with self.subTest(raw_value=raw_value):
+                with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+                    config_path = Path(directory) / "config.toml"
+                    config_path.write_text(
+                        Path("/bd_shared/test_config.toml")
+                        .read_text()
+                        .replace("[webreport]\n", f'[webreport]\nknowledge_dir = "{raw_value}"\n', 1)
+                    )
+                    config_module = self._reload_config({"BD_CONFIG_FILE": str(config_path)})
+
+                self.assertIsInstance(config_module.KNOWLEDGE_DIR, Path)
+                self.assertTrue(config_module.KNOWLEDGE_DIR.is_absolute())
+
+    def test_knowledge_dir_resolves_without_requiring_existence(self):
+        """Given a knowledge_dir that does not exist on disk, When config loads, Then it still resolves to a Path rather than raising or returning None."""
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                Path("/bd_shared/test_config.toml")
+                .read_text()
+                .replace("[webreport]\n", '[webreport]\nknowledge_dir = "definitely/does/not/exist/anywhere"\n', 1)
+            )
+            config_module = self._reload_config({"BD_CONFIG_FILE": str(config_path)})
+
+        self.assertIsInstance(config_module.KNOWLEDGE_DIR, Path)
+        self.assertFalse(config_module.KNOWLEDGE_DIR.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
