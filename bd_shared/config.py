@@ -3,6 +3,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TypeAlias
+from sqlalchemy.engine import make_url
 
 # Using the standard tomllib module for Python 3.11+
 if sys.version_info >= (3, 11):
@@ -47,6 +48,7 @@ DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
 _bd_docker = os.environ.get('BD_DOCKER', '').lower() in ('1', 'true', 'yes')
 DATABASE_URL = config["database"]["docker_url"] if _bd_docker else config["database"]["url"]
+DATABASE_NAME = make_url(DATABASE_URL).database
 
 # Function for getting the configuration (optional)
 def get_config():
