@@ -27,6 +27,7 @@ tools_metadata = importlib.import_module("test_agent_tools_metadata")
 graph_cases = importlib.import_module("test_agent_graph")
 report_agent_cases = importlib.import_module("test_agent_report_agent")
 checkpointer_cases = importlib.import_module("test_agent_checkpointer")
+knowledge_config_cases = importlib.import_module("test_agent_config")
 net_guard = importlib.import_module("test_net_guard")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
@@ -149,6 +150,10 @@ class TestTools(
 
 class TestGraph(graph_cases.GraphTests):
     """Bounded sequential ReAct graph exercised with an offline scripted model."""
+
+
+class TestKnowledgeConfig(knowledge_config_cases.KnowledgeConfigTests):
+    pass
 
 
 class TestReportAgentSystem(report_agent_cases.ReportAgentSystemTests):
