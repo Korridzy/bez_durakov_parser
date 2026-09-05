@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 PYTHON_VERSION ?= 3.11
 
-.PHONY: help setup test upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -10,6 +10,7 @@ help:
 	@echo ""
 	@echo "Core:"
 	@echo "  make setup          - Create venv and install dependencies"
+	@echo "  make lint           - Run Ruff checks"
 	@echo "  make test           - Run the complete project test suite"
 	@echo "  make upgrade-db     - Apply Alembic migrations"
 	@echo "  make upgrade-code   - Pull updates from main safely"
@@ -68,6 +69,9 @@ setup:
 	poetry env use "$$python_path"; \
 	poetry install --no-root; \
 	poetry run python -V
+
+lint:
+	@poetry run ruff check .
 
 test:
 	@set -o pipefail; \
