@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Final, Optional, final
 
 from .report_contracts import QueryPlan
+from .report_runtime import ReportAgentSystem as ReportAgentSystem, parse_legacy_query
 
 _MIN_TOP_TEAMS_LIMIT: Final = 1
 _MAX_TOP_TEAMS_LIMIT: Final = 1024
@@ -184,6 +185,3 @@ class FallbackInterpreter:
                 "params": {},
                 "description": "Get summary of all games",
             }
-
-
-from .report_runtime import ReportAgentSystem, parse_legacy_query

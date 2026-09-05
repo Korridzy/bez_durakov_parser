@@ -1,7 +1,7 @@
 """Base fetcher for xlsm_fetch package."""
 
 import logging
-from typing import List, Dict, Optional
+from typing import List, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

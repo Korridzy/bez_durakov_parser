@@ -91,7 +91,7 @@ def main():
     passed = sum(all_checks)
     failed = total - passed
 
-    print(f"📊 SUMMARY:")
+    print("📊 SUMMARY:")
     print(f"   Total checks: {total}")
     print(f"   ✅ Passed: {passed}")
     print(f"   ❌ Failed: {failed}")

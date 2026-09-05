@@ -3,7 +3,6 @@ Test script for the web reporting system.
 Tests all components: services, agents, API.
 """
 import sys
-import os
 import asyncio
 import importlib
 import json as json_module
@@ -11,7 +10,6 @@ from typing import Any
 
 import unittest
 from unittest.mock import AsyncMock, call, patch
-from datetime import date, datetime
 
 _test_agent_support = importlib.import_module("test_agent_support")
 _test_agent_graph = importlib.import_module("test_agent_graph")
@@ -332,7 +330,7 @@ class TestGameDataService(unittest.TestCase):
         self.assertNotIn("No module named 'db'", result_str,
                         "Result should not contain import error")
 
-        print(f"✅ Service get_team_statistics executed successfully")
+        print("✅ Service get_team_statistics executed successfully")
 
     def test_regression_service_get_team_statistics_reraises_missing_team(self):
         if self.service is None:
@@ -626,7 +624,7 @@ class TestAPI(unittest.TestCase):
             self.assertNotIn("No module named 'db'", response_str,
                             "API response should not contain import error")
             
-            print(f"✅ API team wins 2025 prompt: returned successfully")
+            print("✅ API team wins 2025 prompt: returned successfully")
             
         except Exception as e:
             print(f"⚠️ API test error: {e}")
@@ -663,7 +661,7 @@ class TestAPI(unittest.TestCase):
             self.assertNotIn("No module named 'db'", response_str,
                             "API response should not contain import error")
             
-            print(f"✅ API generic team statistics prompt: returned successfully")
+            print("✅ API generic team statistics prompt: returned successfully")
             
         except Exception as e:
             print(f"⚠️ API test error: {e}")

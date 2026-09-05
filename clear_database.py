@@ -39,7 +39,7 @@ def clear_database(clear_teams=False):
                 failed_count += 1
                 print(f"Ошибка при удалении игры {game.game_id}: {e}")
 
-        print(f"\nИгры удалены!")
+        print("\nИгры удалены!")
         print(f"Успешно удалено: {deleted_count}")
         if failed_count > 0:
             print(f"Ошибок: {failed_count}")
@@ -91,4 +91,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     clear_database(clear_teams=args.teams)
-

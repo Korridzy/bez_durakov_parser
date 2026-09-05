@@ -3,7 +3,7 @@
 import time
 import re
 import logging
-from typing import List, Dict, Optional
+from typing import List, Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
@@ -397,7 +397,7 @@ class SeleniumFetcher(BaseFetcher):
     def _wait_for_download_completion(self, driver, target_download_dir):
         """Wait for zip file download to complete."""
 
-        self._log(f"⏳ Waiting for download completion...")
+        self._log("⏳ Waiting for download completion...")
         self._log(f"📁 Target directory: {target_download_dir}")
 
         # Get initial files in target download directory
@@ -461,7 +461,7 @@ class SeleniumFetcher(BaseFetcher):
         # List all files in target directory for debugging
         if target_download_dir.exists():
             all_files = list(target_download_dir.iterdir())
-            self._log(f"🔍 Final target directory contents:")
+            self._log("🔍 Final target directory contents:")
             for file_path in all_files:
                 if file_path.is_file():
                     self._log(f"  - {file_path.name} ({file_path.stat().st_size} bytes)")
