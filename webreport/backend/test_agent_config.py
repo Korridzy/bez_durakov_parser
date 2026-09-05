@@ -132,6 +132,27 @@ class KnowledgeConfigTests(unittest.TestCase):
         self.assertIsInstance(config_module.KNOWLEDGE_DIR, Path)
         self.assertFalse(config_module.KNOWLEDGE_DIR.exists())
 
+    def test_database_name_matches_local_url_without_bd_docker(self):
+        """Given BD_DOCKER is unset, When config loads, Then DATABASE_NAME derives from database.url."""
+        config_module = self._reload_config(unset=("BD_DOCKER",))
+        self.assertEqual(config_module.DATABASE_NAME, "bez_durakov")
+
+    def test_database_name_matches_docker_url_with_bd_docker(self):
+        """Given BD_DOCKER=1, When config loads, Then DATABASE_NAME still derives correctly from database.docker_url."""
+        config_module = self._reload_config({"BD_DOCKER": "1"})
+        self.assertEqual(config_module.DATABASE_NAME, "bez_durakov")
+
+    def test_database_name_under_test_config_is_the_test_database(self):
+        """Given BD_CONFIG_FILE=test_config.toml, When config loads, Then DATABASE_NAME is bez_durakov_test."""
+        config_module = self._reload_config({"BD_CONFIG_FILE": "test_config.toml"})
+        self.assertEqual(config_module.DATABASE_NAME, "bez_durakov_test")
+
+    def test_database_name_derivation_opens_no_socket(self):
+        """Given socket creation is patched to fail, When config reloads, Then DATABASE_NAME is still derived without opening a connection."""
+        with patch("socket.socket", side_effect=RuntimeError("attempted to open a socket during DATABASE_NAME derivation")):
+            config_module = self._reload_config({"BD_CONFIG_FILE": "test_config.toml"})
+        self.assertEqual(config_module.DATABASE_NAME, "bez_durakov_test")
+
 
 if __name__ == "__main__":
     unittest.main()
