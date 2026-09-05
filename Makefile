@@ -75,6 +75,7 @@ lint:
 
 test:
 	@set -o pipefail; \
+	$(MAKE) lint || { echo ""; echo "❌ make lint failed - aborting before the test suite runs"; exit 1; }; \
 	status=0; \
 	run() { \
 		echo ""; \
