@@ -3,6 +3,8 @@
 import importlib
 import unittest
 
+from pydantic import ValidationError
+
 
 class KnowledgeTypesTests(unittest.TestCase):
     @classmethod
@@ -81,6 +83,61 @@ class KnowledgeTypesTests(unittest.TestCase):
 
         self.assertIs(knowledge.manifest, manifest_stub)
         self.assertEqual(tuple(t.id for t in knowledge.topics), ("a", "b"))
+
+    def test_knowledge_manifest_accepts_only_dataset_and_persona(self):
+        """Given dataset and persona, When a KnowledgeManifest is constructed, Then both fields are accepted exactly."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        manifest = knowledge_manifest(dataset="ok_dataset", persona="Some persona text.")
+
+        self.assertEqual(set(knowledge_manifest.model_fields), {"dataset", "persona"})
+        self.assertEqual(
+            manifest.model_dump(),
+            {"dataset": "ok_dataset", "persona": "Some persona text."},
+        )
+
+    def test_knowledge_manifest_rejects_unknown_key_and_names_language(self):
+        """Given extra=\"forbid\", When language is supplied to a KnowledgeManifest, Then the error names language."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest(
+                dataset="ok_dataset",
+                persona="Some persona text.",
+                language="ru",
+            )
+
+        self.assertIn("language", str(raised.exception))
+
+    def test_knowledge_manifest_rejects_dataset_outside_pinned_pattern(self):
+        """Given dataset must match ^[a-z0-9_-]{1,64}$, When it contains uppercase letters, Then the error names dataset."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest(dataset="Bad_Durakov", persona="Some persona text.")
+
+        self.assertIn("dataset", str(raised.exception))
+
+    def test_knowledge_manifest_rejects_empty_persona_and_names_persona(self):
+        """Given an empty persona, When a KnowledgeManifest is constructed, Then the error names persona."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest(dataset="ok_dataset", persona="")
+
+        self.assertIn("persona", str(raised.exception))
+
+    def test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona(self):
+        """Given max_persona_chars is supplied in validation context, When persona exceeds it, Then the error names persona."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest.model_validate(
+                {"dataset": "ok_dataset", "persona": "x" * 10},
+                context={"max_persona_chars": 5},
+            )
+
+        self.assertIn("persona", str(raised.exception))
 
 
 if __name__ == "__main__":

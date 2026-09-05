@@ -1,0 +1,59 @@
+Command: cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+Container webreport-backend-run-ddf9f8de87b7 Creating
+Container webreport-backend-run-ddf9f8de87b7 Created
+.....EEEEE.
+======================================================================
+ERROR: test_knowledge_manifest_accepts_only_dataset_and_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_accepts_only_dataset_and_persona)
+Given dataset and persona, When a KnowledgeManifest is constructed, Then both fields are accepted exactly.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 89, in test_knowledge_manifest_accepts_only_dataset_and_persona
+    knowledge_manifest = self.knowledge_module.KnowledgeManifest
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'KnowledgeManifest'
+
+======================================================================
+ERROR: test_knowledge_manifest_rejects_dataset_outside_pinned_pattern (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_dataset_outside_pinned_pattern)
+Given dataset must match ^[a-z0-9_-]{1,64}$, When it contains uppercase letters, Then the error names dataset.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 114, in test_knowledge_manifest_rejects_dataset_outside_pinned_pattern
+    knowledge_manifest = self.knowledge_module.KnowledgeManifest
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'KnowledgeManifest'
+
+======================================================================
+ERROR: test_knowledge_manifest_rejects_empty_persona_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_empty_persona_and_names_persona)
+Given an empty persona, When a KnowledgeManifest is constructed, Then the error names persona.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 123, in test_knowledge_manifest_rejects_empty_persona_and_names_persona
+    knowledge_manifest = self.knowledge_module.KnowledgeManifest
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'KnowledgeManifest'
+
+======================================================================
+ERROR: test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona)
+Given max_persona_chars is supplied in validation context, When persona exceeds it, Then the error names persona.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 132, in test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona
+    knowledge_manifest = self.knowledge_module.KnowledgeManifest
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'KnowledgeManifest'
+
+======================================================================
+ERROR: test_knowledge_manifest_rejects_unknown_key_and_names_language (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_unknown_key_and_names_language)
+Given extra="forbid", When language is supplied to a KnowledgeManifest, Then the error names language.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 101, in test_knowledge_manifest_rejects_unknown_key_and_names_language
+    knowledge_manifest = self.knowledge_module.KnowledgeManifest
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'KnowledgeManifest'
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.184s
+
+FAILED (errors=5)
+exit=1
