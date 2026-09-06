@@ -1,7 +1,10 @@
 """Contracts for the knowledge model types in agent/knowledge.py."""
 
 import importlib
+import inspect
+import tempfile
 import unittest
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -138,6 +141,150 @@ class KnowledgeTypesTests(unittest.TestCase):
             )
 
         self.assertIn("persona", str(raised.exception))
+
+    def _knowledge_limits(self):
+        return self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=50,
+            max_doc_bytes=65536,
+            max_bytes_per_turn=131072,
+        )
+
+    def _assert_manifest_path(self, error, manifest_path):
+        path_sources = (str(error.path), str(error))
+
+        self.assertTrue(any(str(manifest_path) in source for source in path_sources))
+
+    def test_load_knowledge_rejects_missing_manifest(self):
+        """Given an empty knowledge folder, When it is loaded, Then KnowledgeError names the missing manifest."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+
+    def test_load_knowledge_treats_differently_cased_manifest_as_missing(self):
+        """Given only Manifest.TOML, When the folder is loaded, Then KnowledgeError reports lowercase manifest.toml missing."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            wrong_case_path = folder_path / "Manifest.TOML"
+            manifest_path = folder_path / "manifest.toml"
+            wrong_case_path.write_text('dataset = "some_db"\npersona = "Some text."\n', encoding="utf-8")
+            self.assertFalse(manifest_path.exists())
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+
+    def test_load_knowledge_wraps_unparseable_toml(self):
+        """Given malformed manifest TOML, When the folder is loaded, Then KnowledgeError identifies the parse failure."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text("[[[\n", encoding="utf-8")
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertRegex(str(raised.exception), r"(?i)(TOML|line \d+|column \d+)")
+
+    def test_load_knowledge_wraps_unknown_manifest_key_validation(self):
+        """Given a manifest with language, When the folder is loaded, Then KnowledgeError names the manifest and key."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "some_db"\npersona = "Some text."\nlanguage = "ru"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn("language", str(raised.exception))
+
+    def test_load_knowledge_wraps_dataset_pattern_validation(self):
+        """Given an invalid manifest dataset, When the folder is loaded, Then KnowledgeError names the manifest and dataset."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "Bad_Dataset"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn("dataset", str(raised.exception))
+
+    def test_load_knowledge_rejects_dataset_mismatch_with_both_names(self):
+        """Given a valid manifest for another dataset, When loaded, Then KnowledgeError names expected and actual datasets."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "wrong_dataset"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "actual_dataset", limits)
+
+            self.assertIn("wrong_dataset", str(raised.exception))
+            self.assertIn("actual_dataset", str(raised.exception))
+
+    def test_load_knowledge_signature_excludes_database_handles(self):
+        """Given load_knowledge, When its signature is inspected, Then it accepts no database handle parameter."""
+        signature = inspect.signature(self.knowledge_module.load_knowledge)
+        database_handle_names = ("engine", "connection", "conn", "url", "session")
+
+        for parameter_name in signature.parameters:
+            self.assertFalse(
+                any(name in parameter_name.lower() for name in database_handle_names),
+                msg=f"unexpected database handle parameter: {parameter_name}",
+            )
+
+    def test_load_knowledge_accepts_database_name_string_and_limits(self):
+        """Given a valid folder, database-name string and limits, When loaded, Then a Knowledge value is returned."""
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "actual_dataset"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(
+                Path(temp_dir),
+                "actual_dataset",
+                limits,
+            )
+
+            self.assertIsInstance(knowledge, self.knowledge_module.Knowledge)
 
 
 if __name__ == "__main__":

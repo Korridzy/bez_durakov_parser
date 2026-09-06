@@ -1,0 +1,88 @@
+ Container webreport-backend-run-2a7a8f8d29a7 Creating
+ Container webreport-backend-run-2a7a8f8d29a7 Created
+...........EEEEEEEE
+======================================================================
+ERROR: test_load_knowledge_accepts_database_name_string_and_limits (__main__.KnowledgeTypesTests.test_load_knowledge_accepts_database_name_string_and_limits)
+Given a valid folder, database-name string and limits, When loaded, Then a Knowledge value is returned.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 281, in test_load_knowledge_accepts_database_name_string_and_limits
+    knowledge = self.knowledge_module.load_knowledge(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_rejects_dataset_mismatch_with_both_names (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_dataset_mismatch_with_both_names)
+Given a valid manifest for another dataset, When loaded, Then KnowledgeError names expected and actual datasets.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 254, in test_load_knowledge_rejects_dataset_mismatch_with_both_names
+    self.knowledge_module.load_knowledge(Path(temp_dir), "actual_dataset", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_rejects_missing_manifest (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_missing_manifest)
+Given an empty knowledge folder, When it is loaded, Then KnowledgeError names the missing manifest.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 169, in test_load_knowledge_rejects_missing_manifest
+    self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_signature_excludes_database_handles (__main__.KnowledgeTypesTests.test_load_knowledge_signature_excludes_database_handles)
+Given load_knowledge, When its signature is inspected, Then it accepts no database handle parameter.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 261, in test_load_knowledge_signature_excludes_database_handles
+    signature = inspect.signature(self.knowledge_module.load_knowledge)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_treats_differently_cased_manifest_as_missing (__main__.KnowledgeTypesTests.test_load_knowledge_treats_differently_cased_manifest_as_missing)
+Given only Manifest.TOML, When the folder is loaded, Then KnowledgeError reports lowercase manifest.toml missing.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 186, in test_load_knowledge_treats_differently_cased_manifest_as_missing
+    self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_wraps_dataset_pattern_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_dataset_pattern_validation)
+Given an invalid manifest dataset, When the folder is loaded, Then KnowledgeError names the manifest and dataset.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 236, in test_load_knowledge_wraps_dataset_pattern_validation
+    self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_wraps_unknown_manifest_key_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unknown_manifest_key_validation)
+Given a manifest with language, When the folder is loaded, Then KnowledgeError names the manifest and key.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 218, in test_load_knowledge_wraps_unknown_manifest_key_validation
+    self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+======================================================================
+ERROR: test_load_knowledge_wraps_unparseable_toml (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unparseable_toml)
+Given malformed manifest TOML, When the folder is loaded, Then KnowledgeError identifies the parse failure.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 200, in test_load_knowledge_wraps_unparseable_toml
+    self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'load_knowledge'
+
+----------------------------------------------------------------------
+Ran 19 tests in 1.190s
+
+FAILED (errors=8)
+exit=1

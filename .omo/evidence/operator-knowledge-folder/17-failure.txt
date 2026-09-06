@@ -1,0 +1,2 @@
+261:        signature = inspect.signature(self.knowledge_module.load_knowledge)
+exit=0
