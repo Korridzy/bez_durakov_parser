@@ -1,0 +1,5 @@
+command: cd webreport && docker compose run --rm --no-deps backend python /app/_probe_20.py
+ Container webreport-backend-run-97d44e59204f Creating
+ Container webreport-backend-run-97d44e59204f Created
+['a-', 'a']
+exit=0

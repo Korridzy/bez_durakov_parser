@@ -1,0 +1,9 @@
+command: cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_knowledge.py
+ Container webreport-backend-run-292033236081 Creating
+ Container webreport-backend-run-292033236081 Created
+..........................
+----------------------------------------------------------------------
+Ran 26 tests in 1.190s
+
+OK
+exit=0

@@ -12,6 +12,7 @@ able to win that race already has deployment write access, so this is a
 deliberate scope boundary rather than a missed case.
 """
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,4 +153,39 @@ def load_knowledge(
             path=manifest_path,
         )
 
-    return Knowledge(manifest=manifest, topics=())
+    topics: list[KnowledgeTopic] = []
+    for entry in sorted(folder.iterdir(), key=lambda candidate: candidate.name.encode("utf-8")):
+        if entry.name == "manifest.toml":
+            continue
+        if entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            raise KnowledgeError(
+                f"Knowledge folder contains a subdirectory: {entry}",
+                path=entry,
+            )
+        if not entry.name.endswith(".md"):
+            continue
+
+        raw_bytes = _safe_read_bytes(folder, entry.name)
+        topic_id = entry.stem
+        if re.fullmatch(r"[a-z0-9_-]{1,40}", topic_id) is None:
+            raise KnowledgeError(
+                f"Topic filename stem is invalid: {entry.name}",
+                path=entry,
+            )
+
+        text = raw_bytes.decode("utf-8")
+        non_blank_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        title = non_blank_lines[0].lstrip("#").strip() if non_blank_lines else ""
+        summary = " ".join(non_blank_lines[1:])
+        topics.append(KnowledgeTopic(id=topic_id, title=title, summary=summary, text=text))
+
+    topic_count = len(topics)
+    if topic_count == 0 or topic_count > limits.max_topics:
+        raise KnowledgeError(
+            f"Knowledge folder {folder} has {topic_count} topic documents; must be between 1 and {limits.max_topics}",
+            path=folder,
+        )
+
+    return Knowledge(manifest=manifest, topics=tuple(topics))

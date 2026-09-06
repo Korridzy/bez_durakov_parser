@@ -299,6 +299,7 @@ class KnowledgeTypesTests(unittest.TestCase):
                 'dataset = "actual_dataset"\npersona = "Some text."\n',
                 encoding="utf-8",
             )
+            (Path(temp_dir) / "rules.md").write_text("# Rules\n\nSome text.\n", encoding="utf-8")
 
             knowledge = self.knowledge_module.load_knowledge(
                 Path(temp_dir),
