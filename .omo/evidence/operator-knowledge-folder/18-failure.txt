@@ -1,0 +1,6 @@
+command: docker compose run --rm --no-deps backend python /app/_probe_18.py
+workdir: /home/homo/git/bez_durakov/parser/webreport
+ Container webreport-backend-run-d1f1427cefab Creating
+ Container webreport-backend-run-d1f1427cefab Created
+dataset 'library' does not match configured database 'bez_durakov'
+exit=0

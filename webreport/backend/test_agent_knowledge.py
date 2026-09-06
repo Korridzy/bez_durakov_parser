@@ -187,6 +187,28 @@ class KnowledgeTypesTests(unittest.TestCase):
 
             self._assert_manifest_path(raised.exception, manifest_path)
 
+    def test_load_knowledge_rejects_manifest_symlink_outside_folder(self):
+        """Given manifest.toml escapes through a symlink, When loaded, Then KnowledgeError names the manifest."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            tempfile.TemporaryDirectory() as outside_dir,
+        ):
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            outside_manifest_path = Path(outside_dir) / "manifest.toml"
+            outside_manifest_path.write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            manifest_path.symlink_to(outside_manifest_path)
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(Path(temp_dir), "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+
     def test_load_knowledge_wraps_unparseable_toml(self):
         """Given malformed manifest TOML, When the folder is loaded, Then KnowledgeError identifies the parse failure."""
         knowledge_error = self.knowledge_module.KnowledgeError

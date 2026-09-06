@@ -1,0 +1,50 @@
+command: docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_knowledge.py -v
+workdir: /home/homo/git/bez_durakov/parser/webreport
+ Container webreport-backend-run-2c62df4e96a0 Creating
+ Container webreport-backend-run-2c62df4e96a0 Created
+test_knowledge_error_carries_path_and_optional_key_and_rule (__main__.KnowledgeTypesTests.test_knowledge_error_carries_path_and_optional_key_and_rule)
+Given a KnowledgeError raised with path, key and rule, When inspected, Then all three are accessible attributes. ... ok
+test_knowledge_error_is_a_plain_exception_subclass (__main__.KnowledgeTypesTests.test_knowledge_error_is_a_plain_exception_subclass)
+Given KnowledgeError, When its MRO is inspected, Then it derives from Exception directly, not ValueError or ToolError. ... ok
+test_knowledge_error_key_and_rule_default_to_none (__main__.KnowledgeTypesTests.test_knowledge_error_key_and_rule_default_to_none)
+Given a KnowledgeError raised with only a path, When inspected, Then key and rule default to None. ... ok
+test_knowledge_exposes_manifest_and_ordered_topics (__main__.KnowledgeTypesTests.test_knowledge_exposes_manifest_and_ordered_topics)
+Given a Knowledge instance, When constructed with a manifest and topics, Then both are accessible and topics preserve order. ... ok
+test_knowledge_limits_holds_six_integer_fields (__main__.KnowledgeTypesTests.test_knowledge_limits_holds_six_integer_fields)
+Given KnowledgeLimits, When constructed with six values, Then all six are accessible as the given integers. ... ok
+test_knowledge_manifest_accepts_only_dataset_and_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_accepts_only_dataset_and_persona)
+Given dataset and persona, When a KnowledgeManifest is constructed, Then both fields are accepted exactly. ... ok
+test_knowledge_manifest_rejects_dataset_outside_pinned_pattern (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_dataset_outside_pinned_pattern)
+Given dataset must match ^[a-z0-9_-]{1,64}$, When it contains uppercase letters, Then the error names dataset. ... ok
+test_knowledge_manifest_rejects_empty_persona_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_empty_persona_and_names_persona)
+Given an empty persona, When a KnowledgeManifest is constructed, Then the error names persona. ... ok
+test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona)
+Given max_persona_chars is supplied in validation context, When persona exceeds it, Then the error names persona. ... ok
+test_knowledge_manifest_rejects_unknown_key_and_names_language (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_unknown_key_and_names_language)
+Given extra="forbid", When language is supplied to a KnowledgeManifest, Then the error names language. ... ok
+test_knowledge_topic_exposes_id_title_summary_text (__main__.KnowledgeTypesTests.test_knowledge_topic_exposes_id_title_summary_text)
+Given a KnowledgeTopic, When constructed, Then id, title, summary and text are all accessible. ... ok
+test_load_knowledge_accepts_database_name_string_and_limits (__main__.KnowledgeTypesTests.test_load_knowledge_accepts_database_name_string_and_limits)
+Given a valid folder, database-name string and limits, When loaded, Then a Knowledge value is returned. ... ok
+test_load_knowledge_rejects_dataset_mismatch_with_both_names (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_dataset_mismatch_with_both_names)
+Given a valid manifest for another dataset, When loaded, Then KnowledgeError names expected and actual datasets. ... ok
+test_load_knowledge_rejects_manifest_symlink_outside_folder (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_manifest_symlink_outside_folder)
+Given manifest.toml escapes through a symlink, When loaded, Then KnowledgeError names the manifest. ... ok
+test_load_knowledge_rejects_missing_manifest (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_missing_manifest)
+Given an empty knowledge folder, When it is loaded, Then KnowledgeError names the missing manifest. ... ok
+test_load_knowledge_signature_excludes_database_handles (__main__.KnowledgeTypesTests.test_load_knowledge_signature_excludes_database_handles)
+Given load_knowledge, When its signature is inspected, Then it accepts no database handle parameter. ... ok
+test_load_knowledge_treats_differently_cased_manifest_as_missing (__main__.KnowledgeTypesTests.test_load_knowledge_treats_differently_cased_manifest_as_missing)
+Given only Manifest.TOML, When the folder is loaded, Then KnowledgeError reports lowercase manifest.toml missing. ... ok
+test_load_knowledge_wraps_dataset_pattern_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_dataset_pattern_validation)
+Given an invalid manifest dataset, When the folder is loaded, Then KnowledgeError names the manifest and dataset. ... ok
+test_load_knowledge_wraps_unknown_manifest_key_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unknown_manifest_key_validation)
+Given a manifest with language, When the folder is loaded, Then KnowledgeError names the manifest and key. ... ok
+test_load_knowledge_wraps_unparseable_toml (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unparseable_toml)
+Given malformed manifest TOML, When the folder is loaded, Then KnowledgeError identifies the parse failure. ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 1.263s
+
+OK
+exit=0
