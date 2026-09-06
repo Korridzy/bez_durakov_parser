@@ -308,6 +308,140 @@ class KnowledgeTypesTests(unittest.TestCase):
 
             self.assertIsInstance(knowledge, self.knowledge_module.Knowledge)
 
+    def test_load_knowledge_ignores_manifest_non_md_and_dot_prefixed_entries(self):
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "notes.txt").write_text("Arbitrary notes.\n", encoding="utf-8")
+            (folder_path / ".hidden.md").write_text(
+                "# Hidden\n\nSome hidden paragraph text.\n",
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(len(knowledge.topics), 1)
+            self.assertEqual(knowledge.topics[0].id, "rules")
+
+    def test_load_knowledge_rejects_subdirectory_in_folder_root(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+            (folder_path / "subdir").mkdir()
+
+            with self.assertRaises(knowledge_error):
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+    def test_load_knowledge_rejects_zero_topic_documents(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error):
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+    def test_load_knowledge_rejects_topic_count_over_max_topics(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=2,
+            max_doc_bytes=65536,
+            max_bytes_per_turn=131072,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            for filename, title in (
+                ("topic-a.md", "Topic A"),
+                ("topic-b.md", "Topic B"),
+                ("topic-c.md", "Topic C"),
+            ):
+                (folder_path / filename).write_text(
+                    f"# {title}\n\nSome summary paragraph text.\n",
+                    encoding="utf-8",
+                )
+
+            with self.assertRaises(knowledge_error):
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+    def test_load_knowledge_rejects_topic_stem_outside_pattern_and_names_file(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "Rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("Rules.md", str(raised.exception))
+
+    def test_load_knowledge_yields_three_topics_in_expected_order_with_expected_ids(self):
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            for filename, title in (
+                ("glossary.md", "Glossary"),
+                ("rules.md", "Rules"),
+                ("scoring.md", "Scoring"),
+            ):
+                (folder_path / filename).write_text(
+                    f"# {title}\n\nSome summary paragraph text.\n",
+                    encoding="utf-8",
+                )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(len(knowledge.topics), 3)
+            self.assertEqual(
+                tuple(topic.id for topic in knowledge.topics),
+                ("glossary", "rules", "scoring"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

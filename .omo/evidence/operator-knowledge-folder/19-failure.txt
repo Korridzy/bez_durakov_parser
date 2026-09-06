@@ -1,0 +1,5 @@
+Command: grep -n "mkdir\|is_dir\|subdir" webreport/backend/test_agent_knowledge.py
+
+335:    def test_load_knowledge_rejects_subdirectory_in_folder_root(self):
+349:            (folder_path / "subdir").mkdir()
+exit=0
