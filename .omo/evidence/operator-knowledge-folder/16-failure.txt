@@ -1,0 +1,12 @@
+ Container webreport-backend-run-116bd71945b3 Creating
+ Container webreport-backend-run-116bd71945b3 Created
+REJECTED ValidationError 1 validation error for KnowledgeManifest
+dataset
+  String should match pattern '^[a-z0-9_-]{1,64}$' [type=string_pattern
+REJECTED ValidationError 1 validation error for KnowledgeManifest
+persona
+  String should have at least 1 character [type=string_too_short, input
+REJECTED ValidationError 1 validation error for KnowledgeManifest
+language
+  Extra inputs are not permitted [type=extra_forbidden, input_value='r
+exit=0

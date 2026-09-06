@@ -8,6 +8,8 @@ DB coupling here).
 
 from dataclasses import dataclass
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+
 
 class KnowledgeError(Exception):
     """Raised when a knowledge folder, manifest, or document fails validation."""
@@ -41,3 +43,18 @@ class KnowledgeTopic:
 class Knowledge:
     manifest: object
     topics: tuple[KnowledgeTopic, ...]
+
+
+class KnowledgeManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: str = Field(pattern=r"^[a-z0-9_-]{1,64}$")
+    persona: str = Field(min_length=1)
+
+    @field_validator("persona")
+    @classmethod
+    def validate_persona_length(cls, value: str, info: ValidationInfo) -> str:
+        max_persona_chars = (info.context or {}).get("max_persona_chars")
+        if max_persona_chars is not None and len(value) > max_persona_chars:
+            raise ValueError("persona exceeds max_persona_chars")
+        return value
