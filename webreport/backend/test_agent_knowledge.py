@@ -443,6 +443,285 @@ class KnowledgeTypesTests(unittest.TestCase):
                 ("glossary", "rules", "scoring"),
             )
 
+    def test_load_knowledge_rejects_document_without_heading_and_names_file(self):
+        """Given a document without a heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "Plain prose without a heading.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_title_over_max_chars_and_names_file(self):
+        """Given a title over the configured limit, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                f"# {'T' * (limits.max_title_chars + 1)}\n\nA summary.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_heading_without_paragraph_and_names_file(self):
+        """Given a heading with no following paragraph, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text("# Rules\n\n", encoding="utf-8")
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_summary_over_max_chars_and_names_file(self):
+        """Given a summary over the configured limit, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                f"# Rules\n\n{'S' * (limits.max_summary_chars + 1)}\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_bullet_block_after_heading_and_names_file(self):
+        """Given a bullet block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n- First item\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_ordered_list_block_after_heading_and_names_file(self):
+        """Given an ordered-list block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n1. First item\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_fence_block_after_heading_and_names_file(self):
+        """Given a fenced block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            # Tilde fences are the equivalent form in this C3 marker category.
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n```\ncode\n```\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_heading_block_after_heading_and_names_file(self):
+        """Given another heading block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n## Details\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_quote_block_after_heading_and_names_file(self):
+        """Given a quote block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n> Quoted text\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_table_block_after_heading_and_names_file(self):
+        """Given a table block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n| Name | Score |\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_html_block_after_heading_and_names_file(self):
+        """Given an HTML block after the heading, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\n<div>HTML text</div>\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_derives_complete_title_and_multiline_summary(self):
+        """Given a valid document, When loaded, Then id, title and joined summary are exact and untruncated."""
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "scoring-rules.md").write_text(
+                "Operator preface.\n\n# Complete scoring rules\n\n"
+                "Every word in this summary remains\n"
+                "and its second line joins with one space.\n",
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(knowledge.topics[0].id, "scoring-rules")
+            self.assertEqual(knowledge.topics[0].title, "Complete scoring rules")
+            self.assertEqual(
+                knowledge.topics[0].summary,
+                "Every word in this summary remains and its second line joins with one space.",
+            )
+
+    def test_load_knowledge_strips_only_leading_heading_hashes_and_preserves_markdown(self):
+        """Given a decorated heading and summary, When loaded, Then trailing hashes and inline Markdown remain verbatim."""
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "scoring.md").write_text(
+                "Operator preface.\n\n## Scoring rules ##\n\n"
+                "Keep *emphasis* and `code` verbatim.\n",
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(knowledge.topics[0].title, "Scoring rules ##")
+            self.assertEqual(
+                knowledge.topics[0].summary,
+                "Keep *emphasis* and `code` verbatim.",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
