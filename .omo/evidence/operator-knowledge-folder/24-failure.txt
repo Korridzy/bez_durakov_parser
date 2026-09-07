@@ -1,0 +1,12 @@
+command=cd webreport && docker compose run --rm --no-deps backend python /app/_probe_24.py
+
+ Container webreport-backend-run-c8b489c894f4 Creating
+ Container webreport-backend-run-c8b489c894f4 Created
+fixture_bytes=15
+over_limit_by=10
+contains_0xff=True
+message=Knowledge document exceeds 5 bytes: /tmp/tmpweb_p2x2/rules.md
+names_file=True
+references_size_rule=True
+mentions_decode=False
+exit=0

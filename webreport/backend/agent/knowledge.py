@@ -255,6 +255,11 @@ def load_knowledge(
             continue
 
         raw_bytes = _safe_read_bytes(folder, entry.name)
+        if len(raw_bytes) > limits.max_doc_bytes:
+            raise KnowledgeError(
+                f"Knowledge document exceeds {limits.max_doc_bytes} bytes: {entry}",
+                path=entry,
+            )
         topic_id = entry.stem
         if re.fullmatch(r"[a-z0-9_-]{1,40}", topic_id) is None:
             raise KnowledgeError(
@@ -262,7 +267,13 @@ def load_knowledge(
                 path=entry,
             )
 
-        text = raw_bytes.decode("utf-8")
+        try:
+            text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise KnowledgeError(
+                f"Knowledge document is not UTF-8: {entry}: {error}",
+                path=entry,
+            ) from error
         title, summary = _derive_title_and_summary(text, entry, limits)
         topics.append(KnowledgeTopic(id=topic_id, title=title, summary=summary, text=text))
 
