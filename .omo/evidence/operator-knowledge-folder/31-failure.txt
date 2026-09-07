@@ -1,0 +1,16 @@
+The plan's literal count command:
+DOCKER_TEST_V test_agent.py 2>&1 | grep -c "^test_.*(.*Knowledge"
+expanded: cd webreport && docker compose run --rm --no-deps backend python /app/test_agent.py -v 2>&1 | grep -c "^test_.*(.*Knowledge"
+raw aggregator count: 64
+
+Independent source count:
+grep -c "def test_" webreport/backend/test_agent_knowledge.py
+source method count: 52
+
+The literal plan regex is broader than the requested TestKnowledge suite: it also matches the 12 pre-existing TestKnowledgeConfig tests. Therefore the literal comparison is 64 != 52 and cannot prove the requested suite by itself.
+
+Exact TestKnowledge count used to disambiguate the pre-existing config family:
+cd webreport && docker compose run --rm --no-deps backend python /app/test_agent.py -v 2>&1 | grep -c "^test_.*(__main__\\.TestKnowledge\\."
+registered TestKnowledge count: 52
+source method count: 52
+equality check: PASS (52 == 52)

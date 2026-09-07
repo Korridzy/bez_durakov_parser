@@ -27,6 +27,7 @@ tools_metadata = importlib.import_module("test_agent_tools_metadata")
 graph_cases = importlib.import_module("test_agent_graph")
 report_agent_cases = importlib.import_module("test_agent_report_agent")
 checkpointer_cases = importlib.import_module("test_agent_checkpointer")
+knowledge_cases = importlib.import_module("test_agent_knowledge")
 knowledge_config_cases = importlib.import_module("test_agent_config")
 net_guard = importlib.import_module("test_net_guard")
 
@@ -153,6 +154,10 @@ class TestGraph(graph_cases.GraphTests):
 
 
 class TestKnowledgeConfig(knowledge_config_cases.KnowledgeConfigTests):
+    pass
+
+
+class TestKnowledge(knowledge_cases.KnowledgeTypesTests):
     pass
 
 
