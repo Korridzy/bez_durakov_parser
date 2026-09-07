@@ -1,0 +1,13 @@
+command=cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+ Container webreport-backend-run-7964a29ab075 Creating
+ Container webreport-backend-run-7964a29ab075 Created
+.................................................
+----------------------------------------------------------------------
+Ran 49 tests in 1.367s
+
+OK
+exit=0
+
+command=poetry run ruff check webreport/backend/agent/knowledge.py
+All checks passed!
+exit=0

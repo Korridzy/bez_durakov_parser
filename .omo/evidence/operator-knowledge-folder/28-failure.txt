@@ -1,0 +1,8 @@
+command=git diff --stat HEAD~1
+ .../operator-knowledge-folder/27-failure.txt       |  14 +++
+ .../operator-knowledge-folder/27-happy.txt         | 100 +++++++++++++++++++++
+ webreport/backend/test_agent_knowledge.py          |  51 +++++++++++
+ 3 files changed, 165 insertions(+)
+exit=0
+
+No-op: todo 27 passed on arrival; no coupling was found in agent/knowledge.py; no production code was changed for this todo.
