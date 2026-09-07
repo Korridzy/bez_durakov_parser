@@ -285,3 +285,32 @@ def load_knowledge(
         )
 
     return Knowledge(manifest=manifest, topics=tuple(topics))
+
+
+def compose_system_prompt(knowledge: Knowledge | None) -> str:
+    rules = (
+        "Get data ONLY through the tools.",
+        "The tools return a summary, not the rows themselves. If you need rows, call read_rows.",
+        "Row budgets are bounded per call and per request. When a budget is exhausted, answer with what you have.",
+        "Once you have received data, call mark_report(handle).",
+        "If there is nothing, say so plainly and do not mark a report.",
+        "Do not invent numbers or names.",
+    )
+
+    if knowledge is None:
+        persona = "You are a data analyst for the connected database. Answer in the language of the user's question."
+        return f"{persona}\n\n" + "\n".join(f"- {rule}" for rule in rules)
+
+    persona = knowledge.manifest.persona
+    rules += (
+        "Before answering a question covered by a listed topic, call read_knowledge with that topic id.",
+    )
+    topic_lines = "\n".join(
+        f"{topic.id}: {topic.title}{'' if topic.title.endswith(('.', '!', '?', '…', ':')) else '.'} {topic.summary}"
+        for topic in knowledge.topics
+    )
+    return (
+        f"{persona}\n\n"
+        + "\n".join(f"- {rule}" for rule in rules)
+        + f"\n\n## Knowledge topics\n\n{topic_lines}"
+    )

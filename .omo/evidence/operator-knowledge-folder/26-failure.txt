@@ -1,0 +1,8 @@
+command=cd webreport && docker compose run --rm --no-deps backend python /app/_probe_26.py
+ Container webreport-backend-run-3e5396e3b6ad Creating
+ Container webreport-backend-run-3e5396e3b6ad Created
+"You are a data analyst for the connected database. Answer in the language of the user's question.\n\n- Get data ONLY through the tools.\n- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n- Row budgets are bounded per call and per request. When a budget is exhausted, answer with what you have.\n- Once you have received data, call mark_report(handle).\n- If there is nothing, say so plainly and do not mark a report.\n- Do not invent numbers or names."
+HAS256 False
+HASGAME False
+HASRETRIEVAL False
+exit=0

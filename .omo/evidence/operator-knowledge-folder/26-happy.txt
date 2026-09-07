@@ -1,0 +1,9 @@
+command=cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+ Container webreport-backend-run-3c507c655487 Creating
+ Container webreport-backend-run-3c507c655487 Created
+................................................
+----------------------------------------------------------------------
+Ran 48 tests in 1.392s
+
+OK
+exit=0
