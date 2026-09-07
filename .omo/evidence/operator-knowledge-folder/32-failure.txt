@@ -1,0 +1,9 @@
+command: grep -n "bd_shared.config\|KNOWLEDGE_MAX" webreport/backend/test_agent_knowledge.py
+exit=0
+
+463:        bd_shared_config = importlib.import_module("bd_shared.config")
+465:            max_title_chars=bd_shared_config.KNOWLEDGE_MAX_TITLE_CHARS,
+466:            max_summary_chars=bd_shared_config.KNOWLEDGE_MAX_SUMMARY_CHARS,
+467:            max_persona_chars=bd_shared_config.KNOWLEDGE_MAX_PERSONA_CHARS,
+468:            max_topics=bd_shared_config.KNOWLEDGE_MAX_TOPICS,
+469:            max_doc_bytes=bd_shared_config.KNOWLEDGE_MAX_DOC_BYTES,

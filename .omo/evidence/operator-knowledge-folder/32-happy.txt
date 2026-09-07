@@ -1,0 +1,21 @@
+command: cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+exit=1
+
+ Container webreport-backend-run-c50bb5027e6d Creating
+ Container webreport-backend-run-c50bb5027e6d Created
+....................................................E
+======================================================================
+ERROR: test_shipped_knowledge_skeleton_loads_under_strict_default_limits (__main__.KnowledgeTypesTests.test_shipped_knowledge_skeleton_loads_under_strict_default_limits)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 473, in test_shipped_knowledge_skeleton_loads_under_strict_default_limits
+    knowledge = self.knowledge_module.load_knowledge(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/knowledge.py", line 226, in load_knowledge
+    raise KnowledgeError(f"Knowledge folder is not a directory: {path}", path=path)
+agent.knowledge.KnowledgeError: Knowledge folder is not a directory: /bd_shared/knowledge/bez_durakov
+
+----------------------------------------------------------------------
+Ran 53 tests in 1.826s
+
+FAILED (errors=1)

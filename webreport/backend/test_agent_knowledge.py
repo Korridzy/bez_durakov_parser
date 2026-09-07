@@ -459,6 +459,32 @@ class KnowledgeTypesTests(unittest.TestCase):
                 ("glossary", "rules", "scoring"),
             )
 
+    def test_shipped_knowledge_skeleton_loads_under_strict_default_limits(self):
+        bd_shared_config = importlib.import_module("bd_shared.config")
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=bd_shared_config.KNOWLEDGE_MAX_TITLE_CHARS,
+            max_summary_chars=bd_shared_config.KNOWLEDGE_MAX_SUMMARY_CHARS,
+            max_persona_chars=bd_shared_config.KNOWLEDGE_MAX_PERSONA_CHARS,
+            max_topics=bd_shared_config.KNOWLEDGE_MAX_TOPICS,
+            max_doc_bytes=bd_shared_config.KNOWLEDGE_MAX_DOC_BYTES,
+            max_bytes_per_turn=131072,
+        )
+
+        knowledge = self.knowledge_module.load_knowledge(
+            Path("/bd_shared/knowledge/bez_durakov"),
+            "bez_durakov",
+            limits,
+        )
+
+        self.assertIsInstance(knowledge, self.knowledge_module.Knowledge)
+        self.assertEqual(len(knowledge.topics), 3)
+        self.assertEqual(
+            tuple(topic.id for topic in knowledge.topics),
+            ("glossary", "rules", "scoring"),
+        )
+        self.assertEqual(knowledge.manifest.dataset, "bez_durakov")
+        self.assertGreater(len(knowledge.manifest.persona), 0)
+
     def test_load_knowledge_rejects_document_without_heading_and_names_file(self):
         """Given a document without a heading, When loaded, Then KnowledgeError names the file."""
         knowledge_error = self.knowledge_module.KnowledgeError
