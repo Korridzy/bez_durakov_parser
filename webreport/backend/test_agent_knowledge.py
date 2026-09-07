@@ -5,8 +5,24 @@ import inspect
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Final
 
 from pydantic import ValidationError
+
+
+GAME_DOMAIN_FORBIDDEN_STRINGS: Final[tuple[str, ...]] = (
+    "дурак",
+    "Без дураков",
+    "команд",
+    "вybor",
+    "выбор",
+    "числа",
+    "преферанс",
+    "пары",
+    "разоблачение",
+    "аукцион",
+    "момент истины",
+)
 
 
 class KnowledgeTypesTests(unittest.TestCase):
@@ -952,6 +968,41 @@ class KnowledgeTypesTests(unittest.TestCase):
 
         self.assertNotIn("256", prompt)
         self.assertNotIn("1024", prompt)
+
+    def test_compose_system_prompt_is_database_agnostic_for_library_catalogue(self):
+        limits = self._knowledge_limits()
+        persona = "You are a data analyst for a public library catalogue."
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                f'dataset = "library"\npersona = "{persona}"\n',
+                encoding="utf-8",
+            )
+            (folder_path / "catalogue.md").write_text(
+                "# Catalogue\n\nBook records include titles, authors, subjects, and shelf locations.\n",
+                encoding="utf-8",
+            )
+            (folder_path / "lending.md").write_text(
+                "# Lending\n\nLoan records track checkout dates, due dates, and borrower activity.\n",
+                encoding="utf-8",
+            )
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "library", limits)
+
+            prompt = self.knowledge_module.compose_system_prompt(knowledge)
+            prompt_lower = prompt.lower()
+
+            self.assertIn(persona, prompt)
+            self.assertIn(
+                "catalogue: Catalogue. Book records include titles, authors, subjects, and shelf locations.",
+                prompt,
+            )
+            self.assertIn(
+                "lending: Lending. Loan records track checkout dates, due dates, and borrower activity.",
+                prompt,
+            )
+            for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS:
+                self.assertNotIn(forbidden_string.lower(), prompt_lower)
 
 
 if __name__ == "__main__":

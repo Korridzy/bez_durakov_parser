@@ -1,0 +1,14 @@
+command=cd webreport && docker compose run --rm --no-deps backend python -c '<inline tempfile library and Russian-fixture probe>'
+ Container webreport-backend-run-c335074b5dd6 Creating
+ Container webreport-backend-run-c335074b5dd6 Created
+LIBRARY forbidden-string assertion: PASS
+RUSSIAN forbidden-string assertion: invoking (expected FAIL)
+Traceback (most recent call last):
+  File "<string>", line 55, in <module>
+  File "<string>", line 22, in assert_no_game_domain
+  File "/usr/local/lib/python3.11/unittest/case.py", line 1147, in assertNotIn
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/usr/local/lib/python3.11/unittest/case.py", line 703, in fail
+    raise self.failureException(msg)
+AssertionError: 'дурак' unexpectedly found in 'ты — аналитик данных игр «без дураков».\n\n- get data only through the tools.\n- the tools return a summary, not the rows themselves. if you need rows, call read_rows.\n- row budgets are bounded per call and per request. when a budget is exhausted, answer with what you have.\n- once you have received data, call mark_report(handle).\n- if there is nothing, say so plainly and do not mark a report.\n- do not invent numbers or names.\n- before answering a question covered by a listed topic, call read_knowledge with that topic id.\n\n## knowledge topics\n\nreference: reference. general reference notes.'
+exit=1 (expected)
