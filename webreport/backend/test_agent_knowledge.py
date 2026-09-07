@@ -722,6 +722,106 @@ class KnowledgeTypesTests(unittest.TestCase):
                 "Keep *emphasis* and `code` verbatim.",
             )
 
+    def test_load_knowledge_rejects_document_over_max_doc_bytes_and_names_file(self):
+        """Given a document exceeding max_doc_bytes, When loaded, Then KnowledgeError names the file."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=50,
+            max_doc_bytes=10,
+            max_bytes_per_turn=131072,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            oversize_path = folder_path / "rules.md"
+            oversize_path.write_bytes(b"# Rules\n\nThis document body is deliberately longer than ten bytes.\n")
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_rejects_document_with_invalid_utf8_and_names_file(self):
+        """Given a document with invalid UTF-8 bytes, When loaded, Then KnowledgeError names the file, not a raw UnicodeDecodeError."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            bad_utf8_path = folder_path / "rules.md"
+            bad_utf8_path.write_bytes(b"# Rules\n\n\xff\xfe invalid bytes here.\n")
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("rules.md", str(raised.exception))
+
+    def test_load_knowledge_reports_size_rule_before_decode_when_both_apply(self):
+        """Given a document that is both oversize and invalid UTF-8, When loaded, Then the error reports the size rule, not a decode failure - proving size is checked first (decision C6)."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=50,
+            max_doc_bytes=5,
+            max_bytes_per_turn=131072,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            bad_path = folder_path / "rules.md"
+            bad_path.write_bytes(b"\xff\xfe more than five bytes of invalid utf-8")
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            message = str(raised.exception)
+            self.assertIn("rules.md", message)
+            self.assertNotIn("codec", message.lower())
+            self.assertNotIn("decode", message.lower())
+
+    def test_load_knowledge_orders_topics_by_full_filename_byte_order_not_stem(self):
+        """Given a-.md and a.md, When loaded, Then topics are ordered by full filename UTF-8 bytes, so 'a-' sorts before 'a' (decision C5)."""
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "a-.md").write_text(
+                "# A Dash\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+            (folder_path / "a.md").write_text(
+                "# A Plain\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(
+                tuple(topic.id for topic in knowledge.topics),
+                ("a-", "a"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
