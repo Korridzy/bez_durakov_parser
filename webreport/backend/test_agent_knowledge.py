@@ -822,6 +822,137 @@ class KnowledgeTypesTests(unittest.TestCase):
                 ("a-", "a"),
             )
 
+    def test_compose_system_prompt_without_knowledge_is_byte_exact(self):
+        """Given no knowledge, When the prompt is composed, Then it is exactly the neutral persona and six rules."""
+        expected_prompt = (
+            "You are a data analyst for the connected database. Answer in the language of the user's question.\n\n"
+            "- Get data ONLY through the tools.\n"
+            "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
+            "- Row budgets are bounded per call and per request. "
+            "When a budget is exhausted, answer with what you have.\n"
+            "- Once you have received data, call mark_report(handle).\n"
+            "- If there is nothing, say so plainly and do not mark a report.\n"
+            "- Do not invent numbers or names."
+        )
+
+        prompt = self.knowledge_module.compose_system_prompt(None)
+
+        self.assertEqual(prompt, expected_prompt)
+        self.assertNotIn(
+            "Before answering a question covered by a listed topic, call read_knowledge with that topic id.",
+            prompt,
+        )
+        self.assertNotIn("## Knowledge topics", prompt)
+
+    def test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge(self):
+        """Given loaded knowledge and no knowledge, When prompts are composed, Then only the loaded branch has D7."""
+        limits = self._knowledge_limits()
+        retrieval_rule = (
+            "Before answering a question covered by a listed topic, call read_knowledge with that topic id."
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            knowledge_prompt = self.knowledge_module.compose_system_prompt(knowledge)
+            neutral_prompt = self.knowledge_module.compose_system_prompt(None)
+
+            self.assertIn(retrieval_rule, knowledge_prompt)
+            self.assertLess(
+                knowledge_prompt.index(retrieval_rule),
+                knowledge_prompt.index("## Knowledge topics"),
+            )
+            self.assertNotIn(retrieval_rule, neutral_prompt)
+
+    def test_compose_system_prompt_with_knowledge_has_full_ordered_structure(self):
+        """Given three loaded topics, When composed, Then persona, seven rules, heading and ordered topics are exact."""
+        limits = self._knowledge_limits()
+        persona = "Some text."
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                f'dataset = "some_db"\npersona = "{persona}"\n',
+                encoding="utf-8",
+            )
+            for filename, title in (
+                ("glossary.md", "Glossary"),
+                ("rules.md", "Rules"),
+                ("scoring.md", "Scoring"),
+            ):
+                (folder_path / filename).write_text(
+                    f"# {title}\n\nSome summary paragraph text.\n",
+                    encoding="utf-8",
+                )
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+            expected_prompt = (
+                "Some text.\n\n"
+                "- Get data ONLY through the tools.\n"
+                "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
+                "- Row budgets are bounded per call and per request. "
+                "When a budget is exhausted, answer with what you have.\n"
+                "- Once you have received data, call mark_report(handle).\n"
+                "- If there is nothing, say so plainly and do not mark a report.\n"
+                "- Do not invent numbers or names.\n"
+                "- Before answering a question covered by a listed topic, "
+                "call read_knowledge with that topic id.\n\n"
+                "## Knowledge topics\n\n"
+                "glossary: Glossary. Some summary paragraph text.\n"
+                "rules: Rules. Some summary paragraph text.\n"
+                "scoring: Scoring. Some summary paragraph text."
+            )
+
+            prompt = self.knowledge_module.compose_system_prompt(knowledge)
+
+            self.assertEqual(prompt, expected_prompt)
+            self.assertIn(persona, prompt)
+            self.assertEqual(
+                tuple(topic.id for topic in knowledge.topics),
+                ("glossary", "rules", "scoring"),
+            )
+
+    def test_compose_system_prompt_suppresses_separator_after_terminal_punctuation(self):
+        """Given punctuated and plain titles, When composed, Then only the plain title receives a separator period."""
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "question.md").write_text(
+                "## Что такое счёт?\n\nRussian score summary.\n",
+                encoding="utf-8",
+            )
+            (folder_path / "scoring.md").write_text(
+                "# Scoring\n\nEnglish scoring summary.\n",
+                encoding="utf-8",
+            )
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            prompt = self.knowledge_module.compose_system_prompt(knowledge)
+
+            self.assertIn("question: Что такое счёт? Russian score summary.", prompt)
+            self.assertNotIn("Что такое счёт?.", prompt)
+            self.assertIn("scoring: Scoring. English scoring summary.", prompt)
+
+    def test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets(self):
+        """Given no knowledge, When the prompt is composed, Then removed literal budget figures stay absent."""
+        prompt = self.knowledge_module.compose_system_prompt(None)
+
+        self.assertNotIn("256", prompt)
+        self.assertNotIn("1024", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

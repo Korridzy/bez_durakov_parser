@@ -1,0 +1,6 @@
+Command: grep -n "256\|1024" webreport/backend/test_agent_knowledge.py
+
+953:        self.assertNotIn("256", prompt)
+954:        self.assertNotIn("1024", prompt)
+
+Confirmed: every hit is inside an assertNotIn negative assertion proving the composed prompt lacks the forbidden literal number.

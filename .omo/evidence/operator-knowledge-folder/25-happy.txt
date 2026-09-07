@@ -1,0 +1,60 @@
+Command: cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+Exit status: 1 (expected red state)
+
+ Container webreport-backend-run-568e3d15f5da Creating
+ Container webreport-backend-run-568e3d15f5da Created
+EEEEE...........................................
+======================================================================
+ERROR: test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge (__main__.KnowledgeTypesTests.test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge)
+Given loaded knowledge and no knowledge, When prompts are composed, Then only the loaded branch has D7.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 866, in test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge
+    knowledge_prompt = self.knowledge_module.compose_system_prompt(knowledge)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'compose_system_prompt'
+
+======================================================================
+ERROR: test_compose_system_prompt_suppresses_separator_after_terminal_punctuation (__main__.KnowledgeTypesTests.test_compose_system_prompt_suppresses_separator_after_terminal_punctuation)
+Given punctuated and plain titles, When composed, Then only the plain title receives a separator period.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 943, in test_compose_system_prompt_suppresses_separator_after_terminal_punctuation
+    prompt = self.knowledge_module.compose_system_prompt(knowledge)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'compose_system_prompt'
+
+======================================================================
+ERROR: test_compose_system_prompt_with_knowledge_has_full_ordered_structure (__main__.KnowledgeTypesTests.test_compose_system_prompt_with_knowledge_has_full_ordered_structure)
+Given three loaded topics, When composed, Then persona, seven rules, heading and ordered topics are exact.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 914, in test_compose_system_prompt_with_knowledge_has_full_ordered_structure
+    prompt = self.knowledge_module.compose_system_prompt(knowledge)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'compose_system_prompt'
+
+======================================================================
+ERROR: test_compose_system_prompt_without_knowledge_is_byte_exact (__main__.KnowledgeTypesTests.test_compose_system_prompt_without_knowledge_is_byte_exact)
+Given no knowledge, When the prompt is composed, Then it is exactly the neutral persona and six rules.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 838, in test_compose_system_prompt_without_knowledge_is_byte_exact
+    prompt = self.knowledge_module.compose_system_prompt(None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'compose_system_prompt'
+
+======================================================================
+ERROR: test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets (__main__.KnowledgeTypesTests.test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets)
+Given no knowledge, When the prompt is composed, Then removed literal budget figures stay absent.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 951, in test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets
+    prompt = self.knowledge_module.compose_system_prompt(None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'agent.knowledge' has no attribute 'compose_system_prompt'
+
+----------------------------------------------------------------------
+Ran 48 tests in 1.301s
+
+FAILED (errors=5)
