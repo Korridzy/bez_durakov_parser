@@ -1,0 +1,3 @@
+.omo/evidence/operator-knowledge-folder/30-failure.txt
+.omo/evidence/operator-knowledge-folder/30-happy.txt
+webreport/backend/agent/knowledge.py

@@ -1,0 +1,8 @@
+ Container webreport-backend-run-c354dc6ace35 Creating
+ Container webreport-backend-run-c354dc6ace35 Created
+....................................................
+----------------------------------------------------------------------
+Ran 52 tests in 1.338s
+
+OK
+exit=0

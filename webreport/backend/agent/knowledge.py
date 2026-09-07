@@ -47,6 +47,23 @@ class KnowledgeLimits:
     max_bytes_per_turn: int
 
 
+def validate_limits(limits: KnowledgeLimits) -> None:
+    limit_values = (
+        ("knowledge_max_title_chars", limits.max_title_chars),
+        ("knowledge_max_summary_chars", limits.max_summary_chars),
+        ("knowledge_max_persona_chars", limits.max_persona_chars),
+        ("knowledge_max_topics", limits.max_topics),
+        ("knowledge_max_doc_bytes", limits.max_doc_bytes),
+    )
+    for config_key, value in limit_values:
+        if type(value) is not int or value < 1:
+            raise KnowledgeError(
+                f"Invalid knowledge limit {config_key}: must be an integer greater than or equal to 1",
+                path=None,
+                key=config_key,
+            )
+
+
 @dataclass(frozen=True)
 class KnowledgeTopic:
     id: str
@@ -196,6 +213,7 @@ def load_knowledge(
     limits: KnowledgeLimits,
 ) -> Knowledge:
     """Load and validate the manifest for an operator knowledge folder."""
+    validate_limits(limits)
     try:
         folder = path.resolve()
     except (OSError, RuntimeError) as error:
