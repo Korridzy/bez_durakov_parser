@@ -103,6 +103,93 @@ def _safe_read_bytes(folder: Path, name: str) -> bytes:
         ) from error
 
 
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s+\S")
+_HEADING_STRIP_RE = re.compile(r"^#{1,6}\s+")
+
+_DISQUALIFYING_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bullet list", re.compile(r"^[-*+]\s")),
+    ("ordered list", re.compile(r"^\d+\.")),
+    ("fenced code block", re.compile(r"^(```|~~~)")),
+    ("heading", re.compile(r"^#")),
+    ("blockquote", re.compile(r"^>")),
+    ("table", re.compile(r"^\|")),
+    ("HTML block", re.compile(r"^<")),
+)
+
+
+def _derive_title_and_summary(
+    text: str,
+    entry: Path,
+    limits: KnowledgeLimits,
+) -> tuple[str, str]:
+    """Derive a strict title and summary per decisions C3/C4.
+
+    Title = the first line matching ^#{1,6}\\s+\\S, with only the leading
+    hashes and surrounding whitespace stripped - nothing else (decision C4).
+    Summary = the first non-blank block (consecutive non-blank lines) after
+    that heading, joined by single spaces. If that block's first line opens
+    with one of seven disqualifying markers, this raises instead of treating
+    it as a paragraph (decision C3). Nothing is ever truncated.
+    """
+    lines = text.splitlines()
+
+    heading_index = None
+    for index, line in enumerate(lines):
+        if _HEADING_LINE_RE.match(line):
+            heading_index = index
+            break
+
+    if heading_index is None:
+        raise KnowledgeError(
+            f"Knowledge document has no heading: {entry}",
+            path=entry,
+        )
+
+    title = _HEADING_STRIP_RE.sub("", lines[heading_index], count=1).strip()
+    if len(title) > limits.max_title_chars:
+        raise KnowledgeError(
+            f"Knowledge document title exceeds {limits.max_title_chars} characters: {entry}",
+            path=entry,
+        )
+
+    remaining_lines = lines[heading_index + 1:]
+    block_start = None
+    for index, line in enumerate(remaining_lines):
+        if line.strip():
+            block_start = index
+            break
+
+    if block_start is None:
+        raise KnowledgeError(
+            f"Knowledge document heading has no following paragraph: {entry}",
+            path=entry,
+        )
+
+    block_lines: list[str] = []
+    for line in remaining_lines[block_start:]:
+        if not line.strip():
+            break
+        block_lines.append(line.strip())
+
+    first_block_line = block_lines[0]
+    for marker_name, pattern in _DISQUALIFYING_MARKERS:
+        if pattern.match(first_block_line):
+            raise KnowledgeError(
+                f"Knowledge document paragraph after the heading is a {marker_name}, not plain text: {entry}",
+                path=entry,
+                rule=marker_name,
+            )
+
+    summary = " ".join(block_lines)
+    if len(summary) > limits.max_summary_chars:
+        raise KnowledgeError(
+            f"Knowledge document summary exceeds {limits.max_summary_chars} characters: {entry}",
+            path=entry,
+        )
+
+    return title, summary
+
+
 def load_knowledge(
     path: Path,
     database_name: str,
@@ -176,9 +263,7 @@ def load_knowledge(
             )
 
         text = raw_bytes.decode("utf-8")
-        non_blank_lines = [line.strip() for line in text.splitlines() if line.strip()]
-        title = non_blank_lines[0].lstrip("#").strip() if non_blank_lines else ""
-        summary = " ".join(non_blank_lines[1:])
+        title, summary = _derive_title_and_summary(text, entry, limits)
         topics.append(KnowledgeTopic(id=topic_id, title=title, summary=summary, text=text))
 
     topic_count = len(topics)
