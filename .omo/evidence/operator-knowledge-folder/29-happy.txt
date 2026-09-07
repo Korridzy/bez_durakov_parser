@@ -1,0 +1,97 @@
+command: cd webreport && docker compose run --rm --no-deps backend python test_agent_knowledge.py
+ Container webreport-backend-run-79fe7b62918e Creating
+ Container webreport-backend-run-79fe7b62918e Created
+.....................F.....FFFFFFFFFF.......................
+======================================================================
+FAIL: test_load_knowledge_rejects_boolean_topics_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_boolean_topics_limit_and_names_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1109, in test_load_knowledge_rejects_boolean_topics_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) (config_key='knowledge_max_title_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1045, in test_load_knowledge_rejects_each_below_one_limit_and_names_key
+    self.assertIn(config_key, str(raised.exception))
+AssertionError: 'knowledge_max_title_chars' not found in 'Knowledge document title exceeds 0 characters: /tmp/tmpam5ei2wi/rules.md'
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) (config_key='knowledge_max_summary_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1045, in test_load_knowledge_rejects_each_below_one_limit_and_names_key
+    self.assertIn(config_key, str(raised.exception))
+AssertionError: 'knowledge_max_summary_chars' not found in 'Knowledge document summary exceeds 0 characters: /tmp/tmpam5ei2wi/rules.md'
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) (config_key='knowledge_max_persona_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1045, in test_load_knowledge_rejects_each_below_one_limit_and_names_key
+    self.assertIn(config_key, str(raised.exception))
+AssertionError: 'knowledge_max_persona_chars' not found in "Invalid knowledge manifest /tmp/tmpam5ei2wi/manifest.toml: 1 validation error for KnowledgeManifest\npersona\n  Value error, persona exceeds max_persona_chars [type=value_error, input_value='Some text.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) (config_key='knowledge_max_topics')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1045, in test_load_knowledge_rejects_each_below_one_limit_and_names_key
+    self.assertIn(config_key, str(raised.exception))
+AssertionError: 'knowledge_max_topics' not found in 'Knowledge folder /tmp/tmpam5ei2wi has 1 topic documents; must be between 1 and 0'
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) (config_key='knowledge_max_doc_bytes')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1045, in test_load_knowledge_rejects_each_below_one_limit_and_names_key
+    self.assertIn(config_key, str(raised.exception))
+AssertionError: 'knowledge_max_doc_bytes' not found in 'Knowledge document exceeds 0 bytes: /tmp/tmpam5ei2wi/rules.md'
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) (config_key='knowledge_max_title_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1082, in test_load_knowledge_rejects_each_non_integer_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) (config_key='knowledge_max_summary_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1082, in test_load_knowledge_rejects_each_non_integer_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) (config_key='knowledge_max_persona_chars')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1082, in test_load_knowledge_rejects_each_non_integer_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) (config_key='knowledge_max_topics')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1082, in test_load_knowledge_rejects_each_non_integer_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+======================================================================
+FAIL: test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) (config_key='knowledge_max_doc_bytes')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 1082, in test_load_knowledge_rejects_each_non_integer_limit_and_names_key
+    with self.assertRaises(knowledge_error) as raised:
+AssertionError: KnowledgeError not raised
+
+----------------------------------------------------------------------
+Ran 52 tests in 1.551s
+
+FAILED (failures=11)
+exit=1

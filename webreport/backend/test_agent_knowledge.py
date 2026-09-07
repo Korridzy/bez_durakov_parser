@@ -1004,6 +1004,113 @@ class KnowledgeTypesTests(unittest.TestCase):
             for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS:
                 self.assertNotIn(forbidden_string.lower(), prompt_lower)
 
+    def test_load_knowledge_rejects_each_below_one_limit_and_names_key(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limit_cases = (
+            ("max_title_chars", "knowledge_max_title_chars"),
+            ("max_summary_chars", "knowledge_max_summary_chars"),
+            ("max_persona_chars", "knowledge_max_persona_chars"),
+            ("max_topics", "knowledge_max_topics"),
+            ("max_doc_bytes", "knowledge_max_doc_bytes"),
+        )
+        valid_limit_values = {
+            "max_title_chars": 80,
+            "max_summary_chars": 200,
+            "max_persona_chars": 2000,
+            "max_topics": 50,
+            "max_doc_bytes": 65536,
+            "max_bytes_per_turn": 131072,
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            for field_name, config_key in limit_cases:
+                with self.subTest(config_key=config_key):
+                    limit_values = dict(valid_limit_values)
+                    limit_values[field_name] = 0
+                    limits = self.knowledge_module.KnowledgeLimits(**limit_values)
+
+                    with self.assertRaises(knowledge_error) as raised:
+                        self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+                    self.assertIn(config_key, str(raised.exception))
+
+    def test_load_knowledge_rejects_each_non_integer_limit_and_names_key(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limit_cases = (
+            ("max_title_chars", "knowledge_max_title_chars", 80.5),
+            ("max_summary_chars", "knowledge_max_summary_chars", 200.5),
+            ("max_persona_chars", "knowledge_max_persona_chars", 2000.5),
+            ("max_topics", "knowledge_max_topics", 50.5),
+            ("max_doc_bytes", "knowledge_max_doc_bytes", 65536.5),
+        )
+        valid_limit_values = {
+            "max_title_chars": 80,
+            "max_summary_chars": 200,
+            "max_persona_chars": 2000,
+            "max_topics": 50,
+            "max_doc_bytes": 65536,
+            "max_bytes_per_turn": 131072,
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            for field_name, config_key, invalid_value in limit_cases:
+                with self.subTest(config_key=config_key):
+                    limit_values = dict(valid_limit_values)
+                    limit_values[field_name] = invalid_value
+                    limits = self.knowledge_module.KnowledgeLimits(**limit_values)
+
+                    with self.assertRaises(knowledge_error) as raised:
+                        self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+                    self.assertIn(config_key, str(raised.exception))
+
+    def test_load_knowledge_rejects_boolean_topics_limit_and_names_key(self):
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=True,
+            max_doc_bytes=65536,
+            max_bytes_per_turn=131072,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertIn("knowledge_max_topics", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
