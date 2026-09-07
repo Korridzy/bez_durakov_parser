@@ -1053,7 +1053,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             ("max_topics", "knowledge_max_topics", 50.5),
             ("max_doc_bytes", "knowledge_max_doc_bytes", 65536.5),
         )
-        valid_limit_values = {
+        valid_limit_values: dict[str, int | float] = {
             "max_title_chars": 80,
             "max_summary_chars": 200,
             "max_persona_chars": 2000,
