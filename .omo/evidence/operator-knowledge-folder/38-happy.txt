@@ -1,0 +1,14 @@
+command=cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_checkpointer.py -v
+ Container webreport-backend-run-909cc095162e Creating
+ Container webreport-backend-run-909cc095162e Created
+test_checkpoint_round_trip_preserves_history (__main__.TestCheckpointerCases.test_checkpoint_round_trip_preserves_history) ... ok
+test_delete_thread_on_missing_thread_needs_setup (__main__.TestCheckpointerCases.test_delete_thread_on_missing_thread_needs_setup) ... ok
+test_system_prompt_with_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_with_knowledge_is_byte_exact) ... ok
+test_system_prompt_without_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_without_knowledge_is_byte_exact) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 3.351s
+
+OK
+result=green because compose_system_prompt already matches the byte-exact neutral and knowledge prompt contracts
+exit=0

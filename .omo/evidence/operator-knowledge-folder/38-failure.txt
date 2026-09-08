@@ -1,0 +1,4 @@
+command=grep -n "encode(\"utf-8\")\|encode('utf-8')" webreport/backend/test_agent_checkpointer.py
+109:        self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
+151:            self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
+exit=0

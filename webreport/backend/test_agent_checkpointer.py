@@ -1,6 +1,8 @@
 import importlib
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, "/")
 
@@ -79,33 +81,74 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
 class TestPromptCases(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.graph_module = importlib.import_module("agent.graph")
+        cls.knowledge_module = importlib.import_module("agent.knowledge")
 
-    def test_system_prompt_contract_is_exact(self):
-        expected_prompt = """Ты — аналитик данных игр «Без дураков».
+    def _knowledge_limits(self):
+        return self.knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=50,
+            max_doc_bytes=65536,
+            max_bytes_per_turn=131072,
+        )
 
-• Отвечай только по-русски.
-• Данные получай ТОЛЬКО через инструменты.
-• Инструменты возвращают сводку, не сами строки.
-  Нужны строки — вызови read_rows.
-• Лимит: 256 строк на вызов, 1024 на запрос.
-  Исчерпан — отвечай по тому, что есть.
-• Получил данные — вызови mark_report(handle).
-• Пусто — скажи прямо, отчёт не отмечай.
-• Не выдумывай числа и названия команд."""
-        actual_prompt = self.graph_module.SYSTEM_PROMPT
+    def test_system_prompt_without_knowledge_is_byte_exact(self):
+        expected_prompt = (
+            "You are a data analyst for the connected database. Answer in the language of the user's question.\n\n"
+            "- Get data ONLY through the tools.\n"
+            "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
+            "- Row budgets are bounded per call and per request. "
+            "When a budget is exhausted, answer with what you have.\n"
+            "- Once you have received data, call mark_report(handle).\n"
+            "- If there is nothing, say so plainly and do not mark a report.\n"
+            "- Do not invent numbers or names."
+        )
+        actual_prompt = self.knowledge_module.compose_system_prompt(None)
 
         self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
-        self.assertLess(len(actual_prompt), 600)
-        for fragment in (
-            "Отвечай только по-русски",
-            "read_rows",
-            "mark_report",
-            "Исчерпан — отвечай по тому, что есть",
-            "Пусто — скажи прямо",
-        ):
+        for fragment in ("read_rows", "mark_report"):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, actual_prompt)
+        self.assertNotIn("256", actual_prompt)
+        self.assertNotIn("1024", actual_prompt)
+
+    def test_system_prompt_with_knowledge_is_byte_exact(self):
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+            knowledge = self.knowledge_module.load_knowledge(
+                folder_path,
+                "some_db",
+                limits,
+            )
+            expected_prompt = (
+                "Some text.\n\n"
+                "- Get data ONLY through the tools.\n"
+                "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
+                "- Row budgets are bounded per call and per request. "
+                "When a budget is exhausted, answer with what you have.\n"
+                "- Once you have received data, call mark_report(handle).\n"
+                "- If there is nothing, say so plainly and do not mark a report.\n"
+                "- Do not invent numbers or names.\n"
+                "- Before answering a question covered by a listed topic, "
+                "call read_knowledge with that topic id.\n\n"
+                "## Knowledge topics\n\n"
+                "rules: Rules. Some summary paragraph text."
+            )
+
+            actual_prompt = self.knowledge_module.compose_system_prompt(knowledge)
+
+            self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
 
 
 if __name__ == "__main__":
