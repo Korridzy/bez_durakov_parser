@@ -26,6 +26,7 @@ from agent.graph import (
     arun,
     build_graph,
 )
+from agent.knowledge import compose_system_prompt
 from agent.reasoning import OutboundReasoningFilter, current_turn_reasoning, extract_text
 from agent.registry import ToolRegistry
 from agent.tools import ToolArgs, build_tools
@@ -232,7 +233,8 @@ class ReportAgentSystem:
                 client = model_client if model_client is not None else _new_model_client()
                 tools = build_tools(registry, CONFIG)
                 self._execution = AgentExecution(
-                    build_graph(client, tools, saver), timeout_seconds
+                    build_graph(client, tools, saver, compose_system_prompt(None)),
+                    timeout_seconds,
                 )
             case unreachable:
                 assert_never(unreachable)

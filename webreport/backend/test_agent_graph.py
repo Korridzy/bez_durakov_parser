@@ -9,6 +9,7 @@ StubService = _support.StubService
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
+DEFAULT_TEST_PROMPT = "Test system prompt for GraphTests."
 
 
 class ToolCall(TypedDict):
@@ -113,7 +114,12 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         registry = self.registry_module.ToolRegistry(service)
         tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
         model = ScriptedModel(responses, repeat_factory=repeat_factory)
-        graph = self.graph_module.build_graph(model, tools, self.memory.InMemorySaver())
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+        )
         return model, service, tools, graph
 
     async def test_build_graph_injects_caller_supplied_system_prompt(self) -> None:
@@ -181,7 +187,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["messages"][-1].content, "Отчёт готов.")
         self.assertEqual(model.parallel_tool_calls, False)
         self.assertEqual(model.bound_tool_names, [tool.name for tool in tools])
-        self.assertEqual(model.requests[0][0].content, self.graph_module.SYSTEM_PROMPT)
+        self.assertEqual(model.requests[0][0].content, DEFAULT_TEST_PROMPT)
 
     async def test_same_message_tool_calls_execute_in_script_order(self) -> None:
         responses = [

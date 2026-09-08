@@ -18,17 +18,6 @@ SystemMessage = _messages.SystemMessage
 StateGraph = _graph.StateGraph
 ToolNode = _prebuilt.ToolNode
 
-SYSTEM_PROMPT: Final = """Ты — аналитик данных игр «Без дураков».
-
-• Отвечай только по-русски.
-• Данные получай ТОЛЬКО через инструменты.
-• Инструменты возвращают сводку, не сами строки.
-  Нужны строки — вызови read_rows.
-• Лимит: 256 строк на вызов, 1024 на запрос.
-  Исчерпан — отвечай по тому, что есть.
-• Получил данные — вызови mark_report(handle).
-• Пусто — скажи прямо, отчёт не отмечай.
-• Не выдумывай числа и названия команд."""
 RECURSION_LIMIT_MARKER: Final = "recursion_limit"
 
 JsonValue: TypeAlias = (
@@ -115,6 +104,7 @@ def build_graph(
     model_client: ModelClient,
     tools: Sequence[NamedTool],
     checkpointer: Checkpointer,
+    system_prompt: str,
 ) -> CompiledGraph:
     bound_model = model_client.bind_tools(tools, parallel_tool_calls=False)
     single_tool_builder = StateGraph(GraphState)
@@ -125,7 +115,7 @@ def build_graph(
 
     async def call_model(state: ConversationState) -> StateUpdate:
         response = await bound_model.ainvoke(
-            [SystemMessage(SYSTEM_PROMPT), *state["messages"]]
+            [SystemMessage(system_prompt), *state["messages"]]
         )
         return {"messages": [response]}
 

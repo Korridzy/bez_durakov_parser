@@ -21,7 +21,9 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         service = self.support.StubService()
         registry = self.registry_module.ToolRegistry(service)
         tools = self.tools_module.build_tools(registry, self.config)
-        graph = self.graph_module.build_graph(model, tools, saver)
+        graph = self.graph_module.build_graph(
+            model, tools, saver, "Test system prompt for checkpointer tests."
+        )
         return service, graph
 
     async def test_checkpoint_round_trip_preserves_history(self):
