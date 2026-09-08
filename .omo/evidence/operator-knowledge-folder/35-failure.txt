@@ -1,0 +1,42 @@
+Todo 35 load-bearing failure-path verification
+Command: cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_knowledge.py
+
+Controlled failure: a `- Проверочный пункт.` bullet was placed as the first non-blank block after the top heading in `rules.md`.
+
+Red output:
+ Container webreport-backend-run-ce73d7b0fa24 Creating
+ Container webreport-backend-run-ce73d7b0fa24 Created
+....................................................E
+======================================================================
+ERROR: test_shipped_knowledge_skeleton_loads_under_strict_default_limits (__main__.KnowledgeTypesTests.test_shipped_knowledge_skeleton_loads_under_strict_default_limits)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 473, in test_shipped_knowledge_skeleton_loads_under_strict_default_limits
+    knowledge = self.knowledge_module.load_knowledge(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/knowledge.py", line 295, in load_knowledge
+    title, summary = _derive_title_and_summary(text, entry, limits)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/knowledge.py", line 194, in _derive_title_and_summary
+    raise KnowledgeError(
+agent.knowledge.KnowledgeError: Knowledge document paragraph after the heading is a bullet list, not plain text: /bd_shared/knowledge/bez_durakov/rules.md
+
+----------------------------------------------------------------------
+Ran 53 tests in 2.188s
+
+FAILED (errors=1)
+
+exit=1
+
+Restored-document confirmation: the bullet was removed and the correct `rules.md` was retested.
+
+Green output:
+ Container webreport-backend-run-f7d578ac235f Creating
+ Container webreport-backend-run-f7d578ac235f Created
+.....................................................
+----------------------------------------------------------------------
+Ran 53 tests in 2.201s
+
+OK
+
+exit=0

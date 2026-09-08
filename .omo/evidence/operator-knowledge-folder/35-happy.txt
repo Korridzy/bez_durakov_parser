@@ -1,0 +1,13 @@
+Todo 35 happy-path verification
+Command: cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_knowledge.py
+
+Output:
+ Container webreport-backend-run-90eaedd8567f Creating
+ Container webreport-backend-run-90eaedd8567f Created
+.....................................................
+----------------------------------------------------------------------
+Ran 53 tests in 2.117s
+
+OK
+
+exit=0
