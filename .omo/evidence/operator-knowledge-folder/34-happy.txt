@@ -1,0 +1,18 @@
+ Container webreport-backend-run-0699d2253b87 Creating
+ Container webreport-backend-run-0699d2253b87 Created
+....................................................F
+======================================================================
+FAIL: test_shipped_knowledge_skeleton_loads_under_strict_default_limits (__main__.KnowledgeTypesTests.test_shipped_knowledge_skeleton_loads_under_strict_default_limits)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_agent_knowledge.py", line 480, in test_shipped_knowledge_skeleton_loads_under_strict_default_limits
+    self.assertEqual(len(knowledge.topics), 3)
+AssertionError: 2 != 3
+
+----------------------------------------------------------------------
+Ran 53 tests in 2.198s
+
+FAILED (failures=1)
+exit=1
+
+The single failure is the expected absent `rules.md` topic: `glossary.md` and `scoring.md` provide two topics, while the skeleton expects `glossary`, `rules`, and `scoring`. No `KnowledgeError` or derivation error appears.
