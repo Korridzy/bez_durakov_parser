@@ -116,6 +116,49 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         graph = self.graph_module.build_graph(model, tools, self.memory.InMemorySaver())
         return model, service, tools, graph
 
+    async def test_build_graph_injects_caller_supplied_system_prompt(self) -> None:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
+        model = ScriptedModel([self.messages.AIMessage(content="Готово.")])
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            "SENTINEL-PROMPT-42",
+        )
+
+        await self.graph_module.arun(graph, "Ответь", "prompt-thread")
+
+        self.assertEqual(model.requests[0][0].content, "SENTINEL-PROMPT-42")
+
+    async def test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip(
+        self,
+    ) -> None:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("get_all_teams", {}, "prompt-tool-1")],
+                ),
+                self.messages.AIMessage(content="Готово."),
+            ]
+        )
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            "SENTINEL-PROMPT-42",
+        )
+        service.results["get_all_teams"] = []
+
+        await self.graph_module.arun(graph, "Покажи команды", "prompt-tool-thread")
+
+        self.assertEqual(model.requests[1][0].content, "SENTINEL-PROMPT-42")
+
     async def test_data_call_mark_report_and_russian_answer_complete(self) -> None:
         handle: dict[str, JsonValue] = {"tool": "get_all_teams", "args": {}}
         responses = [

@@ -1,0 +1,6 @@
+Todo 36 production-sentinel absence verification
+Command: git grep -c "SENTINEL-PROMPT-42" -- webreport/backend -- ':!*test*'
+
+Output:
+
+exit=1

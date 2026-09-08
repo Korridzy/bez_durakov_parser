@@ -1,0 +1,61 @@
+Todo 36 strict-TDD verification
+Command: cd webreport && docker compose run --rm --no-deps backend python /app/test_agent_graph.py -v
+
+Output:
+ Container webreport-backend-run-22aa914879e7 Creating
+ Container webreport-backend-run-22aa914879e7 Created
+test_budget_error_tool_message_can_be_followed_by_final_answer (__main__.GraphTests.test_budget_error_tool_message_can_be_followed_by_final_answer) ... ok
+test_build_graph_injects_caller_supplied_system_prompt (__main__.GraphTests.test_build_graph_injects_caller_supplied_system_prompt) ... ERROR
+test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip (__main__.GraphTests.test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip) ... ERROR
+test_data_call_mark_report_and_russian_answer_complete (__main__.GraphTests.test_data_call_mark_report_and_russian_answer_complete) ... ok
+test_endless_tool_calls_return_controlled_recursion_marker (__main__.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker) ... ok
+test_same_message_tool_calls_execute_in_script_order (__main__.GraphTests.test_same_message_tool_calls_execute_in_script_order) ... ok
+
+======================================================================
+ERROR: test_build_graph_injects_caller_supplied_system_prompt (__main__.GraphTests.test_build_graph_injects_caller_supplied_system_prompt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_graph.py", line 124, in test_build_graph_injects_caller_supplied_system_prompt
+    graph = self.graph_module.build_graph(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: build_graph() takes 3 positional arguments but 4 were given
+
+======================================================================
+ERROR: test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip (__main__.GraphTests.test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_graph.py", line 150, in test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip
+    graph = self.graph_module.build_graph(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: build_graph() takes 3 positional arguments but 4 were given
+
+----------------------------------------------------------------------
+Ran 6 tests in 4.367s
+
+FAILED (errors=2)
+
+exit=1
