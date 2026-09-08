@@ -1,0 +1,3 @@
+result=no-op: the required repository scan found no SYSTEM_PROMPT references, consistent with todo 37 removing the obsolete constant
+command=git grep -n "SYSTEM_PROMPT" webreport/backend/
+exit=1
