@@ -1372,6 +1372,70 @@ class TestStartupInitialization(unittest.TestCase):
             testclient.close()
             testclient = None
 
+    def test_knowledge_loads_once_before_database_and_probe_in_each_mode(self):
+        main_module = self._get_main_module()
+
+        async def run_test(proxy_healthy):
+            call_order = []
+            loaded_knowledge = object()
+            created_agents = []
+
+            def record_knowledge_load(*_args, **_kwargs):
+                call_order.append("loader")
+                return loaded_knowledge
+
+            async def record_data_service_initialization():
+                call_order.append("data_service")
+                return object()
+
+            async def record_probe(*_args, **_kwargs):
+                call_order.append("probe")
+                return proxy_healthy
+
+            def fake_agent_system(**kwargs):
+                created_agents.append(kwargs)
+                return object()
+
+            await self._reset_startup_state(main_module)
+            with (
+                patch.object(
+                    main_module,
+                    "load_knowledge",
+                    side_effect=record_knowledge_load,
+                    create=True,
+                ) as knowledge_loader,
+                patch.object(
+                    main_module,
+                    "initialize_data_service_with_retry",
+                    side_effect=record_data_service_initialization,
+                ),
+                patch.object(main_module, "probe_llm_proxy", side_effect=record_probe),
+                patch.object(
+                    main_module,
+                    "ReportAgentSystem",
+                    side_effect=fake_agent_system,
+                ),
+                patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
+            ):
+                await main_module.startup_event()
+                await main_module.root()
+                await main_module.health_check()
+                loader_call_count = knowledge_loader.call_count
+
+            await main_module.shutdown_event()
+            return call_order, loader_call_count, created_agents, loaded_knowledge
+
+        for proxy_healthy, expected_mode in ((True, "agent"), (False, "fallback")):
+            with self.subTest(expected_mode=expected_mode):
+                call_order, loader_call_count, created_agents, loaded_knowledge = asyncio.run(
+                    run_test(proxy_healthy)
+                )
+
+                self.assertEqual(call_order, ["loader", "data_service", "probe"])
+                self.assertEqual(loader_call_count, 1)
+                self.assertEqual(created_agents[0]["mode"], expected_mode)
+                self.assertIs(created_agents[0]["knowledge"], loaded_knowledge)
+
     def test_regression_startup_retries_database_initialization(self):
         main_module = self._get_main_module()
 

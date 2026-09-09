@@ -1,0 +1,9 @@
+grep -n "call_order\|order ==\|assertEqual(.*order" webreport/backend/test_system.py
+1379:            call_order = []
+1384:                call_order.append("loader")
+1388:                call_order.append("data_service")
+1392:                call_order.append("probe")
+1426:            return call_order, loader_call_count, created_agents, loaded_knowledge
+1430:                call_order, loader_call_count, created_agents, loaded_knowledge = asyncio.run(
+1434:                self.assertEqual(call_order, ["loader", "data_service", "probe"])
+exit=0
