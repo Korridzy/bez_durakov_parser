@@ -3,6 +3,7 @@ import importlib
 import json
 import typing
 import unittest
+from pathlib import Path
 
 _support = importlib.import_module("test_agent_tools_support")
 TOOL_NAMES = _support.TOOL_NAMES
@@ -52,6 +53,78 @@ class ToolMetadataTests(ToolsCaseBase):
         self.assertEqual(len(built), 11)
         self.assertEqual(names[0], "read_knowledge")
         self.assertEqual(names[1:], expected_existing)
+
+    def _build_knowledge_tools(self):
+        knowledge_module = importlib.import_module("agent.knowledge")
+        fixture_path = Path("/bd_shared/knowledge/bez_durakov")
+        limits = knowledge_module.KnowledgeLimits(
+            max_title_chars=80,
+            max_summary_chars=200,
+            max_persona_chars=2000,
+            max_topics=50,
+            max_doc_bytes=65536,
+            max_bytes_per_turn=131072,
+        )
+        knowledge = knowledge_module.load_knowledge(fixture_path, "bez_durakov", limits)
+        built = self.tools_module.build_tools(self.registry, self.config, knowledge=knowledge)
+        self.tools = {tool.name: tool for tool in built}
+        return fixture_path
+
+    async def test_read_knowledge_returns_full_fixture_text_verbatim(self):
+        """Given a known topic, When it is read, Then the complete file is returned unchanged."""
+        fixture_path = self._build_knowledge_tools()
+
+        state = await self.invoke_tool("read_knowledge", {"topic_id": "rules"})
+        message = self.latest_tool_message(state)
+        read_knowledge_content = message.content
+
+        self.assertIsInstance(read_knowledge_content, str)
+        self.assertEqual(read_knowledge_content, (fixture_path / "rules.md").read_text(encoding="utf-8"))
+        self.assertEqual(state["rows_consumed"], 0)
+
+    async def test_read_knowledge_unknown_id_returns_exact_tool_error(self):
+        """Given an unknown topic, When it is read, Then an exact in-band error is returned."""
+        self._build_knowledge_tools()
+        topic_id = "missing"
+
+        state = await self.invoke_tool("read_knowledge", {"topic_id": topic_id})
+        message = self.latest_tool_message(state)
+
+        self.assertEqual(
+            message.content,
+            "Tool error: unknown knowledge topic 'missing'. Available topics: glossary, rules, scoring",
+        )
+        self.assertEqual(state["rows_consumed"], 0)
+
+    async def test_read_knowledge_empty_ids_keep_raw_value_in_exact_error(self):
+        """Given empty topic ids, When they are read, Then each raw value is interpolated."""
+        self._build_knowledge_tools()
+
+        for topic_id in ("", "   "):
+            with self.subTest(topic_id=topic_id):
+                state = await self.invoke_tool("read_knowledge", {"topic_id": topic_id})
+                message = self.latest_tool_message(state)
+                expected = (
+                    f"Tool error: unknown knowledge topic '{topic_id}'. "
+                    "Available topics: glossary, rules, scoring"
+                )
+
+                self.assertEqual(message.content, expected)
+                self.assertEqual(state["rows_consumed"], 0)
+
+    async def test_read_knowledge_topic_ids_are_case_sensitive(self):
+        """Given a correctly spelled id with different case, When read, Then it is unknown."""
+        self._build_knowledge_tools()
+        topic_id = "Rules"
+
+        state = await self.invoke_tool("read_knowledge", {"topic_id": topic_id})
+        message = self.latest_tool_message(state)
+
+        self.assertEqual(
+            message.content,
+            "Tool error: unknown knowledge topic 'Rules'. Available topics: glossary, rules, scoring",
+        )
+        self.assertEqual(state["rows_consumed"], 0)
 
     def test_data_tool_schemas_match_registry_parameters(self):
         """Given data tools, When schemas are inspected, Then all eight inputs remain typed."""

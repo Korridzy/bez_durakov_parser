@@ -1,0 +1,4 @@
+grep -n "assertEqual" webreport/backend/test_agent_tools_*.py | grep -i knowledge
+webreport/backend/test_agent_tools_metadata.py:54:        self.assertEqual(names[0], "read_knowledge")
+webreport/backend/test_agent_tools_metadata.py:82:        self.assertEqual(read_knowledge_content, (fixture_path / "rules.md").read_text(encoding="utf-8"))
+exit=0
