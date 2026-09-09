@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from asyncio import CancelledError, sleep
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 _graph_cases = importlib.import_module("test_agent_graph")
@@ -44,6 +45,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         cls.checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
         cls.memory = importlib.import_module("langgraph.checkpoint.memory")
         cls.messages = importlib.import_module("langchain_core.messages")
+        cls.knowledge = importlib.import_module("agent.knowledge")
         cls.pd = importlib.import_module("pandas")
         cls.report_module = importlib.import_module("agents.report_agents")
         cls.runtime_module = importlib.import_module("agents.report_runtime")
@@ -59,6 +61,109 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             timeout_seconds=timeout,
         )
         return system, service
+
+    def load_fixture_knowledge(self):
+        return self.knowledge.load_knowledge(
+            Path("/bd_shared/knowledge/bez_durakov"),
+            "bez_durakov",
+            self.knowledge.KnowledgeLimits(
+                max_title_chars=80,
+                max_summary_chars=200,
+                max_persona_chars=2000,
+                max_topics=50,
+                max_doc_bytes=65536,
+                max_bytes_per_turn=131072,
+            ),
+        )
+
+    async def test_agent_mode_threads_knowledge_into_tools_graph_and_prompt(self):
+        knowledge = self.load_fixture_knowledge()
+        model = ScriptedModel([self.messages.AIMessage(content="Правила загружены.")])
+        service = self.support.StubService()
+
+        with patch.object(
+            self.runtime_module,
+            "compose_system_prompt",
+            wraps=self.knowledge.compose_system_prompt,
+        ) as prompt_composer:
+            system = self.report_module.ReportAgentSystem(
+                service=service,
+                model_client=model,
+                checkpointer=self.memory.InMemorySaver(),
+                mode="agent",
+                knowledge=knowledge,
+            )
+            response = await system.process_user_request("Объясни правила", "knowledge-agent")
+
+        self.assertEqual(
+            model.bound_tool_names,
+            [
+                "read_knowledge",
+                *self.support.TOOL_NAMES,
+                "read_rows",
+                "mark_report",
+            ],
+        )
+        self.assertEqual(
+            model.requests[0][0].content,
+            self.knowledge.compose_system_prompt(knowledge),
+        )
+        prompt_composer.assert_called_once_with(knowledge)
+        self.assertEqual(response["message"], "Правила загружены.")
+        self.assertEqual(response["mode"], "agent")
+
+    def test_agent_mode_with_explicit_none_keeps_current_ten_tools(self):
+        model = ScriptedModel([])
+
+        self.report_module.ReportAgentSystem(
+            service=self.support.StubService(),
+            model_client=model,
+            checkpointer=self.memory.InMemorySaver(),
+            mode="agent",
+            knowledge=None,
+        )
+
+        self.assertEqual(
+            model.bound_tool_names,
+            [*self.support.TOOL_NAMES, "read_rows", "mark_report"],
+        )
+
+    async def test_fallback_accepts_knowledge_without_using_agent_construction(self):
+        knowledge = self.load_fixture_knowledge()
+        service = self.support.StubService()
+        service.results["get_all_games_summary"] = [{"game_id": 1}]
+
+        with (
+            patch.object(self.runtime_module, "build_tools") as tools_builder,
+            patch.object(self.runtime_module, "build_graph") as graph_builder,
+            patch.object(self.runtime_module, "compose_system_prompt") as prompt_composer,
+        ):
+            system = self.report_module.ReportAgentSystem(
+                service=service,
+                checkpointer=self.memory.InMemorySaver(),
+                mode="fallback",
+                knowledge=knowledge,
+            )
+            response = await system.process_user_request(
+                "покажи все игры",
+                "knowledge-fallback",
+            )
+
+        self.assertIsInstance(system._execution, self.runtime_module.FallbackExecution)
+        tools_builder.assert_not_called()
+        graph_builder.assert_not_called()
+        prompt_composer.assert_not_called()
+        self.assertEqual(
+            {key: value for key, value in response.items() if key != "timestamp"},
+            {
+                "success": True,
+                "query_info": [{"tool": "get_all_games_summary", "args": {}}],
+                "data": [{"game_id": 1}],
+                "message": "Report generated (fallback mode): покажи все игры",
+                "mode": "fallback",
+                "reasoning": None,
+            },
+        )
 
     async def test_fallback_preserves_frozen_routes_and_response_shapes(self):
         cases = (

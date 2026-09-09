@@ -1,0 +1,4 @@
+grep -n "rows_consumed" webreport/backend/test_agent_graph.py | grep -i knowledge
+185:        rows_consumed_before_knowledge_call = 0
+203:        self.assertEqual(result["rows_consumed"], rows_consumed_before_knowledge_call)
+exit=0

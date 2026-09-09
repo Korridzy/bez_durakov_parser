@@ -1,6 +1,7 @@
 import importlib
 import unittest
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import ClassVar, final, Protocol, TypeAlias, TypedDict
 
 _support = importlib.import_module("test_agent_tools_support")
@@ -100,6 +101,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         cls.graph_module = importlib.import_module("agent.graph")
         cls.memory = importlib.import_module("langgraph.checkpoint.memory")
         cls.messages = importlib.import_module("langchain_core.messages")
+        cls.knowledge = importlib.import_module("agent.knowledge")
         cls.pd = importlib.import_module("pandas")
         cls.registry_module = importlib.import_module("agent.registry")
         cls.tools_module = importlib.import_module("agent.tools")
@@ -121,6 +123,87 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
             DEFAULT_TEST_PROMPT,
         )
         return model, service, tools, graph
+
+    def load_fixture_knowledge(self):
+        return self.knowledge.load_knowledge(
+            Path("/bd_shared/knowledge/bez_durakov"),
+            "bez_durakov",
+            self.knowledge.KnowledgeLimits(
+                max_title_chars=80,
+                max_summary_chars=200,
+                max_persona_chars=2000,
+                max_topics=50,
+                max_doc_bytes=65536,
+                max_bytes_per_turn=131072,
+            ),
+        )
+
+    async def test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band(
+        self,
+    ) -> None:
+        knowledge = self.load_fixture_knowledge()
+        rules_text = next(topic.text for topic in knowledge.topics if topic.id == "rules")
+        invalid_handle: dict[str, JsonValue] = {"tool": rules_text, "args": {}}
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "rules"},
+                            "knowledge-1",
+                        )
+                    ],
+                ),
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "mark_report",
+                            {"handle": invalid_handle},
+                            "invalid-report-1",
+                        )
+                    ],
+                ),
+                self.messages.AIMessage(content="Правила прочитаны."),
+            ]
+        )
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(
+            registry,
+            self.config,
+            knowledge=knowledge,
+        )
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            self.knowledge.compose_system_prompt(knowledge),
+        )
+        rows_consumed_before_knowledge_call = 0
+
+        result = await self.graph_module.arun(graph, "Объясни правила", "knowledge-thread")
+
+        knowledge_messages = [
+            message
+            for message in model.requests[1]
+            if isinstance(message, self.messages.ToolMessage)
+        ]
+        invalid_report_messages = [
+            message
+            for message in model.requests[2]
+            if isinstance(message, self.messages.ToolMessage)
+        ]
+        self.assertEqual(len(knowledge_messages), 1)
+        self.assertEqual(knowledge_messages[0].content, rules_text)
+        self.assertEqual(len(invalid_report_messages), 2)
+        self.assertTrue(invalid_report_messages[-1].content.startswith("Tool error:"))
+        self.assertEqual(result["rows_consumed"], rows_consumed_before_knowledge_call)
+        self.assertIsNone(result["report_payload"])
+        self.assertEqual(result["messages"][-1].content, "Правила прочитаны.")
+        self.assertEqual(service.calls, [])
 
     async def test_build_graph_injects_caller_supplied_system_prompt(self) -> None:
         service: ServiceView = StubService()
