@@ -1030,6 +1030,26 @@ class KnowledgeTypesTests(unittest.TestCase):
             for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS:
                 self.assertNotIn(forbidden_string.lower(), prompt_lower)
 
+    def test_agent_package_and_neutral_prompt_are_free_of_game_domain_strings(self):
+        agent_path = Path(__file__).parent / "agent"
+        forbidden_strings = tuple(
+            forbidden_string.lower() for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS
+        )
+
+        for source_path in sorted(agent_path.rglob("*.py")):
+            source = source_path.read_text(encoding="utf-8").lower()
+            for forbidden_string in forbidden_strings:
+                with self.subTest(
+                    path=source_path.relative_to(agent_path),
+                    forbidden_string=forbidden_string,
+                ):
+                    self.assertNotIn(forbidden_string, source)
+
+        neutral_prompt = self.knowledge_module.compose_system_prompt(None).lower()
+        for forbidden_string in forbidden_strings:
+            with self.subTest(path="compose_system_prompt(None)", forbidden_string=forbidden_string):
+                self.assertNotIn(forbidden_string, neutral_prompt)
+
     def test_load_knowledge_rejects_each_below_one_limit_and_names_key(self):
         knowledge_error = self.knowledge_module.KnowledgeError
         limit_cases = (
