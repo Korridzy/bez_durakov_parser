@@ -229,3 +229,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - ToolNode tests use the shipped `/bd_shared/knowledge/bez_durakov` folder, compare the `rules` result to the complete file text, and pin exact unknown-id errors for missing, empty, whitespace, and wrong-case ids.
 - `read_knowledge` preserves `topic.text`, matches ids exactly, and builds the available-topic list from the loader-preserved tuple order; it does not mutate graph state.
 - The aggregate passed all 148 tests, and the made-up-id probe returned an in-band `str` error without raising; `_probe_43.py` was deleted afterward.
+
+## Todo 44-45 agent package game-domain scan
+
+- The agent-package test walks every `.py` file under `webreport/backend/agent/` with the shared `GAME_DOMAIN_FORBIDDEN_STRINGS` tuple and checks the knowledge-free prompt; the 149-test aggregate passed.
+- A temporary `_probe.py` containing the historical `Ты — аналитик данных игр «Без дураков».` persona produced two named failures, then was deleted and the aggregate returned green.
+- No residue was found, so todo 45 is an explicit no-op; the fallback `webreport/backend/agents/` package and data tools were untouched. Ruff passed on the agent package and knowledge test.

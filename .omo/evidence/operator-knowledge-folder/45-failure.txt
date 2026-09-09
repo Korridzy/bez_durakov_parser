@@ -1,0 +1,8 @@
+git diff --name-only HEAD~1
+.omo/evidence/operator-knowledge-folder/42-happy.txt
+.omo/evidence/operator-knowledge-folder/43-happy.txt
+.omo/evidence/operator-knowledge-folder/44-failure.txt
+.omo/evidence/operator-knowledge-folder/44-happy.txt
+.omo/notepads/operator-knowledge-folder/learnings.md
+webreport/backend/test_agent_knowledge.py
+exit=0
