@@ -1,0 +1,6 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_43.py
+ Container webreport-backend-run-e3a7bed57e36 Creating 
+ Container webreport-backend-run-e3a7bed57e36 Created 
+Tool error: unknown knowledge topic 'made-up'. Available topics: glossary, rules, scoring
+type=str
+exit=0

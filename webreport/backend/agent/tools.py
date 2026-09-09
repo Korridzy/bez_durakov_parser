@@ -227,8 +227,14 @@ def build_tools(
     @tool
     async def read_knowledge(topic_id: str) -> str:
         """Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt."""
-        raise NotImplementedError(
-            f"read_knowledge({topic_id!r}) is not implemented for {len(knowledge.topics)} topics"
+        for topic in knowledge.topics:
+            if topic.id == topic_id:
+                return topic.text
+
+        available_topics = ", ".join(topic.id for topic in knowledge.topics)
+        return (
+            f"Tool error: unknown knowledge topic '{topic_id}'. "
+            f"Available topics: {available_topics}"
         )
 
     return [read_knowledge, *existing_tools]

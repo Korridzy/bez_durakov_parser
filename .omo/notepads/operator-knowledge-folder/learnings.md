@@ -223,3 +223,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - The registration contract is best pinned by comparing the complete ordered name list: no knowledge yields the existing ten, while loaded knowledge requires `read_knowledge` at index 0 and the ten existing tools unchanged after it.
 - The todo-40 aggregate was observed red with `TypeError: build_tools() got an unexpected keyword argument 'knowledge'`; the todo-41 aggregate then passed all 144 tests.
 - The knowledge-bearing branch defines `read_knowledge` inside `build_tools` so it closes over the loaded `Knowledge`; its lookup and error behavior remains the next tool-contract implementation.
+
+## Todo 42-43 read_knowledge contract
+
+- ToolNode tests use the shipped `/bd_shared/knowledge/bez_durakov` folder, compare the `rules` result to the complete file text, and pin exact unknown-id errors for missing, empty, whitespace, and wrong-case ids.
+- `read_knowledge` preserves `topic.text`, matches ids exactly, and builds the available-topic list from the loader-preserved tuple order; it does not mutate graph state.
+- The aggregate passed all 148 tests, and the made-up-id probe returned an in-band `str` error without raising; `_probe_43.py` was deleted afterward.
