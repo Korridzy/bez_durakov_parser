@@ -21,17 +21,20 @@ Traceback (most recent call last):
     async for chunk in self.astream(
   File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
     async for _ in runner.atick(
-  File "/usr/local/lib/python3.11/site-packages/langgraph/_runner.py", line 396, in atick
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
     await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
     input = await asyncio.create_task(
             ^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
-    input = await self.afunc(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/agent/graph.py", line 117, in call_model
     response = await bound_model.ainvoke(
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/test_agent_report_agent.py", line 23, in ainvoke
     raise ScriptedModelError("scripted model failure")
 test_agent_report_agent.ScriptedModelError: scripted model failure
