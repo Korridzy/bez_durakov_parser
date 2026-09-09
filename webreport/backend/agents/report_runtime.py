@@ -26,7 +26,7 @@ from agent.graph import (
     arun,
     build_graph,
 )
-from agent.knowledge import compose_system_prompt
+from agent.knowledge import Knowledge, compose_system_prompt
 from agent.reasoning import OutboundReasoningFilter, current_turn_reasoning, extract_text
 from agent.registry import ToolRegistry
 from agent.tools import ToolArgs, build_tools
@@ -218,6 +218,7 @@ class ReportAgentSystem:
         checkpointer: object | None = None,
         mode: Mode = "fallback",
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        knowledge: Knowledge | None = None,
     ) -> None:
         selected_service = service if service is not None else GameDataService()
         registry = ToolRegistry(selected_service)
@@ -231,9 +232,9 @@ class ReportAgentSystem:
                 self._execution: Execution = FallbackExecution(_build_history_graph(saver))
             case "agent":
                 client = model_client if model_client is not None else _new_model_client()
-                tools = build_tools(registry, CONFIG)
+                tools = build_tools(registry, CONFIG, knowledge=knowledge)
                 self._execution = AgentExecution(
-                    build_graph(client, tools, saver, compose_system_prompt(None)),
+                    build_graph(client, tools, saver, compose_system_prompt(knowledge)),
                     timeout_seconds,
                 )
             case unreachable:

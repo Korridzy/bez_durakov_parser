@@ -1,0 +1,2 @@
+git diff HEAD~1 -- webreport/backend/agents/report_agents.py
+exit=0

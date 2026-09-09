@@ -235,3 +235,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - The agent-package test walks every `.py` file under `webreport/backend/agent/` with the shared `GAME_DOMAIN_FORBIDDEN_STRINGS` tuple and checks the knowledge-free prompt; the 149-test aggregate passed.
 - A temporary `_probe.py` containing the historical `Ты — аналитик данных игр «Без дураков».` persona produced two named failures, then was deleted and the aggregate returned green.
 - No residue was found, so todo 45 is an explicit no-op; the fallback `webreport/backend/agents/` package and data tools were untouched. Ruff passed on the agent package and knowledge test.
+
+## Todo 46-47 runtime knowledge threading
+
+- `ReportAgentSystem` accepts the concrete optional `Knowledge`, forwards it only while constructing agent tools, and composes the matching system prompt once before building the graph; explicit `None` preserves the ordered ten-tool catalogue.
+- The scripted graph flow reads the shipped `rules` topic, exposes its complete text to the next model call without changing `rows_consumed`, and returns the existing in-band `Tool error:` when that document is used as an invalid report tool name.
+- A loaded knowledge object is accepted in fallback mode without building tools, composing an agent prompt, or changing the existing fallback response. The full aggregate passed all 153 tests.
