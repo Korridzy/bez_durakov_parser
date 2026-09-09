@@ -1,0 +1,7 @@
+command=cd webreport && docker compose run --rm --no-deps backend python /app/_probe_41.py
+ Container webreport-backend-run-7e07051266dc Creating 
+ Container webreport-backend-run-7e07051266dc Created 
+SIG (registry: agent.registry.ToolRegistry, cfg: agent.tools.AgentToolConfig, knowledge: agent.knowledge.Knowledge | None = None) -> list[agent.tools.BuiltTool]
+COUNT 10
+NAMES ['get_all_games_summary', 'get_game_by_id', 'get_games_by_date_range', 'get_team_game_scores', 'get_all_teams', 'get_team_statistics', 'get_team_wins', 'get_top_teams', 'read_rows', 'mark_report']
+exit=0

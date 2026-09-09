@@ -3,6 +3,7 @@ import json
 from collections.abc import Mapping
 from typing import Annotated, Protocol, TYPE_CHECKING, TypeAlias, TypedDict
 
+from .knowledge import Knowledge
 from .registry import ToolError, ToolRegistry
 _messages = importlib.import_module("langchain_core.messages")
 _tool_api = importlib.import_module("langchain_core.tools")
@@ -68,7 +69,11 @@ def _parse_handle(handle: dict[str, str | ToolArgs]) -> QueryHandle:
     return {"tool": name, "args": dict(args)}
 
 
-def build_tools(registry: ToolRegistry, cfg: AgentToolConfig) -> list[BuiltTool]:
+def build_tools(
+    registry: ToolRegistry,
+    cfg: AgentToolConfig,
+    knowledge: Knowledge | None = None,
+) -> list[BuiltTool]:
     async def metadata(name: str, args: ToolArgs) -> ToolEnvelope | str:
         try:
             records, cols = await registry.execute_normalized(name, args)
@@ -204,7 +209,7 @@ def build_tools(registry: ToolRegistry, cfg: AgentToolConfig) -> list[BuiltTool]
             }
         )
 
-    return [
+    existing_tools = [
         get_all_games_summary,
         get_game_by_id,
         get_games_by_date_range,
@@ -216,3 +221,14 @@ def build_tools(registry: ToolRegistry, cfg: AgentToolConfig) -> list[BuiltTool]
         read_rows,
         mark_report,
     ]
+    if knowledge is None:
+        return existing_tools
+
+    @tool
+    async def read_knowledge(topic_id: str) -> str:
+        """Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt."""
+        raise NotImplementedError(
+            f"read_knowledge({topic_id!r}) is not implemented for {len(knowledge.topics)} topics"
+        )
+
+    return [read_knowledge, *existing_tools]

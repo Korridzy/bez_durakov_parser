@@ -1,0 +1,47 @@
+command=cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent.py
+ Container webreport-backend-run-92dd39e3ddb6 Creating 
+ Container webreport-backend-run-92dd39e3ddb6 Created 
+........................................................................................................../bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+..............ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 260, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 322, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 169, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 117, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_agent_report_agent.py", line 23, in ainvoke
+    raise ScriptedModelError("scripted model failure")
+test_agent_report_agent.ScriptedModelError: scripted model failure
+During task with name 'agent' and id '620383f5-e986-bf79-b9bf-e5e1b3b571d8'
+........................
+----------------------------------------------------------------------
+Ran 144 tests in 8.207s
+
+OK
+exit=0
