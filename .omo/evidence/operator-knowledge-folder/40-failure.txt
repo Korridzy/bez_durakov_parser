@@ -1,0 +1,4 @@
+command=grep -n "\[0\]\|index(" webreport/backend/test_agent_tools_*.py
+webreport/backend/test_agent_tools_metadata.py:22:        self.assertIs(message_args[0], list)
+webreport/backend/test_agent_tools_metadata.py:53:        self.assertEqual(names[0], "read_knowledge")
+exit=0

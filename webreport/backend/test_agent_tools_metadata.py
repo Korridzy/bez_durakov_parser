@@ -25,10 +25,33 @@ class ToolMetadataTests(ToolsCaseBase):
         self.assertIs(hints["rows_consumed"], int)
         json.dumps({"messages": [], "report_payload": None, "rows_consumed": 0})
 
-    def test_build_tools_exposes_exactly_eight_data_tools_plus_two_state_tools(self):
-        """Given built tools, When names are read, Then the bounded catalogue is exact."""
-        self.assertEqual(set(self.tools), {*TOOL_NAMES, "read_rows", "mark_report"})
-        self.assertEqual(len(self.tools), 10)
+    def test_build_tools_without_knowledge_keeps_current_catalogue(self):
+        """Given no knowledge, When tools are built, Then the current ten-tool catalogue is unchanged."""
+        built = self.tools_module.build_tools(self.registry, self.config)
+        names = [tool.name for tool in built]
+        expected = [*TOOL_NAMES, "read_rows", "mark_report"]
+
+        self.assertEqual(names, expected)
+        self.assertNotIn("read_knowledge", names)
+
+    def test_build_tools_with_knowledge_puts_read_knowledge_first(self):
+        """Given loaded knowledge, When tools are built, Then read_knowledge leads the unchanged catalogue."""
+        knowledge_module = importlib.import_module("agent.knowledge")
+        topic = knowledge_module.KnowledgeTopic(
+            id="rules",
+            title="Rules",
+            summary="A summary.",
+            text="# Rules\\n\\nA summary.\\n",
+        )
+        knowledge = knowledge_module.Knowledge(manifest=object(), topics=(topic,))
+
+        built = self.tools_module.build_tools(self.registry, self.config, knowledge=knowledge)
+        names = [tool.name for tool in built]
+        expected_existing = [*TOOL_NAMES, "read_rows", "mark_report"]
+
+        self.assertEqual(len(built), 11)
+        self.assertEqual(names[0], "read_knowledge")
+        self.assertEqual(names[1:], expected_existing)
 
     def test_data_tool_schemas_match_registry_parameters(self):
         """Given data tools, When schemas are inspected, Then all eight inputs remain typed."""
