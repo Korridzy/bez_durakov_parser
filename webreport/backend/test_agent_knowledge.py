@@ -220,6 +220,8 @@ class KnowledgeTypesTests(unittest.TestCase):
         path_sources = (str(error.path), str(error))
 
         self.assertTrue(any(str(manifest_path) in source for source in path_sources))
+        self.assertEqual(error.path, manifest_path)
+        self.assertIsNotNone(error.rule)
 
     def test_load_knowledge_rejects_missing_manifest(self):
         """Given an empty knowledge folder, When it is loaded, Then KnowledgeError names the missing manifest."""
@@ -305,6 +307,49 @@ class KnowledgeTypesTests(unittest.TestCase):
 
             self._assert_manifest_path(raised.exception, manifest_path)
             self.assertIn("language", str(raised.exception))
+            self.assertEqual(raised.exception.key, "language")
+            self.assertEqual(raised.exception.rule, "extra_forbidden")
+
+    def test_load_knowledge_wraps_directory_enumeration_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            denied = PermissionError(13, "Permission denied", str(folder))
+
+            def failing_iterator():
+                yield folder / "manifest.toml"
+                raise denied
+
+            for failure in (denied, failing_iterator):
+                with self.subTest(failure=failure):
+                    with patch.object(Path, "iterdir", side_effect=failure):
+                        with self.assertRaises(self.knowledge_module.KnowledgeError) as raised:
+                            self.knowledge_module.load_knowledge(folder, "some_db", self._knowledge_limits())
+                    self.assertEqual(raised.exception.path, folder)
+                    self.assertIsNone(raised.exception.key)
+                    self.assertEqual(raised.exception.rule, "directory_enumeration")
+                    self.assertIs(raised.exception.__cause__, denied)
+
+    def test_load_knowledge_wraps_entry_inspection_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            entry = folder / "rules.md"
+            entry.write_text("# Rules\n\nSummary.\n")
+            original_is_dir = Path.is_dir
+            denied = PermissionError(13, "Permission denied", str(entry))
+
+            def inspect_entry(path):
+                if path == entry:
+                    raise denied
+                return original_is_dir(path)
+
+            with patch.object(Path, "is_dir", inspect_entry):
+                with self.assertRaises(self.knowledge_module.KnowledgeError) as raised:
+                    self.knowledge_module.load_knowledge(folder, "some_db", self._knowledge_limits())
+            self.assertEqual(raised.exception.path, entry)
+            self.assertEqual(raised.exception.rule, "directory_entry_access")
+            self.assertIs(raised.exception.__cause__, denied)
 
     def test_load_knowledge_wraps_dataset_pattern_validation(self):
         """Given an invalid manifest dataset, When the folder is loaded, Then KnowledgeError names the manifest and dataset."""
@@ -323,6 +368,8 @@ class KnowledgeTypesTests(unittest.TestCase):
 
             self._assert_manifest_path(raised.exception, manifest_path)
             self.assertIn("dataset", str(raised.exception))
+            self.assertEqual(raised.exception.key, "dataset")
+            self.assertEqual(raised.exception.rule, "string_pattern_mismatch")
 
     def test_load_knowledge_rejects_dataset_mismatch_with_both_names(self):
         """Given a valid manifest for another dataset, When loaded, Then KnowledgeError names expected and actual datasets."""
@@ -341,6 +388,9 @@ class KnowledgeTypesTests(unittest.TestCase):
 
             self.assertIn("wrong_dataset", str(raised.exception))
             self.assertIn("actual_dataset", str(raised.exception))
+            self.assertEqual(raised.exception.path, manifest_path)
+            self.assertEqual(raised.exception.key, "dataset")
+            self.assertEqual(raised.exception.rule, "database_match")
 
     def test_load_knowledge_signature_excludes_database_handles(self):
         """Given load_knowledge, When its signature is inspected, Then it accepts no database handle parameter."""
@@ -784,6 +834,30 @@ class KnowledgeTypesTests(unittest.TestCase):
                 self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
 
             self.assertIn("rules.md", str(raised.exception))
+
+    def test_document_failures_carry_structured_rules_and_limit_keys(self):
+        limits = self._knowledge_limits()
+        cases = (
+            (b"No heading", "heading_required", None),
+            (b"# Heading\n", "paragraph_required", None),
+            (b"# " + b"T" * 81 + b"\n\nSummary.", "max_title_chars", "knowledge_max_title_chars"),
+            (b"# Heading\n\n" + b"S" * 201, "max_summary_chars", "knowledge_max_summary_chars"),
+            (b"x" * 65537, "max_doc_bytes", "knowledge_max_doc_bytes"),
+            (b"\xff", "utf8", None),
+            (b"# Heading\n\n- list", "bullet list", None),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            entry = folder / "rules.md"
+            for body, rule, key in cases:
+                with self.subTest(rule=rule):
+                    entry.write_bytes(body)
+                    with self.assertRaises(self.knowledge_module.KnowledgeError) as raised:
+                        self.knowledge_module.load_knowledge(folder, "some_db", limits)
+                    self.assertEqual(raised.exception.path, entry)
+                    self.assertEqual(raised.exception.rule, rule)
+                    self.assertEqual(raised.exception.key, key)
 
     def test_load_knowledge_derives_complete_title_and_multiline_summary(self):
         """Given a valid document, When loaded, Then id, title and joined summary are exact and untruncated."""

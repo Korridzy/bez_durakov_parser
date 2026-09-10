@@ -118,16 +118,19 @@ def _safe_read_bytes(folder: Path, name: str) -> bytes:
     try:
         resolved_folder = folder.resolve()
         resolved_candidate = candidate_path.resolve(strict=True)
+        is_regular = resolved_candidate.parent == resolved_folder and resolved_candidate.is_file()
     except (OSError, RuntimeError) as error:
         raise KnowledgeError(
             f"Knowledge file is missing or invalid: {candidate_path}: {error}",
             path=candidate_path,
+            rule="file_access",
         ) from error
 
-    if resolved_candidate.parent != resolved_folder or not resolved_candidate.is_file():
+    if not is_regular:
         raise KnowledgeError(
             f"Knowledge file is not a regular file inside its folder: {candidate_path}",
             path=candidate_path,
+            rule="regular_file_containment",
         )
 
     try:
@@ -136,6 +139,7 @@ def _safe_read_bytes(folder: Path, name: str) -> bytes:
         raise KnowledgeError(
             f"Unable to read knowledge file {candidate_path}: {error}",
             path=candidate_path,
+            rule="file_read",
         ) from error
 
 
@@ -179,6 +183,7 @@ def _derive_title_and_summary(
         raise KnowledgeError(
             f"Knowledge document has no heading: {entry}",
             path=entry,
+            rule="heading_required",
         )
 
     title = _HEADING_STRIP_RE.sub("", lines[heading_index], count=1).strip()
@@ -187,6 +192,8 @@ def _derive_title_and_summary(
             f"Knowledge document title exceeds {limits.max_title_chars} characters: {entry}; "
             f"title is {len(title)} characters, limit is {limits.max_title_chars}",
             path=entry,
+            key="knowledge_max_title_chars",
+            rule="max_title_chars",
             observed=len(title),
             permitted=limits.max_title_chars,
         )
@@ -202,6 +209,7 @@ def _derive_title_and_summary(
         raise KnowledgeError(
             f"Knowledge document heading has no following paragraph: {entry}",
             path=entry,
+            rule="paragraph_required",
         )
 
     block_lines: list[str] = []
@@ -225,6 +233,8 @@ def _derive_title_and_summary(
             f"Knowledge document summary exceeds {limits.max_summary_chars} characters: {entry}; "
             f"summary is {len(summary)} characters, limit is {limits.max_summary_chars}",
             path=entry,
+            key="knowledge_max_summary_chars",
+            rule="max_summary_chars",
             observed=len(summary),
             permitted=limits.max_summary_chars,
         )
@@ -241,14 +251,18 @@ def load_knowledge(
     validate_limits(limits)
     try:
         folder = path.resolve()
+        is_directory = folder.is_dir()
     except (OSError, RuntimeError) as error:
         raise KnowledgeError(
             f"Knowledge folder is invalid: {path}: {error}",
             path=path,
+            rule="directory_access",
         ) from error
 
-    if not folder.is_dir():
-        raise KnowledgeError(f"Knowledge folder is not a directory: {path}", path=path)
+    if not is_directory:
+        raise KnowledgeError(
+            f"Knowledge folder is not a directory: {path}", path=path, rule="directory_required"
+        )
 
     manifest_path = folder / "manifest.toml"
     manifest_bytes = _safe_read_bytes(folder, "manifest.toml")
@@ -258,11 +272,13 @@ def load_knowledge(
         raise KnowledgeError(
             f"Knowledge manifest is not UTF-8: {manifest_path}: {error}",
             path=manifest_path,
+            rule="utf8",
         ) from error
     except tomllib.TOMLDecodeError as error:
         raise KnowledgeError(
             f"Invalid TOML in knowledge manifest {manifest_path}: {error}",
             path=manifest_path,
+            rule="toml",
         ) from error
 
     try:
@@ -277,12 +293,17 @@ def load_knowledge(
             raise KnowledgeError(
                 f"Invalid knowledge manifest {manifest_path}: {detail}",
                 path=manifest_path,
+                key="persona",
+                rule="max_persona_chars",
                 observed=len(persona),
                 permitted=limits.max_persona_chars,
             ) from error
+        failure = error.errors()[0]
         raise KnowledgeError(
             f"Invalid knowledge manifest {manifest_path}: {error}",
             path=manifest_path,
+            key=".".join(str(part) for part in failure["loc"]),
+            rule=failure["type"],
         ) from error
 
     if manifest.dataset != database_name:
@@ -290,18 +311,38 @@ def load_knowledge(
         raise KnowledgeError(
             mismatch_message,
             path=manifest_path,
+            key="dataset",
+            rule="database_match",
         )
 
+    try:
+        entries = sorted(folder.iterdir(), key=lambda candidate: candidate.name.encode("utf-8"))
+    except OSError as error:
+        raise KnowledgeError(
+            f"Unable to enumerate knowledge folder {folder}: {error}",
+            path=Path(error.filename) if error.filename else folder,
+            rule="directory_enumeration",
+        ) from error
+
     topics: list[KnowledgeTopic] = []
-    for entry in sorted(folder.iterdir(), key=lambda candidate: candidate.name.encode("utf-8")):
+    for entry in entries:
         if entry.name == "manifest.toml":
             continue
         if entry.name.startswith("."):
             continue
-        if entry.is_dir():
+        try:
+            is_subdirectory = entry.is_dir()
+        except OSError as error:
+            raise KnowledgeError(
+                f"Unable to inspect knowledge entry {entry}: {error}",
+                path=entry,
+                rule="directory_entry_access",
+            ) from error
+        if is_subdirectory:
             raise KnowledgeError(
                 f"Knowledge folder contains a subdirectory: {entry}",
                 path=entry,
+                rule="no_subdirectories",
             )
         if not entry.name.endswith(".md"):
             continue
@@ -312,6 +353,8 @@ def load_knowledge(
                 f"Knowledge document exceeds {limits.max_doc_bytes} bytes: {entry}; "
                 f"document is {len(raw_bytes)} bytes, limit is {limits.max_doc_bytes}",
                 path=entry,
+                key="knowledge_max_doc_bytes",
+                rule="max_doc_bytes",
                 observed=len(raw_bytes),
                 permitted=limits.max_doc_bytes,
             )
@@ -320,6 +363,7 @@ def load_knowledge(
             raise KnowledgeError(
                 f"Topic filename stem is invalid: {entry.name}",
                 path=entry,
+                rule="filename_stem",
             )
 
         try:
@@ -328,6 +372,7 @@ def load_knowledge(
             raise KnowledgeError(
                 f"Knowledge document is not UTF-8: {entry}: {error}",
                 path=entry,
+                rule="utf8",
             ) from error
         title, summary = _derive_title_and_summary(text, entry, limits)
         topics.append(KnowledgeTopic(id=topic_id, title=title, summary=summary, text=text))
@@ -339,6 +384,8 @@ def load_knowledge(
             f"must be between 1 and {limits.max_topics}; "
             f"topic count is {topic_count}, limit is {limits.max_topics}",
             path=folder,
+            key="knowledge_max_topics",
+            rule="topic_count",
             observed=topic_count,
             permitted=limits.max_topics,
         )

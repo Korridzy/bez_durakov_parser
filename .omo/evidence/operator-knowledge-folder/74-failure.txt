@@ -1,0 +1,9 @@
+$ cd webreport && docker compose run --rm --no-deps backend python /app/_probe_74.py
+ Container webreport-backend-run-21b2fba0fa0b Creating 
+ Container webreport-backend-run-21b2fba0fa0b Created 
+KnowledgeError path=/tmp/tmp9krwzrcg/manifest.toml key='language' rule='extra_forbidden' Invalid knowledge manifest /tmp/tmp9krwzrcg/manifest.toml: 1 validation error for KnowledgeManifest
+language
+  Extra inputs are not permitted [type=extra_forbidden, input_value='en', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+KnowledgeError path=/tmp/tmp9krwzrcg key=None rule='directory_enumeration' Unable to enumerate knowledge folder /tmp/tmp9krwzrcg: [Errno 13] Permission denied: '/tmp/tmp9krwzrcg'
+exit=0
