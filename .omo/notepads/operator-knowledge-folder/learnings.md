@@ -265,3 +265,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - A successful shipped-folder load emits exactly one knowledge-concern INFO record using the manifest dataset and `len(knowledge.topics)`; the unset, missing, and invalid branches cannot reach it.
 - The in-process ASGI integration starts the real app with the shipped folder, scripts one `read_knowledge("rules")` tool call, posts one `/api/chat` request, and compares the resulting tool message with the shipped `rules.md` text.
 - The startup-order mock delegates to the real loader so it preserves the loaded object's manifest and topics while still recording call order. The final system lane passed all 87 tests; the mechanically captured red and green runs differ and report exits 1 and 0 respectively.
+
+## Todo 59
+
+`compose_system_prompt()` собирает persona манифеста, заданные в коде правила и список тем. Полный текст `KnowledgeTopic.text` остаётся доступен по точному идентификатору только через `read_knowledge`.
+
+В `startup_event()` загрузка и валидация знаний происходят перед `GameDataService`, probe LiteLLM и выбором режима. Сегодня независим от БД лишь путь prompt и знаний; восемь data tools и regex `FallbackInterpreter` всё ещё привязаны к игре.

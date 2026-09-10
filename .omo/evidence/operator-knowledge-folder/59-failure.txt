@@ -1,0 +1,2 @@
+grep -n "256\|1024" webreport/ARCHITECTURE.md
+exit=1
