@@ -1324,6 +1324,7 @@ class TestStartupInitialization(unittest.TestCase):
         main_module.checkpoint_connection = None
         main_module.checkpoint_saver = None
         main_module.data_service = None
+        main_module.knowledge = None
         main_module.llm_proxy_healthy = False
         main_module.sessions = SessionIndex(
             ttl=main_module.CHECKPOINT_TTL_SECONDS,
@@ -1435,6 +1436,31 @@ class TestStartupInitialization(unittest.TestCase):
                 self.assertEqual(loader_call_count, 1)
                 self.assertEqual(created_agents[0]["mode"], expected_mode)
                 self.assertIs(created_agents[0]["knowledge"], loaded_knowledge)
+
+    def test_invalid_limits_abort_startup_when_knowledge_dir_is_unset(self):
+        knowledge_module = importlib.import_module("agent.knowledge")
+        main_module = self._get_main_module()
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with (
+                patch.object(main_module, "KNOWLEDGE_DIR", None),
+                patch.object(main_module, "KNOWLEDGE_MAX_TOPICS", 0),
+                patch.object(main_module, "load_knowledge") as knowledge_loader,
+                patch.object(
+                    main_module,
+                    "initialize_data_service_with_retry",
+                    new=AsyncMock(),
+                ) as data_service_initializer,
+            ):
+                with self.assertRaises(knowledge_module.KnowledgeError) as raised:
+                    await main_module.startup_event()
+
+            self.assertEqual(raised.exception.key, "knowledge_max_topics")
+            knowledge_loader.assert_not_called()
+            data_service_initializer.assert_not_awaited()
+
+        asyncio.run(run_test())
 
     def test_regression_startup_retries_database_initialization(self):
         main_module = self._get_main_module()

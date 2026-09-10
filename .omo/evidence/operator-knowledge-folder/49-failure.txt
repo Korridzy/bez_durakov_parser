@@ -1,0 +1,9 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_49.py
+KNOWLEDGE_LOADED dataset=bez_durakov topics=3
+DATABASE_INITIALIZER_RAISED scripted database failure
+EXPECTED_STARTUP_ERROR scripted database failure
+CALL_ORDER ['knowledge', 'database']
+PASS knowledge loaded before database failure
+ Container webreport-backend-run-4ad0710411eb Creating 
+ Container webreport-backend-run-4ad0710411eb Created 
+exit=0

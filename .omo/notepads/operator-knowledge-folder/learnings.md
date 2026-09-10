@@ -241,3 +241,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `ReportAgentSystem` accepts the concrete optional `Knowledge`, forwards it only while constructing agent tools, and composes the matching system prompt once before building the graph; explicit `None` preserves the ordered ten-tool catalogue.
 - The scripted graph flow reads the shipped `rules` topic, exposes its complete text to the next model call without changing `rows_consumed`, and returns the existing in-band `Tool error:` when that document is used as an invalid report tool name.
 - A loaded knowledge object is accepted in fallback mode without building tools, composing an agent prompt, or changing the existing fallback response. The full aggregate passed all 153 tests.
+
+## Todo 48-49 startup knowledge ordering
+
+- `startup_event()` constructs and validates the five configured folder limits unconditionally, so an invalid limit aborts before checking an unset `KNOWLEDGE_DIR` or touching the database.
+- When configured, knowledge loads exactly once before database initialization and the LiteLLM probe in both elected modes; startup passes that same object to `ReportAgentSystem`.
+- The full system suite passed 77 tests, the agent regression suite passed 153 tests, and the failure probe recorded a completed knowledge load before an immediately raised database-initialization error.

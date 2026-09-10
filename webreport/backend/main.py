@@ -14,10 +14,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from bd_shared.config import (
+    AGENT_MODEL,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
+    DATABASE_NAME,
+    KNOWLEDGE_DIR,
+    KNOWLEDGE_MAX_DOC_BYTES,
+    KNOWLEDGE_MAX_PERSONA_CHARS,
+    KNOWLEDGE_MAX_SUMMARY_CHARS,
+    KNOWLEDGE_MAX_TITLE_CHARS,
+    KNOWLEDGE_MAX_TOPICS,
     LITELLM_BASE_URL,
-    AGENT_MODEL,
     PROBE_REQUEST_TIMEOUT_SECONDS,
     PROBE_RETRY_ATTEMPTS,
     PROBE_RETRY_DELAY_SECONDS,
@@ -26,6 +33,7 @@ from bd_shared.config import (
 )
 
 
+from agent.knowledge import Knowledge, KnowledgeLimits, load_knowledge, validate_limits
 from agent.reasoning import extract_reasoning, extract_text
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
@@ -101,6 +109,7 @@ agent_system: Optional[ReportAgentSystem] = None
 checkpoint_connection = None
 checkpoint_saver = None
 data_service: Optional[GameDataService] = None
+knowledge: Knowledge | None = None
 llm_proxy_healthy: bool = False
 sessions: SessionIndex = SessionIndex(
     max_size=MAX_SESSIONS,
@@ -263,7 +272,22 @@ async def rebuild_session_index() -> None:
 async def startup_event():
     """Initialize services on startup."""
     global agent_system, checkpoint_connection, checkpoint_saver
-    global data_service, llm_proxy_healthy
+    global data_service, knowledge, llm_proxy_healthy
+
+    knowledge_limits = KnowledgeLimits(
+        max_title_chars=KNOWLEDGE_MAX_TITLE_CHARS,
+        max_summary_chars=KNOWLEDGE_MAX_SUMMARY_CHARS,
+        max_persona_chars=KNOWLEDGE_MAX_PERSONA_CHARS,
+        max_topics=KNOWLEDGE_MAX_TOPICS,
+        max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
+        max_bytes_per_turn=131072,
+    )
+    validate_limits(knowledge_limits)
+    knowledge = (
+        load_knowledge(KNOWLEDGE_DIR, DATABASE_NAME, knowledge_limits)
+        if KNOWLEDGE_DIR is not None
+        else None
+    )
 
     data_service = await initialize_data_service_with_retry()
 
@@ -286,6 +310,7 @@ async def startup_event():
             service=data_service,
             checkpointer=saver,
             mode=mode,
+            knowledge=knowledge,
         )
         startup_complete = True
     finally:
