@@ -1,6 +1,6 @@
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help generate-env test test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env validate-knowledge test test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -10,10 +10,11 @@ help:
 	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
-	@echo "  make restart     - Recreate LiteLLM, backend, and frontend"
+	@echo "  make validate-knowledge - Validate the configured knowledge folder"
+	@echo "  make restart     - Validate, then recreate LiteLLM, backend, and frontend"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
-	@echo "  make rebuild     - Rebuild and restart services"
+	@echo "  make rebuild     - Validate, rebuild, and restart services"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test           - Run the offline backend suite (no running stack needed)"
@@ -55,7 +56,11 @@ stop:
 	$(DOCKER_COMPOSE) down
 	@echo "✅ Containers stopped"
 
-restart: generate-env
+validate-knowledge:
+	@echo "🔎 Validating the configured knowledge folder..."
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.knowledge_cli
+
+restart: generate-env validate-knowledge
 	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
 	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
 	@echo "✅ Application services recreated"
@@ -68,7 +73,7 @@ build: generate-env
 	$(DOCKER_COMPOSE) build
 	@echo "✅ Build complete"
 
-rebuild: generate-env
+rebuild: generate-env validate-knowledge
 	@echo "🔨 Rebuilding and restarting services..."
 	$(DOCKER_COMPOSE) down
 	$(DOCKER_COMPOSE) build

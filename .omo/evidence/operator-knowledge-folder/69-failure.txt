@@ -1,0 +1,273 @@
+SETUP: separate scratch folder selected through temporary config.local.toml override
+knowledge_dir=knowledge/_todo69_bad
+summary_file=bd_shared/knowledge/_todo69_bad/rules.md
+summary_length=201
+shipped_folder=bd_shared/knowledge/bez_durakov (untouched)
+exit=0
+
+$ docker inspect webreport-backend --format={{.Id}} {{.State.StartedAt}}
+8c1215b02738eff0fbda954ac77fb81462df284775363534a931097a8b4aca35 2026-09-10T02:32:57.437591687Z
+exit=0
+
+$ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:28000/health
+{"status":"healthy","timestamp":"2026-09-10T02:34:48.282130","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+$ make restart
+make -C webreport restart
+make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-fdaf7485d87d Creating 
+ Container webreport-backend-run-fdaf7485d87d Created 
+Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: /bd_shared/knowledge/_todo69_bad/rules.md; summary is 201 characters, limit is 200
+
+make[1]: *** [Makefile:61: validate-knowledge] Error 1
+make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+make: *** [Makefile:176: restart] Error 2
+exit=2
+
+$ make -C webreport rebuild
+make: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-1c50add04e38 Creating 
+ Container webreport-backend-run-1c50add04e38 Created 
+Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: /bd_shared/knowledge/_todo69_bad/rules.md; summary is 201 characters, limit is 200
+
+make: *** [Makefile:61: validate-knowledge] Error 1
+make: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+exit=2
+
+$ docker inspect webreport-backend --format={{.Id}} {{.State.StartedAt}}
+8c1215b02738eff0fbda954ac77fb81462df284775363534a931097a8b4aca35 2026-09-10T02:32:57.437591687Z
+exit=0
+
+$ cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED         STATUS                          PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          2 minutes ago   Up About a minute               5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago      Restarting (1) 44 seconds ago   
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         2 minutes ago   Up About a minute               5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          2 minutes ago   Up 2 minutes (healthy)          4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago      Up 40 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+
+$ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:28000/health
+{"status":"healthy","timestamp":"2026-09-10T02:34:54.771234","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+backend_container_unchanged=true
+scenario_exit=0
+exit=0
+
+DOCUMENTED EMERGENCY RECOVERY: set knowledge_dir = ""
+edit=bd_shared/config.local.toml [webreport] knowledge_dir = ""
+exit=0
+
+$ cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-04c1161eeabf Creating 
+ Container webreport-backend-run-04c1161eeabf Created 
+Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
+exit=0
+
+$ make validate-knowledge
+cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-07f768131522 Creating 
+ Container webreport-backend-run-07f768131522 Created 
+Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
+exit=0
+
+$ make restart
+make -C webreport restart
+make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-34b9790b5c58 Creating 
+ Container webreport-backend-run-34b9790b5c58 Created 
+Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
+🔄 Recreating LiteLLM, backend, and frontend...
+docker compose up -d --force-recreate litellm backend frontend
+ Container webreport-mysql Running 
+ Container webreport-litellm Recreate 
+ Container webreport-litellm Recreated 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-frontend Recreate 
+ Container webreport-frontend Recreated 
+ Container webreport-litellm Starting 
+ Container webreport-litellm Started 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+ Container webreport-frontend Starting 
+ Container webreport-frontend Started 
+✅ Application services recreated
+make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+exit=0
+
+$ curl --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 60 --fail http://127.0.0.1:28000/health
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 30 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 29 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 28 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 27 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 26 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 25 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 24 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 23 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 22 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+Warning: Problem (retrying all errors). Will retry in 1 seconds. 21 retries 
+Warning: left.
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100   121  100   121    0     0  77119      0 --:--:-- --:--:-- --:--:--  118k
+{"status":"healthy","timestamp":"2026-09-10T02:36:50.879857","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+$ cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                          PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          37 seconds ago   Up 10 seconds                   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 39 seconds ago   
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         36 seconds ago   Up 10 seconds                   5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          40 seconds ago   Up 25 seconds (healthy)         4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 40 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+
+emergency_recovery_exit=0
+exit=0
+
+RESTORE ORIGINAL CONFIGURATION AND SHIPPED KNOWLEDGE PATH
+sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a  bd_shared/config.local.toml
+expected_sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a
+scratch_folder_absent=true
+exit=0
+
+$ make validate-knowledge
+cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-f35ec704e0a1 Creating 
+ Container webreport-backend-run-f35ec704e0a1 Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
+exit=0
+
+$ make restart
+make -C webreport restart
+make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-0f90010d9c6e Creating 
+ Container webreport-backend-run-0f90010d9c6e Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
+🔄 Recreating LiteLLM, backend, and frontend...
+docker compose up -d --force-recreate litellm backend frontend
+ Container webreport-mysql Running 
+ Container webreport-litellm Recreate 
+ Container webreport-litellm Recreated 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-frontend Recreate 
+ Container webreport-frontend Recreated 
+ Container webreport-litellm Starting 
+ Container webreport-litellm Started 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+ Container webreport-frontend Starting 
+ Container webreport-frontend Started 
+✅ Application services recreated
+make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+exit=0
+
+$ curl --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 60 --fail --silent --show-error http://127.0.0.1:28000/health
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+{"status":"healthy","timestamp":"2026-09-10T02:38:28.227037","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+$ cd webreport && docker compose exec -T backend python -c import bd_shared.config as c; print(c.KNOWLEDGE_DIR)
+/bd_shared/knowledge/bez_durakov
+exit=0
+
+$ cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                          PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          37 seconds ago   Up 10 seconds                   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 17 seconds ago   
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         37 seconds ago   Up 10 seconds                   5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          41 seconds ago   Up 26 seconds (healthy)         4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 40 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+
+original_configuration_restored=true
+restoration_exit=0
+exit=0

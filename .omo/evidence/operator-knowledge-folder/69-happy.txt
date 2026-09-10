@@ -1,0 +1,63 @@
+$ make validate-knowledge
+cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-1bdd47e65776 Creating 
+ Container webreport-backend-run-1bdd47e65776 Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
+exit=0
+
+$ make restart
+make -C webreport restart
+make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-5ceb4abe1f31 Creating 
+ Container webreport-backend-run-5ceb4abe1f31 Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
+🔄 Recreating LiteLLM, backend, and frontend...
+docker compose up -d --force-recreate litellm backend frontend
+ Container webreport-mysql Running 
+ Container webreport-litellm Recreate 
+ Container webreport-litellm Recreated 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-frontend Recreate 
+ Container webreport-frontend Recreated 
+ Container webreport-litellm Starting 
+ Container webreport-litellm Started 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+ Container webreport-frontend Starting 
+ Container webreport-frontend Started 
+✅ Application services recreated
+make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+exit=0
+
+$ cd webreport && docker compose exec -T backend python -c import bd_shared.config as c; print(c.KNOWLEDGE_DIR)
+/bd_shared/knowledge/bez_durakov
+exit=0
+
+$ curl --retry 30 --retry-all-errors --retry-delay 0 --retry-max-time 60 --fail --silent --show-error http://127.0.0.1:28000/health
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+{"status":"healthy","timestamp":"2026-09-10T02:33:13.324631","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+$ cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                         PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          43 seconds ago   Up 15 seconds                  5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 3 seconds ago   
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         42 seconds ago   Up 15 seconds                  5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          46 seconds ago   Up 31 seconds (healthy)        4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 40 hours                    0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+
+verifier_note=The first verifier attempted json.loads() on combined curl stderr/stdout; the command itself exited 0 and its final output line is the healthy JSON response shown above.
+scenario_exit=0
+exit=0

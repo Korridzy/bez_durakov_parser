@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 PYTHON_VERSION ?= 3.11
 
-.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop validate-knowledge restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -17,8 +17,9 @@ help:
 	@echo ""
 	@echo "WebReport stack:"
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
-	@echo "  make webreport-stop  - Stop WebReport stack"
-	@echo "  make restart         - Recreate LiteLLM, backend, and frontend"
+	@echo "  make webreport-stop   - Stop WebReport stack"
+	@echo "  make validate-knowledge - Validate the configured knowledge folder"
+	@echo "  make restart          - Recreate LiteLLM, backend, and frontend"
 	@echo "  make mysql-start     - Start only MySQL container"
 	@echo "  make mysql-stop      - Stop only MySQL container"
 	@echo ""
@@ -167,6 +168,9 @@ webreport-start:
 webreport-stop:
 	@echo "🛑 Остановка WebReport..."
 	cd webreport && $(MAKE) stop
+
+validate-knowledge:
+	cd webreport && $(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.knowledge_cli
 
 restart:
 	$(MAKE) -C webreport restart
