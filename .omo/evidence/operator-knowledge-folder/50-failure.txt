@@ -1,0 +1,4 @@
+grep -n "runs without dataset knowledge" webreport/backend/test_system.py
+1450:            "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.",
+1458:            f"Knowledge folder not found at {missing_path.resolve()}; the agent runs without dataset knowledge.",
+exit=0

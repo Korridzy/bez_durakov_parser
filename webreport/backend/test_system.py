@@ -6,6 +6,7 @@ import sys
 import asyncio
 import importlib
 import json as json_module
+from pathlib import Path
 from typing import Any
 
 import unittest
@@ -1372,6 +1373,90 @@ class TestStartupInitialization(unittest.TestCase):
         if testclient is not None:
             testclient.close()
             testclient = None
+
+    def _assert_startup_without_knowledge(self, knowledge_dir, expected_warning):
+        knowledge_module = importlib.import_module("agent.knowledge")
+        runtime_module = importlib.import_module("agents.report_runtime")
+        message_module = importlib.import_module("langchain_core.messages")
+        main_module = self._get_main_module()
+
+        async def run_test():
+            model = ScriptedStub([message_module.AIMessage(content="ready")])
+            startup_error = None
+            mode = None
+            prompt = None
+            await self._reset_startup_state(main_module)
+            with (
+                patch.object(main_module, "KNOWLEDGE_DIR", knowledge_dir),
+                patch.object(main_module, "GameDataService", return_value=StubService()),
+                patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
+                patch.object(
+                    main_module,
+                    "probe_llm_proxy",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    runtime_module,
+                    "_new_model_client",
+                    return_value=model,
+                ),
+                patch.object(
+                    runtime_module,
+                    "build_graph",
+                    wraps=runtime_module.build_graph,
+                ) as graph_builder,
+                patch.object(
+                    main_module.logger,
+                    "warning",
+                    wraps=main_module.logger.warning,
+                ) as warning_logger,
+            ):
+                try:
+                    await main_module.startup_event()
+                except Exception as error:
+                    startup_error = error
+                else:
+                    mode = main_module.agent_system.mode
+                    prompt = graph_builder.call_args.args[3]
+                finally:
+                    if main_module.checkpoint_connection is not None:
+                        await main_module.shutdown_event()
+
+            rendered_warnings = [
+                args.args[0] % args.args[1:]
+                for args in warning_logger.call_args_list
+            ]
+            knowledge_warnings = [
+                message
+                for message in rendered_warnings
+                if message.startswith("Knowledge folder")
+            ]
+            return startup_error, mode, prompt, model.bound_tool_names, knowledge_warnings
+
+        startup_error, mode, prompt, tool_names, knowledge_warnings = asyncio.run(
+            run_test()
+        )
+
+        self.assertEqual(knowledge_warnings, [expected_warning])
+        self.assertIsNone(startup_error)
+        self.assertEqual(mode, "agent")
+        self.assertNotIn("read_knowledge", tool_names)
+        self.assertEqual(prompt, knowledge_module.compose_system_prompt(None))
+        self.assertIsNone(main_module.knowledge)
+
+    def test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent(self):
+        self._assert_startup_without_knowledge(
+            None,
+            "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.",
+        )
+
+    def test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent(self):
+        missing_path = Path("definitely-missing-knowledge-folder")
+        self.assertFalse(missing_path.exists())
+        self._assert_startup_without_knowledge(
+            missing_path,
+            f"Knowledge folder not found at {missing_path.resolve()}; the agent runs without dataset knowledge.",
+        )
 
     def test_knowledge_loads_once_before_database_and_probe_in_each_mode(self):
         main_module = self._get_main_module()
