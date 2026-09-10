@@ -1,0 +1,102 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/test_reasoning.py
+ Container webreport-backend-run-50ffc3cf9eae Creating 
+ Container webreport-backend-run-50ffc3cf9eae Created 
+/app/main.py:277: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+/usr/local/lib/python3.11/site-packages/fastapi/applications.py:4675: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+/app/main.py:352: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+..............................ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 261, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 323, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 169, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 117, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_reasoning_partial.py", line 84, in ainvoke
+    raise _ScriptedFailure("model exploded")
+test_reasoning_partial._ScriptedFailure: model exploded
+During task with name 'agent' and id '1ae87bb2-b1ce-a80f-5ffa-9a34fbd61697'
+.ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 261, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 323, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 169, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 117, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_reasoning_partial.py", line 84, in ainvoke
+    raise _ScriptedFailure("model exploded")
+test_reasoning_partial._ScriptedFailure: model exploded
+During task with name 'agent' and id '85fb93c7-671a-f7e6-c0f4-b275d61102d4'
+...............................
+----------------------------------------------------------------------
+Ran 62 tests in 1.770s
+
+OK
+exit=0
