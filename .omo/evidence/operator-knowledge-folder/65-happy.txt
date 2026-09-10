@@ -1,0 +1,183 @@
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_checkpointer.py -v
+bounded baseline: model_invocations=16 tool_executions=15 data_calls=14
+ Container webreport-backend-run-03b1189f7f45 Creating 
+ Container webreport-backend-run-03b1189f7f45 Created 
+/bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+test_baseline_bounded_tool_rounds_still_complete (__main__.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete) ... ok
+test_checkpoint_round_trip_preserves_history (__main__.TestCheckpointerCases.test_checkpoint_round_trip_preserves_history) ... ok
+test_delete_thread_on_missing_thread_needs_setup (__main__.TestCheckpointerCases.test_delete_thread_on_missing_thread_needs_setup) ... ok
+test_knowledge_compaction_preserves_message_identity_and_pairs (__main__.TestCheckpointerCases.test_knowledge_compaction_preserves_message_identity_and_pairs) ... FAIL
+test_next_turn_after_model_exception_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document) ... FAIL
+test_next_turn_after_recursion_error_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document) ... FAIL
+test_next_turn_after_timeout_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document) ... FAIL
+test_next_turn_does_not_carry_knowledge_document (__main__.TestCheckpointerCases.test_next_turn_does_not_carry_knowledge_document) ... FAIL
+test_restart_reads_changed_document_not_checkpoint_copy (__main__.TestCheckpointerCases.test_restart_reads_changed_document_not_checkpoint_copy) ... FAIL
+test_three_large_reads_keep_head_and_next_request_small (__main__.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small) ... FAIL
+test_system_prompt_with_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_with_knowledge_is_byte_exact) ... ok
+test_system_prompt_without_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_without_knowledge_is_byte_exact) ... ok
+
+======================================================================
+FAIL: test_knowledge_compaction_preserves_message_identity_and_pairs (__main__.TestCheckpointerCases.test_knowledge_compaction_preserves_message_identity_and_pairs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 179, in test_knowledge_compaction_preserves_message_identity_and_pairs
+    self.assertNotEqual(after.content, before.content)
+AssertionError: '# Rules\n\nFixture summary.\n\nDOCUMENT-BODY-SENTINEL-65\n' == '# Rules\n\nFixture summary.\n\nDOCUMENT-BODY-SENTINEL-65\n'
+
+======================================================================
+FAIL: test_next_turn_after_model_exception_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 305, in test_next_turn_after_model_exception_does_not_carry_document
+    await self._recover_failed_turn("model_exception")
+  File "/app/test_agent_checkpointer.py", line 286, in _recover_failed_turn
+    self._assert_no_document(failing.requests[0], text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+======================================================================
+FAIL: test_next_turn_after_recursion_error_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 302, in test_next_turn_after_recursion_error_does_not_carry_document
+    await self._recover_failed_turn("recursion")
+  File "/app/test_agent_checkpointer.py", line 294, in _recover_failed_turn
+    self._assert_no_document(recovery.requests[0], text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+======================================================================
+FAIL: test_next_turn_after_timeout_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 308, in test_next_turn_after_timeout_does_not_carry_document
+    await self._recover_failed_turn("timeout")
+  File "/app/test_agent_checkpointer.py", line 294, in _recover_failed_turn
+    self._assert_no_document(recovery.requests[0], text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+======================================================================
+FAIL: test_next_turn_does_not_carry_knowledge_document (__main__.TestCheckpointerCases.test_next_turn_does_not_carry_knowledge_document)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 147, in test_next_turn_does_not_carry_knowledge_document
+    self._assert_no_document(model.requests[-1], text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+======================================================================
+FAIL: test_restart_reads_changed_document_not_checkpoint_copy (__main__.TestCheckpointerCases.test_restart_reads_changed_document_not_checkpoint_copy)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 328, in test_restart_reads_changed_document_not_checkpoint_copy
+    self._assert_no_document(model.requests[0], old_text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+======================================================================
+FAIL: test_three_large_reads_keep_head_and_next_request_small (__main__.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_checkpointer.py", line 361, in test_three_large_reads_keep_head_and_next_request_small
+    self._assert_no_document(outbound, text)
+  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+    self.assertFalse(
+AssertionError: True is not false : The next turn must not carry the knowledge document body
+
+----------------------------------------------------------------------
+Ran 12 tests in 4.872s
+
+FAILED (failures=7)
+
+exit=1

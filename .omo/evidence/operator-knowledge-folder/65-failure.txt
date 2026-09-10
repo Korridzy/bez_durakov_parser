@@ -1,0 +1,108 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_65.py
+Without compaction, document body IS present in ScriptedModel.requests[-1]
+Next-turn regression assertion correctly FAILS: True is not false : The next turn must not carry the knowledge document body
+BASELINE requested_tool_rounds= 15 model_invocations= 16 tool_executions= 15 result= success head_final_content= FINAL-ANSWER head_final_tool_calls= []
+BASELINE requested_tool_rounds= 16 model_invocations= 17 tool_executions= 16 result= recursion_limit head_final_content= FINAL-ANSWER head_final_tool_calls= []
+Installed LangGraph tick implementation:
+    def tick(self) -> bool:
+        """Execute a single iteration of the Pregel loop.
+
+        Returns:
+            True if more iterations are needed.
+        """
+
+        # check if iteration limit is reached
+        if self.step > self.stop:
+            self.status = "out_of_steps"
+            return False
+
+        # prepare next tasks
+        self.tasks = prepare_next_tasks(
+            self.checkpoint,
+            self.checkpoint_pending_writes,
+            self.nodes,
+            self.channels,
+            self.managed,
+            self.config,
+            self.step,
+            self.stop,
+            for_execution=True,
+            manager=self.manager,
+            store=self.store,
+            checkpointer=self.checkpointer,
+            trigger_to_nodes=self.trigger_to_nodes,
+            updated_channels=self.updated_channels,
+            retry_policy=self.retry_policy,
+            cache_policy=self.cache_policy,
+        )
+
+        # produce debug output
+        if self._checkpointer_put_after_previous is not None:
+            self._emit(
+                "checkpoints",
+                map_debug_checkpoint,
+                {
+                    **self.checkpoint_config,
+                    CONF: {
+                        **self.checkpoint_config[CONF],
+                        CONFIG_KEY_CHECKPOINT_ID: self.checkpoint["id"],
+                    },
+                },
+                self.channels,
+                self.stream_keys,
+                self.checkpoint_metadata,
+                self.tasks.values(),
+                self.checkpoint_pending_writes,
+                self.prev_checkpoint_config,
+                self.output_keys,
+            )
+
+        # if no more tasks, we're done
+        if not self.tasks:
+            self.status = "done"
+            return False
+
+        if self.control is not None and self.control.drain_requested:
+            self.status = "draining"
+            return False
+
+        # if there are pending writes from a previous loop, apply them
+        if not self.is_replaying and self.checkpoint_pending_writes:
+            self._reapply_writes_to_succeeded_nodes(self.tasks)
+            self._resume_error_handlers_if_applicable()
+
+        # before execution, check if we should interrupt
+        if self.interrupt_before and should_interrupt(
+            self.checkpoint, self.interrupt_before, self.tasks.values()
+        ):
+            self.status = "interrupt_before"
+            raise GraphInterrupt()
+
+        # produce debug output
+        self._emit("tasks", map_debug_tasks, self.tasks.values())
+
+        # print output for any tasks we applied previous writes to
+        for task in self.tasks.values():
+            if task.writes:
+                self.output_writes(task.id, task.writes, cached=True)
+
+        return True
+
+ Container webreport-backend-run-9d90cafb610a Creating 
+ Container webreport-backend-run-9d90cafb610a Created 
+exit=0
+
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python -m unittest -v test_agent_checkpointer.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete test_agent_graph.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker
+bounded baseline: model_invocations=16 tool_executions=15 data_calls=14
+ Container webreport-backend-run-f020e9806d22 Creating 
+ Container webreport-backend-run-f020e9806d22 Created 
+/bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+test_baseline_bounded_tool_rounds_still_complete (test_agent_checkpointer.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete) ... ok
+test_endless_tool_calls_return_controlled_recursion_marker (test_agent_graph.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 3.668s
+
+OK
+exit=0
