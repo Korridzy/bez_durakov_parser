@@ -1,0 +1,497 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_66.py
+ASGI read_turn=1 document_bytes=61440 head_messages_bytes=1116 next_first_request_bytes=1961
+ASGI read_turn=2 document_bytes=61440 head_messages_bytes=2232 next_first_request_bytes=3033
+ASGI read_turn=3 document_bytes=61440 head_messages_bytes=3348 next_first_request_bytes=4105
+ASGI chat/history: four successful turns, eight history entries, reasoning preserved
+ Container webreport-backend-run-2c1188bbe44a Creating 
+ Container webreport-backend-run-2c1188bbe44a Created 
+INFO:httpx:HTTP Request: POST http://test/api/chat "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://test/api/chat "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://test/api/chat "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://test/api/chat "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://test/api/history/21409851c1b54d0da37f4257bfac2efb "HTTP/1.1 200 OK"
+exit=0
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python -m unittest -v test_agent_checkpointer.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document test_agent_checkpointer.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete test_agent_graph.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker
+read_turn=1 document_bytes=61440 head_messages_bytes=1102 next_first_request_bytes=1464
+read_turn=2 document_bytes=61440 head_messages_bytes=2204 next_first_request_bytes=2566
+read_turn=3 document_bytes=61440 head_messages_bytes=3306 next_first_request_bytes=3668
+recursion: next-turn request and completed head omit document
+timeout: next-turn request and completed head omit document
+model_exception: next-turn request and completed head omit document
+bounded baseline: model_invocations=16 tool_executions=15 data_calls=14
+ Container webreport-backend-run-7e5c51f89c18 Creating 
+ Container webreport-backend-run-7e5c51f89c18 Created 
+/bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+test_three_large_reads_keep_head_and_next_request_small (test_agent_checkpointer.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small) ... ok
+test_next_turn_after_recursion_error_does_not_carry_document (test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document) ... ok
+test_next_turn_after_timeout_does_not_carry_document (test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document) ... ok
+test_next_turn_after_model_exception_does_not_carry_document (test_agent_checkpointer.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document) ... ok
+test_baseline_bounded_tool_rounds_still_complete (test_agent_checkpointer.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete) ... ok
+test_endless_tool_calls_return_controlled_recursion_marker (test_agent_graph.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 4.694s
+
+OK
+exit=0
+
+diff -u .omo/evidence/operator-knowledge-folder/65-happy.txt .omo/evidence/operator-knowledge-folder/66-happy.txt
+--- .omo/evidence/operator-knowledge-folder/65-happy.txt	2026-09-10 06:04:09.407125834 +0300
++++ .omo/evidence/operator-knowledge-folder/66-happy.txt	2026-09-10 06:08:38.016124354 +0300
+@@ -1,183 +1,256 @@
+ cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_checkpointer.py -v
+ bounded baseline: model_invocations=16 tool_executions=15 data_calls=14
+- Container webreport-backend-run-03b1189f7f45 Creating 
+- Container webreport-backend-run-03b1189f7f45 Created 
++model_exception: next-turn request and completed head omit document
++recursion: next-turn request and completed head omit document
++timeout: next-turn request and completed head omit document
++read_turn=1 document_bytes=61440 head_messages_bytes=1102 next_first_request_bytes=1464
++read_turn=2 document_bytes=61440 head_messages_bytes=2204 next_first_request_bytes=2566
++read_turn=3 document_bytes=61440 head_messages_bytes=3306 next_first_request_bytes=3668
++ Container webreport-backend-run-fbf298358e09 Creating 
++ Container webreport-backend-run-fbf298358e09 Created 
+ /bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+   Base = declarative_base()
+ test_baseline_bounded_tool_rounds_still_complete (__main__.TestCheckpointerCases.test_baseline_bounded_tool_rounds_still_complete) ... ok
+ test_checkpoint_round_trip_preserves_history (__main__.TestCheckpointerCases.test_checkpoint_round_trip_preserves_history) ... ok
+ test_delete_thread_on_missing_thread_needs_setup (__main__.TestCheckpointerCases.test_delete_thread_on_missing_thread_needs_setup) ... ok
+-test_knowledge_compaction_preserves_message_identity_and_pairs (__main__.TestCheckpointerCases.test_knowledge_compaction_preserves_message_identity_and_pairs) ... FAIL
+-test_next_turn_after_model_exception_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document) ... FAIL
+-test_next_turn_after_recursion_error_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document) ... FAIL
+-test_next_turn_after_timeout_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document) ... FAIL
+-test_next_turn_does_not_carry_knowledge_document (__main__.TestCheckpointerCases.test_next_turn_does_not_carry_knowledge_document) ... FAIL
+-test_restart_reads_changed_document_not_checkpoint_copy (__main__.TestCheckpointerCases.test_restart_reads_changed_document_not_checkpoint_copy) ... FAIL
+-test_three_large_reads_keep_head_and_next_request_small (__main__.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small) ... FAIL
++test_knowledge_compaction_preserves_message_identity_and_pairs (__main__.TestCheckpointerCases.test_knowledge_compaction_preserves_message_identity_and_pairs) ... ok
++test_next_turn_after_model_exception_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document) ... ok
++test_next_turn_after_recursion_error_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document) ... ok
++test_next_turn_after_timeout_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document) ... ok
++test_next_turn_does_not_carry_knowledge_document (__main__.TestCheckpointerCases.test_next_turn_does_not_carry_knowledge_document) ... ok
++test_restart_reads_changed_document_not_checkpoint_copy (__main__.TestCheckpointerCases.test_restart_reads_changed_document_not_checkpoint_copy) ... ok
++test_three_large_reads_keep_head_and_next_request_small (__main__.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small) ... ok
+ test_system_prompt_with_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_with_knowledge_is_byte_exact) ... ok
+ test_system_prompt_without_knowledge_is_byte_exact (__main__.TestPromptCases.test_system_prompt_without_knowledge_is_byte_exact) ... ok
+ 
+-======================================================================
+-FAIL: test_knowledge_compaction_preserves_message_identity_and_pairs (__main__.TestCheckpointerCases.test_knowledge_compaction_preserves_message_identity_and_pairs)
+ ----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 179, in test_knowledge_compaction_preserves_message_identity_and_pairs
+-    self.assertNotEqual(after.content, before.content)
+-AssertionError: '# Rules\n\nFixture summary.\n\nDOCUMENT-BODY-SENTINEL-65\n' == '# Rules\n\nFixture summary.\n\nDOCUMENT-BODY-SENTINEL-65\n'
++Ran 12 tests in 4.996s
+ 
+-======================================================================
+-FAIL: test_next_turn_after_model_exception_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_model_exception_does_not_carry_document)
+-----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 305, in test_next_turn_after_model_exception_does_not_carry_document
+-    await self._recover_failed_turn("model_exception")
+-  File "/app/test_agent_checkpointer.py", line 286, in _recover_failed_turn
+-    self._assert_no_document(failing.requests[0], text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
++OK
++exit=0
+ 
+-======================================================================
+-FAIL: test_next_turn_after_recursion_error_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_recursion_error_does_not_carry_document)
+-----------------------------------------------------------------------
++cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent.py
++bounded baseline: model_invocations=8 tool_executions=7 data_calls=6
++model_exception: next-turn request and completed head omit document
++recursion: next-turn request and completed head omit document
++timeout: next-turn request and completed head omit document
++read_turn=1 document_bytes=61440 head_messages_bytes=1102 next_first_request_bytes=1464
++read_turn=2 document_bytes=61440 head_messages_bytes=2204 next_first_request_bytes=2566
++read_turn=3 document_bytes=61440 head_messages_bytes=3306 next_first_request_bytes=3668
++ Container webreport-backend-run-133f78a5b81d Creating 
++ Container webreport-backend-run-133f78a5b81d Created 
++......./bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
++  Base = declarative_base()
++...................................................................................................................................ERROR:agents.report_runtime:Report request failed
+ Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 302, in test_next_turn_after_recursion_error_does_not_carry_document
+-    await self._recover_failed_turn("recursion")
+-  File "/app/test_agent_checkpointer.py", line 294, in _recover_failed_turn
+-    self._assert_no_document(recovery.requests[0], text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
+-
+-======================================================================
+-FAIL: test_next_turn_after_timeout_does_not_carry_document (__main__.TestCheckpointerCases.test_next_turn_after_timeout_does_not_carry_document)
++  File "/app/agents/report_runtime.py", line 261, in process_user_request
++    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agents/report_runtime.py", line 324, in _process_agent
++    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
++    return fut.result()
++           ^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 223, in arun
++    return await graph.ainvoke(
++           ^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
++    async for chunk in self.astream(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
++    async for _ in runner.atick(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
++    await arun_with_retry(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
++    return await task.proc.ainvoke(task.input, config)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
++    input = await asyncio.create_task(
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
++    ret = await self.afunc(*args, **kwargs)
++          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 166, in call_model
++    response = await bound_model.ainvoke(
++               ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/test_agent_report_agent.py", line 24, in ainvoke
++    raise ScriptedModelError("scripted model failure")
++test_agent_report_agent.ScriptedModelError: scripted model failure
++During task with name 'agent' and id '9a359480-067c-d05e-74a8-494ca332d8f2'
++............................
+ ----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 308, in test_next_turn_after_timeout_does_not_carry_document
+-    await self._recover_failed_turn("timeout")
+-  File "/app/test_agent_checkpointer.py", line 294, in _recover_failed_turn
+-    self._assert_no_document(recovery.requests[0], text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
++Ran 166 tests in 9.207s
+ 
+-======================================================================
+-FAIL: test_next_turn_does_not_carry_knowledge_document (__main__.TestCheckpointerCases.test_next_turn_does_not_carry_knowledge_document)
+-----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 147, in test_next_turn_does_not_carry_knowledge_document
+-    self._assert_no_document(model.requests[-1], text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
++OK
++exit=0
+ 
+-======================================================================
+-FAIL: test_restart_reads_changed_document_not_checkpoint_copy (__main__.TestCheckpointerCases.test_restart_reads_changed_document_not_checkpoint_copy)
+-----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 328, in test_restart_reads_changed_document_not_checkpoint_copy
+-    self._assert_no_document(model.requests[0], old_text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
++cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_reasoning.py
++ Container webreport-backend-run-5d94aa0b207e Creating 
++ Container webreport-backend-run-5d94aa0b207e Created 
++/app/main.py:278: DeprecationWarning: 
++        on_event is deprecated, use lifespan event handlers instead.
+ 
+-======================================================================
+-FAIL: test_three_large_reads_keep_head_and_next_request_small (__main__.TestCheckpointerCases.test_three_large_reads_keep_head_and_next_request_small)
+-----------------------------------------------------------------------
+-Traceback (most recent call last):
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+-    if self._callMaybeAsync(method) is not None:
+-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+-    return self._asyncioRunner.run(
+-           ^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+-    return self._loop.run_until_complete(task)
+-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+-    return future.result()
+-           ^^^^^^^^^^^^^^^
+-  File "/app/test_agent_checkpointer.py", line 361, in test_three_large_reads_keep_head_and_next_request_small
+-    self._assert_no_document(outbound, text)
+-  File "/app/test_agent_checkpointer.py", line 113, in _assert_no_document
+-    self.assertFalse(
+-AssertionError: True is not false : The next turn must not carry the knowledge document body
++        Read more about it in the
++        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
++        
++  @app.on_event("startup")
++/usr/local/lib/python3.11/site-packages/fastapi/applications.py:4675: DeprecationWarning: 
++        on_event is deprecated, use lifespan event handlers instead.
++
++        Read more about it in the
++        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
++        
++  return self.router.on_event(event_type)  # ty: ignore[deprecated]
++/app/main.py:353: DeprecationWarning: 
++        on_event is deprecated, use lifespan event handlers instead.
+ 
++        Read more about it in the
++        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
++        
++  @app.on_event("shutdown")
++..............................ERROR:agents.report_runtime:Report request failed
++Traceback (most recent call last):
++  File "/app/agents/report_runtime.py", line 261, in process_user_request
++    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agents/report_runtime.py", line 324, in _process_agent
++    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
++    return fut.result()
++           ^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 223, in arun
++    return await graph.ainvoke(
++           ^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
++    async for chunk in self.astream(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
++    async for _ in runner.atick(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
++    await arun_with_retry(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
++    return await task.proc.ainvoke(task.input, config)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
++    input = await asyncio.create_task(
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
++    ret = await self.afunc(*args, **kwargs)
++          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 166, in call_model
++    response = await bound_model.ainvoke(
++               ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/test_reasoning_partial.py", line 84, in ainvoke
++    raise _ScriptedFailure("model exploded")
++test_reasoning_partial._ScriptedFailure: model exploded
++During task with name 'agent' and id 'c1a80aca-b011-30c3-1907-a65544d9f276'
++.ERROR:agents.report_runtime:Report request failed
++Traceback (most recent call last):
++  File "/app/agents/report_runtime.py", line 261, in process_user_request
++    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agents/report_runtime.py", line 324, in _process_agent
++    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
++    return fut.result()
++           ^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 223, in arun
++    return await graph.ainvoke(
++           ^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
++    async for chunk in self.astream(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
++    async for _ in runner.atick(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
++    await arun_with_retry(
++  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
++    return await task.proc.ainvoke(task.input, config)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
++    input = await asyncio.create_task(
++            ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
++    ret = await self.afunc(*args, **kwargs)
++          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/agent/graph.py", line 166, in call_model
++    response = await bound_model.ainvoke(
++               ^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "/app/test_reasoning_partial.py", line 84, in ainvoke
++    raise _ScriptedFailure("model exploded")
++test_reasoning_partial._ScriptedFailure: model exploded
++During task with name 'agent' and id 'ed5e1fca-b2c8-b5ca-f071-2a2bcbcb0e20'
++...............................
+ ----------------------------------------------------------------------
+-Ran 12 tests in 4.872s
++Ran 62 tests in 1.737s
++
++OK
++exit=0
++
++poetry run ruff check webreport/backend/agent/graph.py webreport/backend/test_agent_checkpointer.py
++All checks passed!
++exit=0
++cd webreport && docker compose build backend
++#1 [internal] load local bake definitions
++#1 reading from stdin 544B done
++#1 DONE 0.0s
++
++#2 [internal] load build definition from Dockerfile.backend
++#2 transferring dockerfile: 1.03kB done
++#2 DONE 0.1s
++
++#3 [internal] load metadata for docker.io/library/python:3.11-slim
++#3 DONE 1.2s
++
++#4 [internal] load .dockerignore
++#4 transferring context: 364B done
++#4 DONE 0.1s
++
++#5 [internal] load build context
++#5 DONE 0.0s
++
++#6 [1/8] FROM docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
++#6 resolve docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 0.0s done
++#6 DONE 0.0s
++
++#5 [internal] load build context
++#5 transferring context: 502.15kB done
++#5 DONE 0.1s
++
++#7 [6/8] COPY webreport/backend/pyproject.toml webreport/backend/poetry.lock /tmp/
++#7 CACHED
++
++#8 [3/8] RUN apt-get update && apt-get install -y     gcc     g++     && rm -rf /var/lib/apt/lists/*
++#8 CACHED
++
++#9 [7/8] RUN poetry config virtualenvs.create false
++#9 CACHED
++
++#10 [2/8] WORKDIR /app
++#10 CACHED
++
++#11 [4/8] RUN python -m pip install --no-cache-dir "poetry==2.1.3"
++#11 CACHED
++
++#12 [5/8] RUN mkdir -p /app
++#12 CACHED
++
++#13 [8/8] RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
++#13 CACHED
+ 
+-FAILED (failures=7)
++#14 exporting to image
++#14 exporting layers done
++#14 exporting manifest sha256:00fb138d42f5f51173574e8b0f3c25f30a26e2fe96181fcfd2b258647abd8f22 0.0s done
++#14 exporting config sha256:226bf9e123059f726c81f6fd90acb14e43cfac1acc750257a03f7e073f47a5cf
++#14 exporting config sha256:226bf9e123059f726c81f6fd90acb14e43cfac1acc750257a03f7e073f47a5cf 0.0s done
++#14 exporting attestation manifest sha256:9082d9e82f481f43daa942e97978bbfb38e08f69f7c1761ba8736c8b50ad198d 0.0s done
++#14 exporting manifest list sha256:02214bd8f2c6f8c5fc01796af22f4ccb36a562c27d63d3e5510f3c5faf03893f 0.0s done
++#14 naming to docker.io/library/webreport-backend:latest done
++#14 unpacking to docker.io/library/webreport-backend:latest 0.0s done
++#14 DONE 0.1s
+ 
+-exit=1
++#15 resolving provenance for metadata file
++#15 DONE 0.0s
++ Image webreport-backend Building 
++ Image webreport-backend Built 
++exit=0
+exit=1
+
+python3 - <<'CHECK'
+import ast
+import hashlib
+import subprocess
+from pathlib import Path
+folder = Path('.omo/evidence/operator-knowledge-folder')
+red = (folder / '65-happy.txt').read_text()
+green = (folder / '66-happy.txt').read_text()
+assert red.endswith('exit=1\n')
+assert green.endswith('exit=0\n')
+assert red != green
+assert 'FAILED (failures=7)' in red
+assert 'Ran 12 tests' in green and 'Ran 166 tests' in green and 'Ran 62 tests' in green
+baseline = 'bounded baseline: model_invocations=16 tool_executions=15 data_calls=14'
+assert baseline in red and baseline in green
+for name in ('65-happy.txt', '65-failure.txt', '66-happy.txt', '66-failure.txt'):
+    data = (folder / name).read_bytes()
+    print(name, 'bytes=', len(data), 'sha256=', hashlib.sha256(data).hexdigest())
+path = 'webreport/backend/agent/graph.py'
+before = subprocess.check_output(['git', 'show', '110c599:' + path], text=True)
+after = Path(path).read_text()
+def arun(source):
+    return next(ast.dump(node) for node in ast.parse(source).body if isinstance(node, ast.AsyncFunctionDef) and node.name == 'arun')
+assert arun(before) == arun(after)
+path = 'webreport/backend/test_agent_graph.py'
+assert subprocess.check_output(['git', 'show', '110c599:' + path]) == Path(path).read_bytes()
+assert not Path('webreport/backend/_probe_65.py').exists()
+assert not Path('webreport/backend/_probe_66.py').exists()
+print('RED and GREEN differ; bounded counts match; arun budget and endless-model test unchanged; probes removed')
+CHECK
+65-happy.txt bytes= 12110 sha256= 704bf2c70dfe2ae7c2d6efe036247d2bc18984661c915c1523cab2ae6fab7065
+65-failure.txt bytes= 4709 sha256= 5a7edb787eb838d2a39dbf4e35b6f6a78b9f73009f88ce46b9e4900d97251a6c
+66-happy.txt bytes= 14303 sha256= 19e49acc2b1ec307145b14de74f917a9e74481b61b98876d779c7ebf6955bfe1
+66-failure.txt bytes= 29411 sha256= 4087869f37eea7107727734705f2032f5ffe9d9ef2470a8febc2caa9ffd55d04
+RED and GREEN differ; bounded counts match; arun budget and endless-model test unchanged; probes removed
+exit=0

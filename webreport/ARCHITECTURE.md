@@ -98,6 +98,8 @@
 
 Сейчас независим от БД только путь prompt и знаний: persona, правила работы, список тем и поиск документа. Замена папки знаний изменяет этот путь целиком без изменения кода. Путь данных пока зависит от игры: восемь инструментов данных, включая `get_team_wins` и `get_top_teams`, работают через `GameDataService`, а `FallbackInterpreter` с regex по-прежнему сопоставляет русские игровые ключевые слова. Обобщение этих частей отложено для будущей работы «Multi-DB Universal Agent». Поэтому другая БД получает подходящие persona и предметные знания, но пока не подходящие запросы.
 
+Knowledge documents remain available within the turn that reads them. Prior-turn documents are removed from what the model sees and from the resumable head state; historical checkpoint rows may retain them until thread deletion by TTL/LRU eviction. The head is compacted on each completed model-node update, including current-turn reads when the model returns its final answer. If a model invocation fails, the head may remain uncompacted even though the outbound copy already excludes prior-turn documents.
+
 ### 3.1. Модельный клиент и рассуждения
 Backend использует `ChatLiteLLM` из пакета `langchain-litellm` с диапазоном версий `>=0.7,<0.8` для вызовов через внутренний LiteLLM proxy. LiteLLM SDK теперь устанавливается в образ backend. Это осознанный разворот прежнего правила, по которому SDK не входил в образ. Proxy по-прежнему остаётся единой точкой маршрутизации и настройки моделей.
 
