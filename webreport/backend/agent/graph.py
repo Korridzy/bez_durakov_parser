@@ -118,7 +118,7 @@ def _compact_knowledge(messages: list[MessageView]) -> list[MessageView]:
         if isinstance(message, AIMessage):
             for call in cast(AgentMessageView, message).tool_calls:
                 if call["name"] == "read_knowledge":
-                    topics[call["id"]] = call["args"].get("topic_id")
+                    topics[call["id"]] = call["args"].get("topic")
         elif isinstance(message, ToolMessage):
             result = cast(_ToolResultMessage, message)
             if result.tool_call_id in topics:

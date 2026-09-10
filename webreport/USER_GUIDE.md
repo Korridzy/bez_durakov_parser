@@ -213,7 +213,7 @@ Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: 
    Выполните `POST http://127.0.0.1:28000/api/chat` с `Content-Type: application/json`. Успешный результат обязан одновременно удовлетворять всем условиям:
 
    - `success` равно `true`, а `mode` равно `agent`;
-   - в `query_info` есть `{"tool":"read_knowledge","args":{"topic_id":"live-model-release-check"}}`;
+   - в `query_info` есть `{"tool":"read_knowledge","args":{"topic":"live-model-release-check"}}`;
    - `message` содержит точное значение `$NONCE`;
    - ответ написан по-русски, кратко и фактологично, в соответствии с `persona` из манифеста.
 

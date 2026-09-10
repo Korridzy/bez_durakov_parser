@@ -30,7 +30,7 @@ webreport/
 | Add API endpoint | `backend/main.py` | FastAPI routes. Pydantic models in same file |
 | Add data query | `backend/services/game_data_service.py` | Must use existing `bd_shared.Database` methods only |
 | Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |
-| Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic_id)` returns loaded Markdown text |
+| Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic)` returns loaded Markdown text |
 | Agent mode | `backend/main.py` | Startup LiteLLM probe elects `agent` or `fallback` |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |

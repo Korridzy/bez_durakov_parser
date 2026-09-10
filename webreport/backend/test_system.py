@@ -1473,7 +1473,7 @@ class TestStartupInitialization(unittest.TestCase):
                     tool_calls=[
                         {
                             "name": "read_knowledge",
-                            "args": {"topic_id": "rules"},
+                            "args": {"topic": "rules"},
                             "id": "startup-knowledge-1",
                             "type": "tool_call",
                         }
@@ -1512,7 +1512,7 @@ class TestStartupInitialization(unittest.TestCase):
         self.assertEqual(body["mode"], "agent")
         self.assertEqual(
             body["query_info"],
-            [{"tool": "read_knowledge", "args": {"topic_id": "rules"}}],
+            [{"tool": "read_knowledge", "args": {"topic": "rules"}}],
         )
         tool_messages = [
             message

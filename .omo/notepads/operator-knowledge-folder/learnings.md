@@ -359,8 +359,30 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - В `webreport/ARCHITECTURE.md` теперь названы `knowledge_dir` и все действующие ключи `knowledge_max_*`, а полный перечень связан с перечислением `[webreport]` в `webreport/README.md`.
 - В `webreport/README.md` `read_knowledge` назван инструментом поиска полного Markdown-документа по требованию.
 - Описание компактации переведено на русский без изменения поведения контекста модели, возобновляемого головного состояния и исторических контрольных точек.
+
+## Todo 73
+
+- There are six numeric knowledge limits in the current code (five folder limits plus the per-turn byte budget); `knowledge_dir` is the seventh knowledge setting, not a numeric limit. Only these six raw TOML reads changed.
+- Real TOML fixtures cover all six limits with strings, both booleans, floats, zero, negative integers, and valid positive integers. Separate subprocesses prove invalid TOML reaches the real startup validator before any database initialization even with no knowledge folder.
+- The host shared-config import and parser help accept an invalid local knowledge limit. An unchanged generator copy also produces its env files in a temporary directory; the local overlay is restored byte-for-byte.
+- Config-limit errors expose the raw observed value, minimum 1, and `integer_minimum` rule. Their path remains None because the pure validator receives values, not a source config path. Host LSP still reports the pre-existing missing Pydantic dependency and `Knowledge.manifest: object` persona typing issue; new test diagnostics were repaired.
+
+## Todo 76 scope blocker and verified tool rename
+
+- The whole-repository pre-edit grep found six authorized Python files plus the graph's compaction argument reader and unrelated loader-local identifiers. Renaming the tool parameter also requires renaming its loop binding to avoid shadowing the requested topic; lookup, budgets, docstring, and error literals are otherwise unchanged.
+- Real audit-equivalent ToolNode probes in `76-failure.txt` capture both schemas: before the edit only `topic_id` succeeds, after it only `topic` succeeds. The old field now reports `topic: Field required`; verbatim CRLF text, no reread after file mutation, byte accounting, and unchanged row consumption also pass.
+- The full aggregate in `76-happy.txt` currently runs 169 tests with one failure: the out-of-scope `agent/graph.py` reader still uses the old key, so the compaction marker contains `None` instead of `rules`. That reader needs an authorized one-line rename; the knowledge lane must also resolve its local identifiers for the requested zero-hit scan. No failing assertion was weakened and no incomplete commit was created.
+- Targeted Ruff, the backend image build, 62 reasoning tests, and 88 system tests pass. File diagnostics report no errors in five changed Python files; `test_system.py` reports three errors in untouched session-index tests at lines 2391, 2408, and 2477.
+
 ## Todo 78
 
 - Reconstructed todo 22 from the adjacent history commits `32fdbec` (strict derivation tests) and `95cfd30` (implementation). The happy capture runs the current 13 title/summary contract tests against the working-tree implementation and exits 0.
 - The failure capture obtains the exact `32fdbec:webreport/backend/agent/knowledge.py` blob (`f8d9e468ee8c15c1c2ea4ac5708270bc695cc656`), transports it on Docker stdin, and exec-loads it into a live `agent.knowledge` module without replacing the mounted working-tree file. The mounted current `test_agent_knowledge.py` then runs the same 13 selected tests; all 13 fail for the expected pre-implementation behavior and the process exits 1.
 - Both captures were written by a Python subprocess-capture script with combined stdout/stderr and a final explicit exit marker; no source or test files were changed.
+
+## Todo 76 completed after scope clarification
+
+- The orchestrator authorized the graph compaction reader and two live documentation examples as part of the rename. All now use `topic`, including the procedure's expected `query_info` key. The loader's private `topic_id = entry.stem` identifiers are explicitly excluded from the zero-hit requirement and were not changed by this lane; historical evidence remains untouched.
+- The final Docker agent aggregate passes all 172 tests, including the unchanged compaction assertion that the placeholder retains `rules`. `76-happy.txt` preserves the earlier blocked run and appends the genuine final green aggregate, scoped zero-match scan, clean Ruff over all seven changed Python files, and successful backend build.
+- The final ToolNode probe again accepts only `topic`, rejects the old field with `topic: Field required`, and preserves the document and counters. Its source and before/after outcomes remain in `76-failure.txt`; the temporary probe was removed.
+- LSP is clean on the graph and five other changed Python files. The same three diagnostics remain in untouched session-index tests in `test_system.py`; no suppressions or unrelated fixes were added.

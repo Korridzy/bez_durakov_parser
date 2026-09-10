@@ -99,7 +99,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         return self.messages.AIMessage(
             content="",
             tool_calls=[
-                self.graph_cases.tool_call("read_knowledge", {"topic_id": "rules"}, call_id)
+                self.graph_cases.tool_call("read_knowledge", {"topic": "rules"}, call_id)
             ],
             additional_kwargs={"reasoning_content": "REASONING-SENTINEL-65"},
         )

@@ -126,7 +126,7 @@ def _read_knowledge_turn(messages):
             tool_calls=[
                 {
                     "name": "read_knowledge",
-                    "args": {"topic_id": "fixture-topic"},
+                    "args": {"topic": "fixture-topic"},
                     "id": KNOWLEDGE_TOOL_CALL_ID,
                 }
             ],
@@ -357,7 +357,7 @@ class TestChatEndpointReasoning(
         """Given a knowledge tool result, When chatting, Then its JSON shape is unchanged."""
         data_tool = await self._chat(_report_response())
         knowledge_query = [
-            {"tool": "read_knowledge", "args": {"topic_id": "fixture-topic"}}
+            {"tool": "read_knowledge", "args": {"topic": "fixture-topic"}}
         ]
         knowledge = await self._chat(
             _report_response(

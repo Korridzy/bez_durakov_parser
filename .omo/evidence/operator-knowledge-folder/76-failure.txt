@@ -1,0 +1,124 @@
+=== BEFORE RENAME: live audit-equivalent ToolNode probe ===
+COMMAND: cd webreport && docker compose run --rm --no-deps backend python /app/_probe_76.py topic_id
+ Container webreport-backend-run-75077bb366a0 Creating 
+ Container webreport-backend-run-75077bb366a0 Created 
+READ_TOOL_SCHEMA {'description': 'Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt.', 'properties': {'topic_id': {'title': 'Topic Id', 'type': 'string'}}, 'required': ['topic_id'], 'title': 'read_knowledge', 'type': 'object'}
+TOOL_ARGUMENT {'topic': 'rules'}
+TOOL_STATUS error
+TOOL_CONTENT Error invoking tool 'read_knowledge' with kwargs {'topic': 'rules'} with error:
+ topic_id: Field required
+ Please fix the error and try again.
+TOOL_ARGUMENT {'topic_id': 'rules'}
+TOOL_STATUS success
+TOOL_CONTENT # Rules
+
+Summary.
+
+BODY-VERBATIM
+
+VERBATIM_CRLF_AND_NO_REREAD_PASS
+
+exit=0
+
+=== AFTER RENAME: live audit-equivalent ToolNode probe ===
+COMMAND: cd webreport && docker compose run --rm --no-deps backend python /app/_probe_76.py topic
+ Container webreport-backend-run-50756ca78826 Creating 
+ Container webreport-backend-run-50756ca78826 Created 
+READ_TOOL_SCHEMA {'description': 'Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt.', 'properties': {'topic': {'title': 'Topic', 'type': 'string'}}, 'required': ['topic'], 'title': 'read_knowledge', 'type': 'object'}
+TOOL_ARGUMENT {'topic': 'rules'}
+TOOL_STATUS success
+TOOL_CONTENT # Rules
+
+Summary.
+
+BODY-VERBATIM
+
+TOOL_ARGUMENT {'topic_id': 'rules'}
+TOOL_STATUS error
+TOOL_CONTENT Error invoking tool 'read_knowledge' with kwargs {'topic_id': 'rules'} with error:
+ topic: Field required
+ Please fix the error and try again.
+VERBATIM_CRLF_AND_NO_REREAD_PASS
+
+exit=0
+
+=== Probe source (same file used before and after rename) ===
+import asyncio
+import sys
+import tempfile
+from pathlib import Path
+
+from agent.knowledge import KnowledgeLimits, load_knowledge
+from test_agent_tools_support import ToolsCaseBase
+
+
+async def probe():
+    expected = sys.argv[1]
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        (folder / "manifest.toml").write_text(
+            'dataset="library"\npersona="Library analyst."\n', encoding="utf-8"
+        )
+        topic_file = folder / "rules.md"
+        text = "# Rules\r\n\r\nSummary.\r\n\r\nBODY-VERBATIM\r\n"
+        topic_file.write_bytes(text.encode("utf-8"))
+        loaded = load_knowledge(
+            folder, "library", KnowledgeLimits(80, 200, 2000, 50, 65536, 131072)
+        )
+        case = ToolsCaseBase()
+        case.setUpClass()
+        case.setUp()
+        case.tools = {
+            tool.name: tool
+            for tool in case.tools_module.build_tools(case.registry, case.config, loaded)
+        }
+        schema = case.tools["read_knowledge"].tool_call_schema.model_json_schema()
+        print("READ_TOOL_SCHEMA", schema)
+        assert set(schema["properties"]) == {expected}
+        assert schema["required"] == [expected]
+        for field in ("topic", "topic_id"):
+            state = await case.invoke_tool("read_knowledge", {field: "rules"})
+            message = state["messages"][-1]
+            print("TOOL_ARGUMENT", {field: "rules"})
+            print("TOOL_STATUS", message.status)
+            print("TOOL_CONTENT", message.content)
+            if field == expected:
+                assert message.status == "success"
+                assert message.content == text
+                assert state["knowledge_bytes_consumed"] == len(text.encode("utf-8"))
+            else:
+                assert message.status == "error"
+                assert f"{expected}: Field required" in message.content
+                assert state["knowledge_bytes_consumed"] == 0
+            assert state["rows_consumed"] == 0
+        topic_file.write_text("# Rules\n\nSummary.\n\nCHANGED AFTER LOAD\n")
+        state = await case.invoke_tool("read_knowledge", {expected: "rules"})
+        assert state["messages"][-1].content == text
+        print("VERBATIM_CRLF_AND_NO_REREAD_PASS")
+
+
+asyncio.run(probe())
+
+exit=0
+
+=== Final live ToolNode probe after authorized graph reader rename ===
+COMMAND: cd webreport && docker compose run --rm --no-deps backend python /app/_probe_76.py topic
+ Container webreport-backend-run-88890fc75735 Creating 
+ Container webreport-backend-run-88890fc75735 Created 
+READ_TOOL_SCHEMA {'description': 'Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt.', 'properties': {'topic': {'title': 'Topic', 'type': 'string'}}, 'required': ['topic'], 'title': 'read_knowledge', 'type': 'object'}
+TOOL_ARGUMENT {'topic': 'rules'}
+TOOL_STATUS success
+TOOL_CONTENT # Rules
+
+Summary.
+
+BODY-VERBATIM
+
+TOOL_ARGUMENT {'topic_id': 'rules'}
+TOOL_STATUS error
+TOOL_CONTENT Error invoking tool 'read_knowledge' with kwargs {'topic_id': 'rules'} with error:
+ topic: Field required
+ Please fix the error and try again.
+VERBATIM_CRLF_AND_NO_REREAD_PASS
+
+exit=0

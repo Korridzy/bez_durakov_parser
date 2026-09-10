@@ -228,7 +228,7 @@ def build_tools(
 
     @tool
     async def read_knowledge(
-        topic_id: str,
+        topic: str,
         *,
         state: Annotated[ToolState, InjectedState],
         tool_call_id: Annotated[str, InjectedToolCallId],
@@ -244,9 +244,9 @@ def build_tools(
                 f"{cfg.KNOWLEDGE_MAX_BYTES_PER_TURN} is exhausted"
             )
 
-        for topic in knowledge.topics:
-            if topic.id == topic_id:
-                document_bytes = len(topic.text.encode("utf-8"))
+        for knowledge_topic in knowledge.topics:
+            if knowledge_topic.id == topic:
+                document_bytes = len(knowledge_topic.text.encode("utf-8"))
                 if document_bytes > remaining:
                     return (
                         "Tool error: knowledge byte budget of "
@@ -258,7 +258,7 @@ def build_tools(
                         "knowledge_bytes_consumed": new_total,
                         "messages": [
                             ToolMessage(
-                                content=topic.text,
+                                content=knowledge_topic.text,
                                 tool_call_id=tool_call_id,
                             )
                         ],
@@ -267,7 +267,7 @@ def build_tools(
 
         available_topics = ", ".join(topic.id for topic in knowledge.topics)
         return (
-            f"Tool error: unknown knowledge topic '{topic_id}'. "
+            f"Tool error: unknown knowledge topic '{topic}'. "
             f"Available topics: {available_topics}"
         )
 

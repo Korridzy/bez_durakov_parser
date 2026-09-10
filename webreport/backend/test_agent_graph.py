@@ -181,12 +181,12 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                     tool_calls=[
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "knowledge-budget-1",
                         ),
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "knowledge-budget-2",
                         ),
                     ],
@@ -223,12 +223,12 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                     tool_calls=[
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "first-turn-read-1",
                         ),
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "first-turn-read-2",
                         ),
                     ],
@@ -239,7 +239,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                     tool_calls=[
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "second-turn-read-1",
                         )
                     ],
@@ -280,12 +280,12 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                     tool_calls=[
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "knowledge-under-1",
                         ),
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "large-topic"},
+                            {"topic": "large-topic"},
                             "knowledge-under-2",
                         ),
                     ],
@@ -322,7 +322,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                     tool_calls=[
                         tool_call(
                             "read_knowledge",
-                            {"topic_id": "rules"},
+                            {"topic": "rules"},
                             "knowledge-1",
                         )
                     ],
