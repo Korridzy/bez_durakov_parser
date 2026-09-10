@@ -283,11 +283,19 @@ async def startup_event():
         max_bytes_per_turn=131072,
     )
     validate_limits(knowledge_limits)
-    knowledge = (
-        load_knowledge(KNOWLEDGE_DIR, DATABASE_NAME, knowledge_limits)
-        if KNOWLEDGE_DIR is not None
-        else None
-    )
+    if KNOWLEDGE_DIR is None:
+        logger.warning(
+            "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge."
+        )
+        knowledge = None
+    elif not KNOWLEDGE_DIR.exists():
+        logger.warning(
+            "Knowledge folder not found at %s; the agent runs without dataset knowledge.",
+            KNOWLEDGE_DIR.resolve(),
+        )
+        knowledge = None
+    else:
+        knowledge = load_knowledge(KNOWLEDGE_DIR, DATABASE_NAME, knowledge_limits)
 
     data_service = await initialize_data_service_with_retry()
 

@@ -1416,7 +1416,10 @@ class TestStartupInitialization(unittest.TestCase):
                 except Exception as error:
                     startup_error = error
                 else:
-                    mode = main_module.agent_system.mode
+                    system = main_module.agent_system
+                    if system is None:
+                        raise AssertionError("Startup completed without an agent system")
+                    mode = system.mode
                     prompt = graph_builder.call_args.args[3]
                 finally:
                     if main_module.checkpoint_connection is not None:

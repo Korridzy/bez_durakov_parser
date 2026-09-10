@@ -247,3 +247,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `startup_event()` constructs and validates the five configured folder limits unconditionally, so an invalid limit aborts before checking an unset `KNOWLEDGE_DIR` or touching the database.
 - When configured, knowledge loads exactly once before database initialization and the LiteLLM probe in both elected modes; startup passes that same object to `ReportAgentSystem`.
 - The full system suite passed 77 tests, the agent regression suite passed 153 tests, and the failure probe recorded a completed knowledge load before an immediately raised database-initialization error.
+
+## Todo 50-51 knowledge fallback startup
+
+- Unset and absent knowledge folders are detected after unconditional limit validation but before database initialization; each emits only its exact knowledge warning and passes `None` into agent construction.
+- The startup tests inspect the real agent-mode tool binding and graph prompt, proving that warn-and-continue omits `read_knowledge` and uses `compose_system_prompt(None)` without changing mode election.
+- Live QA recreated `webreport-backend` with `/nope/missing`, served healthy and successful agent-mode requests, then restored the ignored local config byte-for-byte and recreated a healthy backend using `/bd_shared/knowledge/bez_durakov`.
