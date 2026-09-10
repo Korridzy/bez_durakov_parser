@@ -1,0 +1,83 @@
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_graph.py -v
+ Container webreport-backend-run-692b6b92b0c3 Creating 
+ Container webreport-backend-run-692b6b92b0c3 Created 
+test_budget_error_tool_message_can_be_followed_by_final_answer (__main__.GraphTests.test_budget_error_tool_message_can_be_followed_by_final_answer) ... ok
+test_build_graph_injects_caller_supplied_system_prompt (__main__.GraphTests.test_build_graph_injects_caller_supplied_system_prompt) ... ok
+test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip (__main__.GraphTests.test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip) ... ok
+test_data_call_mark_report_and_russian_answer_complete (__main__.GraphTests.test_data_call_mark_report_and_russian_answer_complete) ... ok
+test_endless_tool_calls_return_controlled_recursion_marker (__main__.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker) ... ok
+test_knowledge_byte_budget_resets_for_each_turn (__main__.GraphTests.test_knowledge_byte_budget_resets_for_each_turn) ... ERROR
+test_knowledge_reads_stay_unchanged_under_byte_budget (__main__.GraphTests.test_knowledge_reads_stay_unchanged_under_byte_budget) ... ERROR
+test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band (__main__.GraphTests.test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band) ... ok
+test_repeated_knowledge_reads_exhaust_per_turn_byte_budget (__main__.GraphTests.test_repeated_knowledge_reads_exhaust_per_turn_byte_budget) ... ERROR
+test_same_message_tool_calls_execute_in_script_order (__main__.GraphTests.test_same_message_tool_calls_execute_in_script_order) ... ok
+
+======================================================================
+ERROR: test_knowledge_byte_budget_resets_for_each_turn (__main__.GraphTests.test_knowledge_byte_budget_resets_for_each_turn)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_graph.py", line 216, in test_knowledge_byte_budget_resets_for_each_turn
+    budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'bd_shared.config' has no attribute 'KNOWLEDGE_MAX_BYTES_PER_TURN'
+
+======================================================================
+ERROR: test_knowledge_reads_stay_unchanged_under_byte_budget (__main__.GraphTests.test_knowledge_reads_stay_unchanged_under_byte_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_graph.py", line 273, in test_knowledge_reads_stay_unchanged_under_byte_budget
+    budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'bd_shared.config' has no attribute 'KNOWLEDGE_MAX_BYTES_PER_TURN'
+
+======================================================================
+ERROR: test_repeated_knowledge_reads_exhaust_per_turn_byte_budget (__main__.GraphTests.test_repeated_knowledge_reads_exhaust_per_turn_byte_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 90, in _callTestMethod
+    if self._callMaybeAsync(method) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/async_case.py", line 112, in _callMaybeAsync
+    return self._asyncioRunner.run(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/test_agent_graph.py", line 174, in test_repeated_knowledge_reads_exhaust_per_turn_byte_budget
+    budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'bd_shared.config' has no attribute 'KNOWLEDGE_MAX_BYTES_PER_TURN'
+
+----------------------------------------------------------------------
+Ran 10 tests in 3.335s
+
+FAILED (errors=3)
+
+exit=1

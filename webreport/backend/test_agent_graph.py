@@ -138,6 +138,177 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    def build_knowledge_harness(
+        self,
+        responses: Sequence[AgentMessageView],
+        topic_text: str,
+    ) -> tuple[ScriptedModel, RunnableGraph]:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        knowledge = self.knowledge.Knowledge(
+            manifest=object(),
+            topics=(
+                self.knowledge.KnowledgeTopic(
+                    id="large-topic",
+                    title="Large topic",
+                    summary="A synthetic budget fixture.",
+                    text=topic_text,
+                ),
+            ),
+        )
+        tools: list[NamedTool] = self.tools_module.build_tools(
+            registry,
+            self.config,
+            knowledge=knowledge,
+        )
+        model = ScriptedModel(responses)
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+        )
+        return model, graph
+
+    async def test_repeated_knowledge_reads_exhaust_per_turn_byte_budget(self) -> None:
+        budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+        topic_text = "я" * (budget // 4 + 1)
+        topic_bytes = len(topic_text.encode("utf-8"))
+        model, graph = self.build_knowledge_harness(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "knowledge-budget-1",
+                        ),
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "knowledge-budget-2",
+                        ),
+                    ],
+                ),
+                self.messages.AIMessage(content="Budget enforced."),
+            ],
+            topic_text,
+        )
+
+        result = await self.graph_module.arun(graph, "Read it twice", "knowledge-budget")
+        tool_messages = [
+            message
+            for message in model.requests[1]
+            if isinstance(message, self.messages.ToolMessage)
+        ]
+
+        self.assertLess(topic_bytes, budget)
+        self.assertGreater(topic_bytes * 2, budget)
+        self.assertEqual(tool_messages[0].content, topic_text)
+        self.assertEqual(
+            tool_messages[1].content,
+            f"Tool error: knowledge byte budget of {budget} is exhausted",
+        )
+        self.assertEqual(result["knowledge_bytes_consumed"], topic_bytes)
+
+    async def test_knowledge_byte_budget_resets_for_each_turn(self) -> None:
+        budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+        topic_text = "я" * (budget // 4 + 1)
+        topic_bytes = len(topic_text.encode("utf-8"))
+        model, graph = self.build_knowledge_harness(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "first-turn-read-1",
+                        ),
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "first-turn-read-2",
+                        ),
+                    ],
+                ),
+                self.messages.AIMessage(content="First turn done."),
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "second-turn-read-1",
+                        )
+                    ],
+                ),
+                self.messages.AIMessage(content="Second turn done."),
+            ],
+            topic_text,
+        )
+
+        first_result = await self.graph_module.arun(
+            graph,
+            "Exhaust this turn",
+            "knowledge-budget-reset",
+        )
+        second_result = await self.graph_module.arun(
+            graph,
+            "Read it next turn",
+            "knowledge-budget-reset",
+        )
+        latest_tool_message = next(
+            message
+            for message in reversed(model.requests[3])
+            if isinstance(message, self.messages.ToolMessage)
+        )
+
+        self.assertEqual(first_result["knowledge_bytes_consumed"], topic_bytes)
+        self.assertEqual(latest_tool_message.content, topic_text)
+        self.assertEqual(second_result["knowledge_bytes_consumed"], topic_bytes)
+
+    async def test_knowledge_reads_stay_unchanged_under_byte_budget(self) -> None:
+        budget = self.config.KNOWLEDGE_MAX_BYTES_PER_TURN
+        topic_text = "я" * (budget // 8)
+        topic_bytes = len(topic_text.encode("utf-8"))
+        model, graph = self.build_knowledge_harness(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "knowledge-under-1",
+                        ),
+                        tool_call(
+                            "read_knowledge",
+                            {"topic_id": "large-topic"},
+                            "knowledge-under-2",
+                        ),
+                    ],
+                ),
+                self.messages.AIMessage(content="Both documents read."),
+            ],
+            topic_text,
+        )
+
+        result = await self.graph_module.arun(graph, "Read both", "knowledge-under-budget")
+        tool_messages = [
+            message
+            for message in model.requests[1]
+            if isinstance(message, self.messages.ToolMessage)
+        ]
+
+        self.assertLessEqual(topic_bytes * 2, budget)
+        self.assertEqual(
+            [message.content for message in tool_messages],
+            [topic_text, topic_text],
+        )
+        self.assertEqual(result["knowledge_bytes_consumed"], topic_bytes * 2)
+
     async def test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band(
         self,
     ) -> None:
