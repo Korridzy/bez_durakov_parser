@@ -311,3 +311,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `knowledge_bytes_consumed` mirrors the row counter through sequential graph tool calls and resets to zero at every `arun` entry; the tool refuses an over-budget document with an in-band error instead of truncating it.
 - Budget accounting uses UTF-8 bytes. The graph tests use Cyrillic fixture text so character counting cannot accidentally satisfy the byte contract.
 - Knowledge reads leave `rows_consumed` untouched; the direct two-read probe ended with `rows_consumed 0` and `knowledge_bytes_consumed 6` after the second read was refused.
+
+## Todo 69-70 deployment preflight and recovery
+
+- `make validate-knowledge` runs `agent.knowledge_cli` in the backend image with `--no-deps`; the CLI shares startup's config constants, `KnowledgeLimits`, `validate_limits()`, and `load_knowledge()` path.
+- With a 201-character summary selected through an ignored `config.local.toml` override, both restart and rebuild aborted in preflight. The backend container ID and start time remained byte-for-byte unchanged and `/health` stayed healthy.
+- Empty `knowledge_dir` returned exit 0 from the CLI and allowed `make restart`, proving the documented no-knowledge recovery path. The ignored local config was restored to SHA-256 `80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a`, the scratch folder was removed, and the shipped folder was loaded again.
