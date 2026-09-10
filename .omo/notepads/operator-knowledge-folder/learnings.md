@@ -317,6 +317,8 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `make validate-knowledge` runs `agent.knowledge_cli` in the backend image with `--no-deps`; the CLI shares startup's config constants, `KnowledgeLimits`, `validate_limits()`, and `load_knowledge()` path.
 - With a 201-character summary selected through an ignored `config.local.toml` override, both restart and rebuild aborted in preflight. The backend container ID and start time remained byte-for-byte unchanged and `/health` stayed healthy.
 - Empty `knowledge_dir` returned exit 0 from the CLI and allowed `make restart`, proving the documented no-knowledge recovery path. The ignored local config was restored to SHA-256 `80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a`, the scratch folder was removed, and the shipped folder was loaded again.
+- Gate follow-up: `test_knowledge_cli.py` now pins direct `main()` exit statuses for unset, missing, invalid, and shipped-valid folders; the four-case Docker lane passes.
+- Gate follow-up: force-recreating backend with reload disabled and a 201-character summary bypassed Make preflight, produced worker exit 3 and an unreachable `/health`, and the documented empty-`knowledge_dir` commands restored service before the original config and shipped folder were restored.
 
 ## Todo 64 startup budget wiring follow-up
 

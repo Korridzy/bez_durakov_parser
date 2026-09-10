@@ -1,52 +1,101 @@
-DOCUMENTED RECOVERY QA - PRECONDITION
-The active deployment config points to the genuinely invalid scratch folder shown below.
-
-$ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:28000/health
-{"status":"healthy","timestamp":"2026-09-10T02:34:48.282130","services":{"database":true,"agents":true,"llm_proxy":true}}
+GENUINE OUTAGE RECOVERY QA - INITIAL HEALTHY ORIGINAL CONFIGURATION
+scratch_summary_length=201
+config_local_sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a
+outage_method=direct docker compose force-recreate bypasses make restart preflight
 exit=0
 
-$ make restart
-make -C webreport restart
-make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+$ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:28000/health
+{"status":"healthy","timestamp":"2026-09-10T02:55:13.508017","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+$ cd webreport && docker compose exec -T backend python -c import bd_shared.config as c; print(c.KNOWLEDGE_DIR)
+/bd_shared/knowledge/bez_durakov
+exit=0
+
+$ cd webreport && docker compose ps backend
+NAME                IMAGE               COMMAND             SERVICE   CREATED          STATUS          PORTS
+webreport-backend   webreport-backend   "python start.py"   backend   17 minutes ago   Up 16 minutes   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+exit=0
+
+initial_state_exit=0
+exit=0
+
+CREATE A GENUINE OUTAGE (INTENTIONAL PREFLIGHT BYPASS)
+temporary_overrides=reload=false, knowledge_dir=knowledge/_todo70_bad
+exit=0
+
+$ cd webreport && make generate-env
 [ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
 PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
 Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
-🔎 Validating the configured knowledge folder...
-docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-fdaf7485d87d Creating 
- Container webreport-backend-run-fdaf7485d87d Created 
-Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: /bd_shared/knowledge/_todo69_bad/rules.md; summary is 201 characters, limit is 200
-
-make[1]: *** [Makefile:61: validate-knowledge] Error 1
-make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
-make: *** [Makefile:176: restart] Error 2
-exit=2
-
-$ docker inspect webreport-backend --format={{.Id}} {{.State.StartedAt}}
-8c1215b02738eff0fbda954ac77fb81462df284775363534a931097a8b4aca35 2026-09-10T02:32:57.437591687Z
 exit=0
 
-$ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:28000/health
-{"status":"healthy","timestamp":"2026-09-10T02:34:54.771234","services":{"database":true,"agents":true,"llm_proxy":true}}
+$ cd webreport && docker compose up -d --force-recreate --no-deps backend
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-backend Starting 
+ Container webreport-backend Started
 exit=0
 
-precondition_exit=0
+$ docker wait webreport-backend
+3
 exit=0
 
-DOCUMENTED EMERGENCY RECOVERY: set knowledge_dir = ""
+$ docker inspect --format=status={{.State.Status}} restart={{.RestartCount}} exit={{.State.ExitCode}} webreport-backend
+status=running restart=1 exit=0
+exit=0
+
+$ cd webreport && docker compose ps backend
+NAME                IMAGE               COMMAND             SERVICE   CREATED         STATUS                  PORTS
+webreport-backend   webreport-backend   "python start.py"   backend   6 seconds ago   Up Less than a second   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+exit=0
+
+$ cd webreport && docker compose logs --no-color backend
+webreport-backend  | INFO:     Started server process [1]
+webreport-backend  | INFO:     Waiting for application startup.
+webreport-backend  | ERROR:main:Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: /bd_shared/knowledge/_todo70_bad/rules.md; summary is 201 characters, limit is 200
+webreport-backend  | ERROR:    Traceback (most recent call last):
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 638, in lifespan
+webreport-backend  |     async with self.lifespan_context(app) as maybe_state:
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 257, in __aenter__
+webreport-backend  |     await self._router._startup()
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 6324, in _startup
+webreport-backend  |     await handler()
+webreport-backend  |   File "/app/main.py", line 306, in startup_event
+webreport-backend  |     knowledge = load_knowledge(
+webreport-backend  |                 ^^^^^^^^^^^^^^^
+webreport-backend  |   File "/app/agent/knowledge.py", line 328, in load_knowledge
+webreport-backend  |     title, summary = _derive_title_and_summary(text, entry, limits)
+webreport-backend  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+webreport-backend  |   File "/app/agent/knowledge.py", line 220, in _derive_title_and_summary
+webreport-backend  |     raise KnowledgeError(
+webreport-backend  | agent.knowledge.KnowledgeError: Knowledge document summary exceeds 200 characters: /bd_shared/knowledge/_todo70_bad/rules.md; summary is 201 characters, limit is 200
+webreport-backend  | 
+webreport-backend  | ERROR:    Application startup failed. Exiting.
+exit=0
+
+$ curl --fail --show-error --connect-timeout 3 --max-time 5 http://127.0.0.1:28000/health
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+exit=56
+
+backend_genuinely_unreachable=true
+outage_proof_basis=docker wait observed process exit 3; startup logs show the invalid folder; health curl exited 56
+outage_proof_exit=0
+exit=0
+
+DOCUMENTED EMERGENCY RECOVERY - FOLLOWED VERBATIM
 edit=bd_shared/config.local.toml [webreport] knowledge_dir = ""
-exit=0
-
-$ cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-04c1161eeabf Creating 
- Container webreport-backend-run-04c1161eeabf Created 
-Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
 exit=0
 
 $ make validate-knowledge
 cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-07f768131522 Creating 
- Container webreport-backend-run-07f768131522 Created 
+ Container webreport-backend-run-ad3023b29cd8 Creating 
+ Container webreport-backend-run-ad3023b29cd8 Created 
 Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
 exit=0
 
@@ -58,8 +107,8 @@ PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
 Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
 🔎 Validating the configured knowledge folder...
 docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-34b9790b5c58 Creating 
- Container webreport-backend-run-34b9790b5c58 Created 
+ Container webreport-backend-run-af03df87d91d Creating 
+ Container webreport-backend-run-af03df87d91d Created 
 Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
 🔄 Recreating LiteLLM, backend, and frontend...
 docker compose up -d --force-recreate litellm backend frontend
@@ -147,32 +196,28 @@ Warning: Problem (retrying all errors). Will retry in 1 seconds. 21 retries
 Warning: left.
 
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100   121  100   121    0     0  77119      0 --:--:-- --:--:-- --:--:--  118k
-{"status":"healthy","timestamp":"2026-09-10T02:36:50.879857","services":{"database":true,"agents":true,"llm_proxy":true}}
+100   121  100   121    0     0  85271      0 --:--:-- --:--:-- --:--:--  118k
+{"status":"healthy","timestamp":"2026-09-10T02:57:31.921704","services":{"database":true,"agents":true,"llm_proxy":true}}
 exit=0
 
-$ cd webreport && docker compose ps
-NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                          PORTS
-webreport-backend          webreport-backend                                                         "python start.py"        backend          37 seconds ago   Up 10 seconds                   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
-webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 39 seconds ago   
-webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         36 seconds ago   Up 10 seconds                   5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
-webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          40 seconds ago   Up 25 seconds (healthy)         4000/tcp
-webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 40 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+$ cd webreport && docker compose ps backend
+NAME                IMAGE               COMMAND             SERVICE   CREATED          STATUS          PORTS
+webreport-backend   webreport-backend   "python start.py"   backend   37 seconds ago   Up 10 seconds   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
 exit=0
 
-emergency_recovery_exit=0
+documented_recovery_exit=0
 exit=0
 
-RESTORE ORIGINAL CONFIGURATION AND SHIPPED KNOWLEDGE PATH
-sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a  bd_shared/config.local.toml
+RESTORE ORIGINAL SHIPPED CONFIGURATION
+config_local_sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a
 expected_sha256=80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a
 scratch_folder_absent=true
 exit=0
 
 $ make validate-knowledge
 cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-f35ec704e0a1 Creating 
- Container webreport-backend-run-f35ec704e0a1 Created 
+ Container webreport-backend-run-6ebdea7e1cb4 Creating 
+ Container webreport-backend-run-6ebdea7e1cb4 Created 
 Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
 exit=0
 
@@ -184,8 +229,8 @@ PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
 Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
 🔎 Validating the configured knowledge folder...
 docker compose run --rm --no-deps backend python -m agent.knowledge_cli
- Container webreport-backend-run-0f90010d9c6e Creating 
- Container webreport-backend-run-0f90010d9c6e Created 
+ Container webreport-backend-run-558d915c7c90 Creating 
+ Container webreport-backend-run-558d915c7c90 Created 
 Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
 🔄 Recreating LiteLLM, backend, and frontend...
 docker compose up -d --force-recreate litellm backend frontend
@@ -219,20 +264,16 @@ curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
-{"status":"healthy","timestamp":"2026-09-10T02:38:28.227037","services":{"database":true,"agents":true,"llm_proxy":true}}
+{"status":"healthy","timestamp":"2026-09-10T02:59:03.165190","services":{"database":true,"agents":true,"llm_proxy":true}}
 exit=0
 
 $ cd webreport && docker compose exec -T backend python -c import bd_shared.config as c; print(c.KNOWLEDGE_DIR)
 /bd_shared/knowledge/bez_durakov
 exit=0
 
-$ cd webreport && docker compose ps
-NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                          PORTS
-webreport-backend          webreport-backend                                                         "python start.py"        backend          37 seconds ago   Up 10 seconds                   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
-webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 17 seconds ago   
-webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         37 seconds ago   Up 10 seconds                   5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
-webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          41 seconds ago   Up 26 seconds (healthy)         4000/tcp
-webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 40 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+$ cd webreport && docker compose ps backend
+NAME                IMAGE               COMMAND             SERVICE   CREATED          STATUS          PORTS
+webreport-backend   webreport-backend   "python start.py"   backend   40 seconds ago   Up 10 seconds   5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
 exit=0
 
 original_configuration_restored=true
