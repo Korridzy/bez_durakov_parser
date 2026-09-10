@@ -50,6 +50,18 @@ class KnowledgeCliTests(unittest.TestCase):
         self.assertIn("Knowledge folder is invalid", stderr)
         self.assertIn("manifest.toml", stderr)
 
+    def test_invalid_configured_byte_budget_exits_nonzero(self):
+        shipped_path = Path("/bd_shared/knowledge/bez_durakov")
+        with (
+            patch("bd_shared.config.KNOWLEDGE_MAX_BYTES_PER_TURN", 0),
+            patch.object(knowledge_cli, "KNOWLEDGE_MAX_BYTES_PER_TURN", 0),
+        ):
+            exit_code, stdout, stderr = self._run(shipped_path)
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(stdout, "")
+        self.assertIn("knowledge_max_bytes_per_turn", stderr)
+
     def test_shipped_knowledge_dir_exits_zero(self):
         shipped_path = Path("/bd_shared/knowledge/bez_durakov")
         exit_code, stdout, stderr = self._run(shipped_path)

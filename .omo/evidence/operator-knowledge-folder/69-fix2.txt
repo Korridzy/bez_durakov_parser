@@ -1,0 +1,9 @@
+cd webreport && docker compose run --rm --no-deps backend python test_knowledge_cli.py
+ Container webreport-backend-run-67f1bdb3aa51 Creating 
+ Container webreport-backend-run-67f1bdb3aa51 Created 
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.002s
+
+OK
+exit=0

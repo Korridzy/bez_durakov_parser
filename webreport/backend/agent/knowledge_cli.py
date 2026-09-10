@@ -5,6 +5,7 @@ import sys
 from bd_shared.config import (
     DATABASE_NAME,
     KNOWLEDGE_DIR,
+    KNOWLEDGE_MAX_BYTES_PER_TURN,
     KNOWLEDGE_MAX_DOC_BYTES,
     KNOWLEDGE_MAX_PERSONA_CHARS,
     KNOWLEDGE_MAX_SUMMARY_CHARS,
@@ -23,7 +24,7 @@ def main() -> int:
         max_persona_chars=KNOWLEDGE_MAX_PERSONA_CHARS,
         max_topics=KNOWLEDGE_MAX_TOPICS,
         max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
-        max_bytes_per_turn=131072,
+        max_bytes_per_turn=KNOWLEDGE_MAX_BYTES_PER_TURN,
     )
 
     try:

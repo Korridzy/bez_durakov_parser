@@ -349,3 +349,7 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - The live `opencode/gpt-5.6-luna` agent called `read_knowledge` for the temporary `live-model-release-check` topic and reproduced the fresh nonce that existed only after the summary paragraph. Its Russian answer was concise and factual.
 - With the same topic id, title, and summary retained but only the body nonce removed, a fresh-session answer said that the marker was absent and did not reproduce the old nonce.
 - A fresh-session question outside every listed topic produced an empty `query_info`, proving the live model followed the non-reflexive retrieval qualifier. Separate session ids are essential so checkpoint history cannot leak the happy-case nonce into the negative control.
+
+## Todo 69 F2 follow-up
+
+- The knowledge CLI preflight now threads `KNOWLEDGE_MAX_BYTES_PER_TURN` from `bd_shared.config` into `KnowledgeLimits`, closing the F2 gap where a hardcoded 131072 could let an invalid operator budget replace a healthy backend before startup rejected it.
