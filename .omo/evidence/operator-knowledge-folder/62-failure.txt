@@ -1,0 +1,22 @@
+git grep -n "noqa\|type: ignore\|per-file-ignores"
+.omo/evidence/operator-knowledge-folder/42-happy.txt:79:    content = flag(e)  # type: ignore [assignment, call-arg]
+.omo/evidence/operator-knowledge-folder/42-happy.txt:141:    content = flag(e)  # type: ignore [assignment, call-arg]
+.omo/evidence/operator-knowledge-folder/42-happy.txt:215:    content = flag(e)  # type: ignore [assignment, call-arg]
+.omo/evidence/operator-knowledge-folder/42-happy.txt:289:    content = flag(e)  # type: ignore [assignment, call-arg]
+.omo/evidence/operator-knowledge-folder/42-happy.txt:363:    content = flag(e)  # type: ignore [assignment, call-arg]
+webreport/frontend/tests_e2e/_sitecustomize/sitecustomize.py:59:    socket.socket.connect = guarded_connect  # type: ignore[method-assign]
+webreport/frontend/tests_e2e/_sitecustomize/sitecustomize.py:60:    socket.socket.connect_ex = guarded_connect_ex  # type: ignore[method-assign]
+webreport/frontend/tests_e2e/stub_backend.py:116:    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
+exit=0
+git log --format='PRE-EXISTING SOURCE SUPPRESSION ORIGIN: %H %ad %s' --date=iso-strict -S'type: ignore' -- webreport/frontend/tests_e2e/_sitecustomize/sitecustomize.py webreport/frontend/tests_e2e/stub_backend.py
+PRE-EXISTING SOURCE SUPPRESSION ORIGIN: 330a94099e8296cfb6858c1ec2903a8d3fdc8b18 2026-08-07T14:03:31+03:00 test(webreport): add stub-backed playwright e2e lane
+exit=0
+git log --format='PRE-EXISTING SOURCE SUPPRESSION ORIGIN: %H %ad %s' --date=iso-strict -S'noqa' -- webreport/frontend/tests_e2e/_sitecustomize/sitecustomize.py webreport/frontend/tests_e2e/stub_backend.py
+PRE-EXISTING SOURCE SUPPRESSION ORIGIN: 330a94099e8296cfb6858c1ec2903a8d3fdc8b18 2026-08-07T14:03:31+03:00 test(webreport): add stub-backed playwright e2e lane
+exit=0
+git show --format='NON-SOURCE CAPTURED-OUTPUT ORIGIN: %H %ad %s' --date=iso-strict --stat e3300f7 -- .omo/evidence/operator-knowledge-folder/42-happy.txt
+NON-SOURCE CAPTURED-OUTPUT ORIGIN: e3300f7a56bcd32d7ba84ee66dc2f91a683814e6 2026-09-10T02:17:16+03:00 fix(evidence): restore verbatim happy-run captures for todos 42-43
+
+ .../operator-knowledge-folder/42-happy.txt         | 292 ++++++++++++++++++---
+ 1 file changed, 256 insertions(+), 36 deletions(-)
+exit=0
