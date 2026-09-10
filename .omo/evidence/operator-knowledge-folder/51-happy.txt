@@ -56,8 +56,8 @@ Successes: 79
 Failures: 0
 Errors: 0
 Skipped: 0
- Container webreport-backend-run-8bfaa762cccd Creating 
- Container webreport-backend-run-8bfaa762cccd Created 
+ Container webreport-backend-run-b502d9bcea30 Creating 
+ Container webreport-backend-run-b502d9bcea30 Created 
 WARNING:main:LLM mode elected: fallback
 INFO:main:Services initialized successfully
 test_caller_driven_eviction_holds_the_cap (__main__.TestSessionIndex.test_caller_driven_eviction_holds_the_cap)
@@ -292,7 +292,7 @@ INFO:main:Services initialized successfully
 ok
 
 ----------------------------------------------------------------------
-Ran 79 tests in 0.815s
+Ran 79 tests in 0.881s
 
 OK
 exit=0
