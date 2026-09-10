@@ -278,7 +278,8 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `knowledge_dir` по умолчанию указывает на поставляемую папку. Отсутствующая папка вызывает только предупреждение, а недействительная прерывает запуск. Корневой README ведёт к операторскому разделу руководства.
 - Проверка документации нашла 8 строк с `knowledge_`, отдельно нашла `knowledge_max_bytes_per_turn` и не выявила отсутствующих ключей `[webreport]`.
 
-## Todo 56-57 history serialization regression guard
+## Todo 58
 
-- Extended `test_reasoning_api.py` with a long `read_knowledge` tool-result turn. `_history_entries` and `GET /api/history` expose exactly the user and final assistant entries, preserve accumulated reasoning, and never expose the document-body sentinel; `POST /api/chat` keeps the data-tool response shape.
-- `_history_entries` was already tool-agnostic because it whitelists `HumanMessage` and `AIMessage` rather than tool names, so todo 57 is an explicit no-op. The deliberate leak probe failed at the explicit `assertNotIn` guard, while the reasoning suite passed.
+- В `USER_GUIDE.md` добавлен доступный из содержания операторский раздел, отделённый от инструкций для пользователя чата. Он описывает поставляемую структуру папки, два ключа манифеста, правила имени темы, заголовка и первого абзаца, а также то, что `rules.md` является заполняемым оператором скелетом без изменения кода или нового деплоя.
+- Текущие `bd_shared/config.py` и `bd_shared/config.toml` содержат шесть проверяемых ключей. Полный поиск не нашёл `knowledge_max_bytes_per_turn` как ключ или константу: сейчас `main.py` передаёт `131072` напрямую, а поздний todo C10 добавит ключ с тем же значением по умолчанию. Руководство явно отмечает это состояние и всё же называет седьмой ключ, как требует Todo 58.
+- Шаблоны сообщений запуска переписаны из литералов `main.py`; итоговая сверка отсортированных сообщений `Knowledge folder` была пустой, `exit=0`.

@@ -1,0 +1,19 @@
+Command:
+grep -n "knowledge_max_title_chars\|knowledge_max_summary_chars\|knowledge_max_persona_chars\|knowledge_max_topics\|knowledge_max_doc_bytes\|knowledge_max_bytes_per_turn\|knowledge_dir" webreport/USER_GUIDE.md
+
+Output:
+66:Знания читаются один раз при запуске backend. По умолчанию `knowledge_dir` ведёт к поставляемой папке `bd_shared/knowledge/bez_durakov`:
+85:- `persona` задаёт роль, тон и язык ответов агента. Это непустая строка длиной не более `knowledge_max_persona_chars` символов.
+100:Заголовок темы берётся из первой строки, которая соответствует `^#{1,6}\s+\S`. Из неё удаляются только начальные `#` и окружающие пробелы. Получившийся заголовок не может быть длиннее `knowledge_max_title_chars` символов.
+102:Первый непустой блок после этого заголовка становится кратким описанием темы. Пустые строки перед ним пропускаются, а строки блока соединяются одним пробелом. Его длина не может быть больше `knowledge_max_summary_chars` символов. Первой строкой этого блока должен быть обычный текст. Если после заголовка первым непустым блоком идёт список, нумерованный список, ограждение кода, таблица, цитата, новый заголовок или HTML-блок, документ будет отклонён. Поэтому сразу после заголовка не ставьте список, кодовый блок, таблицу, цитату или заголовок.
+118:| `knowledge_dir` | `"knowledge/bez_durakov"` | Путь к папке знаний относительно `bd_shared`; пустое значение отключает загрузку знаний. |
+119:| `knowledge_max_title_chars` | `80` | Максимальная длина заголовка темы. |
+120:| `knowledge_max_summary_chars` | `200` | Максимальная длина первого абзаца, который становится кратким описанием. |
+121:| `knowledge_max_persona_chars` | `2000` | Максимальная длина `persona` в манифесте. |
+122:| `knowledge_max_topics` | `50` | Максимальное число файлов тем. |
+123:| `knowledge_max_doc_bytes` | `65536` | Максимальный размер одного файла темы в байтах. |
+124:| `knowledge_max_bytes_per_turn` | `131072` | Суммарный лимит байтов документов, прочитанных за один вопрос пользователя, когда вопрос охватывает несколько больших тем. |
+126:Первые шесть ключей уже читаются из текущей конфигурации. Значение `131072` для `knowledge_max_bytes_per_turn` сейчас передаётся при запуске напрямую; отдельный ключ конфигурации добавляется работой C10 и сохранит это значение по умолчанию.
+134:| `knowledge_dir` не задан | `Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.` | Запуск продолжается без знаний. |
+
+C10 check: `knowledge_max_bytes_per_turn` is present at lines 124 and 126. The current `bd_shared/config.py` and `bd_shared/config.toml` have no key or constant with that name; `main.py` currently supplies `max_bytes_per_turn=131072` directly. A later C10 todo will add the configuration key with that default.

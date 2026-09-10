@@ -1,0 +1,5 @@
+Command:
+diff <(grep -o "Knowledge folder[^\"]*" webreport/backend/main.py | sort -u) <(grep -o "Knowledge folder[^\`]*" webreport/USER_GUIDE.md | sort -u)
+
+Diff output:
+exit=0
