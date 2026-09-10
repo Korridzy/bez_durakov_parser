@@ -1646,13 +1646,17 @@ class TestStartupInitialization(unittest.TestCase):
     def test_knowledge_loads_once_before_database_and_probe_in_each_mode(self):
         main_module = self._get_main_module()
 
+        original_knowledge_loader = main_module.load_knowledge
+
         async def run_test(proxy_healthy):
             call_order = []
-            loaded_knowledge = object()
+            loaded_knowledge = None
             created_agents = []
 
-            def record_knowledge_load(*_args, **_kwargs):
+            def record_knowledge_load(*args, **kwargs):
+                nonlocal loaded_knowledge
                 call_order.append("loader")
+                loaded_knowledge = original_knowledge_loader(*args, **kwargs)
                 return loaded_knowledge
 
             async def record_data_service_initialization():

@@ -259,3 +259,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - Seven startup contracts cover missing/unparseable manifests, unknown keys, dataset-pattern violations, empty/over-long personas, and dataset/database mismatch; each pins the ERROR message, absence of `LLM mode elected`, and untouched service/checkpoint state.
 - Catching `KnowledgeError` around the complete pre-database knowledge boundary preserves warn-and-continue behavior while logging the exception's own detail once and re-raising before any checkpoint or probe work.
 - Live QA must set `reload = false` temporarily: uvicorn's reload supervisor otherwise remains up after its worker rejects startup. With reload disabled, the invalid `wrong_db` fixture put the backend in `Restarting`, exposed no health listener, and logged both dataset names. The ignored local config was restored to SHA-256 `80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a`, generated env was restored, and `/health` recovered successfully.
+
+## Todo 54-55 startup success logging
+
+- A successful shipped-folder load emits exactly one knowledge-concern INFO record using the manifest dataset and `len(knowledge.topics)`; the unset, missing, and invalid branches cannot reach it.
+- The in-process ASGI integration starts the real app with the shipped folder, scripts one `read_knowledge("rules")` tool call, posts one `/api/chat` request, and compares the resulting tool message with the shipped `rules.md` text.
+- The startup-order mock delegates to the real loader so it preserves the loaded object's manifest and topics while still recording call order. The final system lane passed all 87 tests; the mechanically captured red and green runs differ and report exits 1 and 0 respectively.

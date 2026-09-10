@@ -307,6 +307,11 @@ async def startup_event():
                 DATABASE_NAME,
                 knowledge_limits,
             )
+            logger.info(
+                "Knowledge loaded: dataset=%s, topics=%d",
+                getattr(knowledge.manifest, "dataset"),
+                len(knowledge.topics),
+            )
     except KnowledgeError as error:
         logger.error("Knowledge folder is invalid: %s", error)
         raise
