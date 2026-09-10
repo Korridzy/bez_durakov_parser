@@ -30,11 +30,22 @@ from pydantic import (
 class KnowledgeError(Exception):
     """Raised when a knowledge folder, manifest, or document fails validation."""
 
-    def __init__(self, message, *, path, key=None, rule=None):
+    def __init__(
+        self,
+        message,
+        *,
+        path,
+        key=None,
+        rule=None,
+        observed=None,
+        permitted=None,
+    ):
         super().__init__(message)
         self.path = path
         self.key = key
         self.rule = rule
+        self.observed = observed
+        self.permitted = permitted
 
 
 @dataclass(frozen=True)
@@ -89,7 +100,10 @@ class KnowledgeManifest(BaseModel):
     def validate_persona_length(cls, value: str, info: ValidationInfo) -> str:
         max_persona_chars = (info.context or {}).get("max_persona_chars")
         if max_persona_chars is not None and len(value) > max_persona_chars:
-            raise ValueError("persona exceeds max_persona_chars")
+            raise ValueError(
+                f"persona exceeds max_persona_chars: persona is {len(value)} characters, "
+                f"limit is {max_persona_chars}"
+            )
         return value
 
 
@@ -165,8 +179,11 @@ def _derive_title_and_summary(
     title = _HEADING_STRIP_RE.sub("", lines[heading_index], count=1).strip()
     if len(title) > limits.max_title_chars:
         raise KnowledgeError(
-            f"Knowledge document title exceeds {limits.max_title_chars} characters: {entry}",
+            f"Knowledge document title exceeds {limits.max_title_chars} characters: {entry}; "
+            f"title is {len(title)} characters, limit is {limits.max_title_chars}",
             path=entry,
+            observed=len(title),
+            permitted=limits.max_title_chars,
         )
 
     remaining_lines = lines[heading_index + 1:]
@@ -200,8 +217,11 @@ def _derive_title_and_summary(
     summary = " ".join(block_lines)
     if len(summary) > limits.max_summary_chars:
         raise KnowledgeError(
-            f"Knowledge document summary exceeds {limits.max_summary_chars} characters: {entry}",
+            f"Knowledge document summary exceeds {limits.max_summary_chars} characters: {entry}; "
+            f"summary is {len(summary)} characters, limit is {limits.max_summary_chars}",
             path=entry,
+            observed=len(summary),
+            permitted=limits.max_summary_chars,
         )
 
     return title, summary
@@ -246,6 +266,15 @@ def load_knowledge(
             context={"max_persona_chars": limits.max_persona_chars},
         )
     except ValidationError as error:
+        persona = manifest_data.get("persona")
+        if isinstance(persona, str) and len(persona) > limits.max_persona_chars:
+            detail = str(error).replace("\n", " ")
+            raise KnowledgeError(
+                f"Invalid knowledge manifest {manifest_path}: {detail}",
+                path=manifest_path,
+                observed=len(persona),
+                permitted=limits.max_persona_chars,
+            ) from error
         raise KnowledgeError(
             f"Invalid knowledge manifest {manifest_path}: {error}",
             path=manifest_path,
@@ -275,8 +304,11 @@ def load_knowledge(
         raw_bytes = _safe_read_bytes(folder, entry.name)
         if len(raw_bytes) > limits.max_doc_bytes:
             raise KnowledgeError(
-                f"Knowledge document exceeds {limits.max_doc_bytes} bytes: {entry}",
+                f"Knowledge document exceeds {limits.max_doc_bytes} bytes: {entry}; "
+                f"document is {len(raw_bytes)} bytes, limit is {limits.max_doc_bytes}",
                 path=entry,
+                observed=len(raw_bytes),
+                permitted=limits.max_doc_bytes,
             )
         topic_id = entry.stem
         if re.fullmatch(r"[a-z0-9_-]{1,40}", topic_id) is None:
@@ -298,8 +330,12 @@ def load_knowledge(
     topic_count = len(topics)
     if topic_count == 0 or topic_count > limits.max_topics:
         raise KnowledgeError(
-            f"Knowledge folder {folder} has {topic_count} topic documents; must be between 1 and {limits.max_topics}",
+            f"Knowledge folder {folder} has {topic_count} topic documents; "
+            f"must be between 1 and {limits.max_topics}; "
+            f"topic count is {topic_count}, limit is {limits.max_topics}",
             path=folder,
+            observed=topic_count,
+            permitted=limits.max_topics,
         )
 
     return Knowledge(manifest=manifest, topics=tuple(topics))

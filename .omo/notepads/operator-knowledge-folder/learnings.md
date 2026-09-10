@@ -299,3 +299,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `make lint` passed across the repository. The four mandated Docker lanes also exited 0: `test_system.py` ran 87 tests, `test_agent.py` 153, `test_top_team_limit.py` 2, and `test_reasoning.py` 62; verbatim output is in `62-happy.txt`.
 - Comparing test identities from `02-test-baseline.txt` with the new happy capture found 0 baseline identities missing from the current run. The larger counts are the expected knowledge-system additions, and every current lane ended with `OK`.
 - The suppression audit found only pre-existing source hits in the frontend E2E stubs, introduced by `330a940` before the `108b4da` branch point. The five `type: ignore` lines under `42-happy.txt` are captured traceback text from the non-source evidence restoration commit `e3300f7`; no suppression was introduced by todos 40-61.
+
+## Todo 67-68 actionable validation messages
+
+- Limit violations preserve their existing rule and path text, then append the observed value and configured limit; `KnowledgeError.observed` and `.permitted` expose the same values without prose parsing.
+- Persona limits are converted from the Pydantic validation wrapper into a structured `KnowledgeError`, while direct `KnowledgeManifest` validation remains actionable too.
+- The todo-67 verbose knowledge lane was intentionally red on four new message assertions; after implementation the knowledge lane passed 56 tests and the five-case probe printed non-`None` observed/permitted values for title, summary, persona, topic count, and document size.

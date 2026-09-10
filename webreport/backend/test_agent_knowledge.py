@@ -49,6 +49,20 @@ class KnowledgeTypesTests(unittest.TestCase):
         self.assertEqual(error.key, "dataset")
         self.assertEqual(error.rule, "pattern")
 
+    def test_knowledge_error_carries_observed_and_permitted_values(self):
+        """Given observed and permitted values, When a KnowledgeError is raised, Then both are accessible attributes."""
+        knowledge_module = self.knowledge_module
+
+        error = knowledge_module.KnowledgeError(
+            "boom",
+            path="/x/y.md",
+            observed=201,
+            permitted=200,
+        )
+
+        self.assertEqual(error.observed, 201)
+        self.assertEqual(error.permitted, 200)
+
     def test_knowledge_error_key_and_rule_default_to_none(self):
         """Given a KnowledgeError raised with only a path, When inspected, Then key and rule default to None."""
         knowledge_module = self.knowledge_module
@@ -57,6 +71,8 @@ class KnowledgeTypesTests(unittest.TestCase):
 
         self.assertIsNone(error.key)
         self.assertIsNone(error.rule)
+        self.assertIsNone(error.observed)
+        self.assertIsNone(error.permitted)
 
     def test_knowledge_limits_holds_six_integer_fields(self):
         """Given KnowledgeLimits, When constructed with six values, Then all six are accessible as the given integers."""
@@ -157,6 +173,33 @@ class KnowledgeTypesTests(unittest.TestCase):
             )
 
         self.assertIn("persona", str(raised.exception))
+
+    def test_load_knowledge_rejects_persona_over_max_chars_with_observed_limit(self):
+        """Given an over-long manifest persona, When loaded, Then its length, limit and manifest path are reported."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+        observed = limits.max_persona_chars + 1
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            manifest_path = folder_path / "manifest.toml"
+            persona = "P" * observed
+            manifest_path.write_text(
+                f'dataset = "some_db"\npersona = "{persona}"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            message = str(raised.exception)
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn(
+                f"persona is {observed} characters, limit is {limits.max_persona_chars}",
+                message,
+            )
+            self.assertEqual(raised.exception.observed, observed)
+            self.assertEqual(raised.exception.permitted, limits.max_persona_chars)
 
     def _knowledge_limits(self):
         return self.knowledge_module.KnowledgeLimits(
@@ -418,6 +461,8 @@ class KnowledgeTypesTests(unittest.TestCase):
                 f"topic count is 3, limit is {limits.max_topics}",
                 message,
             )
+            self.assertEqual(raised.exception.observed, 3)
+            self.assertEqual(raised.exception.permitted, limits.max_topics)
 
     def test_load_knowledge_rejects_topic_stem_outside_pattern_and_names_file(self):
         knowledge_error = self.knowledge_module.KnowledgeError
@@ -538,6 +583,8 @@ class KnowledgeTypesTests(unittest.TestCase):
                 f"title is {limits.max_title_chars + 1} characters, limit is {limits.max_title_chars}",
                 message,
             )
+            self.assertEqual(raised.exception.observed, limits.max_title_chars + 1)
+            self.assertEqual(raised.exception.permitted, limits.max_title_chars)
 
     def test_load_knowledge_rejects_heading_without_paragraph_and_names_file(self):
         """Given a heading with no following paragraph, When loaded, Then KnowledgeError names the file."""
@@ -582,6 +629,8 @@ class KnowledgeTypesTests(unittest.TestCase):
                 f"summary is {limits.max_summary_chars + 1} characters, limit is {limits.max_summary_chars}",
                 message,
             )
+            self.assertEqual(raised.exception.observed, limits.max_summary_chars + 1)
+            self.assertEqual(raised.exception.permitted, limits.max_summary_chars)
 
     def test_load_knowledge_rejects_bullet_block_after_heading_and_names_file(self):
         """Given a bullet block after the heading, When loaded, Then KnowledgeError names the file."""
@@ -811,6 +860,8 @@ class KnowledgeTypesTests(unittest.TestCase):
                 f"document is {len(oversize_path.read_bytes())} bytes, limit is {limits.max_doc_bytes}",
                 message,
             )
+            self.assertEqual(raised.exception.observed, len(oversize_path.read_bytes()))
+            self.assertEqual(raised.exception.permitted, limits.max_doc_bytes)
 
     def test_load_knowledge_rejects_document_with_invalid_utf8_and_names_file(self):
         """Given a document with invalid UTF-8 bytes, When loaded, Then KnowledgeError names the file, not a raw UnicodeDecodeError."""

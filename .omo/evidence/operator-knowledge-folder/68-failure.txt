@@ -1,0 +1,9 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_68.py
+title: Knowledge document title exceeds 80 characters: /tmp/tmp4sxnf8xe/rules.md; title is 81 characters, limit is 80; observed=81; permitted=80
+summary: Knowledge document summary exceeds 200 characters: /tmp/tmpgunw2l4c/rules.md; summary is 201 characters, limit is 200; observed=201; permitted=200
+persona: Invalid knowledge manifest /tmp/tmpomcuhlto/manifest.toml: 1 validation error for KnowledgeManifest persona   Value error, persona exceeds max_persona_chars: persona is 2001 characters, limit is 2000 [type=value_error, input_value='PPPPPPPPPPPPPPPPPPPPPPPP...PPPPPPPPPPPPPPPPPPPPPPP', input_type=str]     For further information visit https://errors.pydantic.dev/2.13/v/value_error; observed=2001; permitted=2000
+topics: Knowledge folder /tmp/tmp0mirdvi1 has 3 topic documents; must be between 1 and 2; topic count is 3, limit is 2; observed=3; permitted=2
+document: Knowledge document exceeds 10 bytes: /tmp/tmpe5b0c9ni/rules.md; document is 49 bytes, limit is 10; observed=49; permitted=10
+ Container webreport-backend-run-8de11c759fce Creating 
+ Container webreport-backend-run-8de11c759fce Created 
+exit=0
