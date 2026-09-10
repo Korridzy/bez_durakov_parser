@@ -1,4 +1,4 @@
-cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_system.py
+cd webreport && docker compose run --rm --no-deps -T -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/_probe_50_historical.py (loads dadeb58~1:webreport/backend/main.py in memory to reproduce the historical RED state)
 ================================================================================
 🧪 Running Web Reporting System Tests
 ================================================================================
@@ -52,12 +52,12 @@ cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/
 📊 Test Summary
 ================================================================================
 Tests run: 79
-Successes: 79
-Failures: 0
+Successes: 77
+Failures: 2
 Errors: 0
 Skipped: 0
- Container webreport-backend-run-b502d9bcea30 Creating 
- Container webreport-backend-run-b502d9bcea30 Created 
+ Container webreport-backend-run-26b18f401973 Creating 
+ Container webreport-backend-run-26b18f401973 Created 
 WARNING:main:LLM mode elected: fallback
 INFO:main:Services initialized successfully
 test_caller_driven_eviction_holds_the_cap (__main__.TestSessionIndex.test_caller_driven_eviction_holds_the_cap)
@@ -182,9 +182,7 @@ Regression test for API endpoint with generic team statistics prompt. ... ok
 test_regression_api_get_game_returns_404_for_missing_game (__main__.TestAPI.test_regression_api_get_game_returns_404_for_missing_game) ... ok
 test_regression_api_get_game_returns_500_for_unexpected_error (__main__.TestAPI.test_regression_api_get_game_returns_500_for_unexpected_error) ... ERROR:main:Unexpected error in API handler
 Traceback (most recent call last):
-  File "/app/main.py", line 597, in get_game
-    data = data_service.get_game_by_id(game_id)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/main.py", line 589, in get_game
   File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
     return self._mock_call(*args, **kwargs)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -213,8 +211,7 @@ test_chat_history_clear_history_flow (__main__.TestSessionLifecycleAPI.test_chat
 test_clear_unknown_session_returns_200 (__main__.TestSessionLifecycleAPI.test_clear_unknown_session_returns_200) ... ok
 test_delete_failure_retains_victim_and_retries_it (__main__.TestSessionLifecycleAPI.test_delete_failure_retains_victim_and_retries_it) ... ERROR:main:Unexpected error in API handler
 Traceback (most recent call last):
-  File "/app/main.py", line 414, in chat
-    await saver.adelete_thread(victim)
+  File "/app/main.py", line 406, in chat
   File "/app/test_system.py", line 839, in adelete_thread
     raise RuntimeError(f"delete failed for {session_id}")
 RuntimeError: delete failed for old
@@ -223,8 +220,7 @@ test_expired_history_is_deleted_on_sight (__main__.TestSessionLifecycleAPI.test_
 test_expired_requested_session_is_deleted_then_readmitted (__main__.TestSessionLifecycleAPI.test_expired_requested_session_is_deleted_then_readmitted) ... ok
 test_failed_admission_deletion_leaves_no_pin (__main__.TestSessionLifecycleAPI.test_failed_admission_deletion_leaves_no_pin) ... ERROR:main:Unexpected error in API handler
 Traceback (most recent call last):
-  File "/app/main.py", line 414, in chat
-    await saver.adelete_thread(victim)
+  File "/app/main.py", line 406, in chat
   File "/app/test_system.py", line 839, in adelete_thread
     raise RuntimeError(f"delete failed for {session_id}")
 RuntimeError: delete failed for old
@@ -250,10 +246,7 @@ INFO:main:Services initialized successfully
 WARNING:main:LLM mode elected: fallback
 INFO:main:Services initialized successfully
 ok
-test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent) ... WARNING:main:Knowledge folder not found at /app/definitely-missing-knowledge-folder; the agent runs without dataset knowledge.
-WARNING:main:LLM mode elected: agent
-INFO:main:Services initialized successfully
-ok
+test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent) ... FAIL
 test_permanent_direct_probe_failure_stops_after_one_attempt (__main__.TestStartupInitialization.test_permanent_direct_probe_failure_stops_after_one_attempt) ... ok
 test_permanent_nested_probe_failure_stops_after_one_attempt (__main__.TestStartupInitialization.test_permanent_nested_probe_failure_stops_after_one_attempt) ... ok
 test_probe_failure_elects_fallback_and_health_reports_proxy_down (__main__.TestStartupInitialization.test_probe_failure_elects_fallback_and_health_reports_proxy_down)
@@ -286,13 +279,33 @@ test_unrelated_unhealthy_endpoints_still_elect_agent (__main__.TestStartupInitia
 WARNING:main:LLM mode elected: agent
 INFO:main:Services initialized successfully
 ok
-test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent) ... WARNING:main:Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.
-WARNING:main:LLM mode elected: agent
+test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent) ... WARNING:main:LLM mode elected: agent
 INFO:main:Services initialized successfully
-ok
+FAIL
+
+======================================================================
+FAIL: test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_system.py", line 1457, in test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent
+    self._assert_startup_without_knowledge(
+  File "/app/test_system.py", line 1441, in _assert_startup_without_knowledge
+    self.assertEqual(rendered_warnings.count(expected_warning), 1)
+AssertionError: 0 != 1
+
+======================================================================
+FAIL: test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent (__main__.TestStartupInitialization.test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/test_system.py", line 1449, in test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent
+    self._assert_startup_without_knowledge(
+  File "/app/test_system.py", line 1441, in _assert_startup_without_knowledge
+    self.assertEqual(rendered_warnings.count(expected_warning), 1)
+AssertionError: 0 != 1
 
 ----------------------------------------------------------------------
-Ran 79 tests in 0.881s
+Ran 79 tests in 0.879s
 
-OK
-exit=0
+FAILED (failures=2)
+
+exit=1
