@@ -253,3 +253,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - Unset and absent knowledge folders are detected after unconditional limit validation but before database initialization; each emits only its exact knowledge warning and passes `None` into agent construction.
 - The startup tests inspect the real agent-mode tool binding and graph prompt, proving that warn-and-continue omits `read_knowledge` and uses `compose_system_prompt(None)` without changing mode election.
 - Live QA recreated `webreport-backend` with `/nope/missing`, served healthy and successful agent-mode requests, then restored the ignored local config byte-for-byte and recreated a healthy backend using `/bd_shared/knowledge/bez_durakov`.
+
+## Todo 52-53 fail-fast invalid knowledge startup
+
+- Seven startup contracts cover missing/unparseable manifests, unknown keys, dataset-pattern violations, empty/over-long personas, and dataset/database mismatch; each pins the ERROR message, absence of `LLM mode elected`, and untouched service/checkpoint state.
+- Catching `KnowledgeError` around the complete pre-database knowledge boundary preserves warn-and-continue behavior while logging the exception's own detail once and re-raising before any checkpoint or probe work.
+- Live QA must set `reload = false` temporarily: uvicorn's reload supervisor otherwise remains up after its worker rejects startup. With reload disabled, the invalid `wrong_db` fixture put the backend in `Restarting`, exposed no health listener, and logged both dataset names. The ignored local config was restored to SHA-256 `80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a`, generated env was restored, and `/health` recovered successfully.

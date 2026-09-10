@@ -33,7 +33,13 @@ from bd_shared.config import (
 )
 
 
-from agent.knowledge import Knowledge, KnowledgeLimits, load_knowledge, validate_limits
+from agent.knowledge import (
+    Knowledge,
+    KnowledgeError,
+    KnowledgeLimits,
+    load_knowledge,
+    validate_limits,
+)
 from agent.reasoning import extract_reasoning, extract_text
 from agents.report_agents import ReportAgentSystem
 from services.game_data_service import GameDataService
@@ -274,28 +280,36 @@ async def startup_event():
     global agent_system, checkpoint_connection, checkpoint_saver
     global data_service, knowledge, llm_proxy_healthy
 
-    knowledge_limits = KnowledgeLimits(
-        max_title_chars=KNOWLEDGE_MAX_TITLE_CHARS,
-        max_summary_chars=KNOWLEDGE_MAX_SUMMARY_CHARS,
-        max_persona_chars=KNOWLEDGE_MAX_PERSONA_CHARS,
-        max_topics=KNOWLEDGE_MAX_TOPICS,
-        max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
-        max_bytes_per_turn=131072,
-    )
-    validate_limits(knowledge_limits)
-    if KNOWLEDGE_DIR is None:
-        logger.warning(
-            "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge."
+    try:
+        knowledge_limits = KnowledgeLimits(
+            max_title_chars=KNOWLEDGE_MAX_TITLE_CHARS,
+            max_summary_chars=KNOWLEDGE_MAX_SUMMARY_CHARS,
+            max_persona_chars=KNOWLEDGE_MAX_PERSONA_CHARS,
+            max_topics=KNOWLEDGE_MAX_TOPICS,
+            max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
+            max_bytes_per_turn=131072,
         )
-        knowledge = None
-    elif not KNOWLEDGE_DIR.exists():
-        logger.warning(
-            "Knowledge folder not found at %s; the agent runs without dataset knowledge.",
-            KNOWLEDGE_DIR.resolve(),
-        )
-        knowledge = None
-    else:
-        knowledge = load_knowledge(KNOWLEDGE_DIR, DATABASE_NAME, knowledge_limits)
+        validate_limits(knowledge_limits)
+        if KNOWLEDGE_DIR is None:
+            logger.warning(
+                "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge."
+            )
+            knowledge = None
+        elif not KNOWLEDGE_DIR.exists():
+            logger.warning(
+                "Knowledge folder not found at %s; the agent runs without dataset knowledge.",
+                KNOWLEDGE_DIR.resolve(),
+            )
+            knowledge = None
+        else:
+            knowledge = load_knowledge(
+                KNOWLEDGE_DIR,
+                DATABASE_NAME,
+                knowledge_limits,
+            )
+    except KnowledgeError as error:
+        logger.error("Knowledge folder is invalid: %s", error)
+        raise
 
     data_service = await initialize_data_service_with_retry()
 

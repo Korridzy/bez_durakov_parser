@@ -1,0 +1,100 @@
+cd webreport && make generate-env && docker compose up -d --force-recreate backend
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+ Container webreport-mysql Running 
+ Container webreport-litellm Running 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+exit=0
+timeout 30 sh -c 'until [ "$(docker inspect --format={{.State.Status}} webreport-backend 2>/dev/null)" = restarting ]; do sleep 0.2; done'
+exit=0
+cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED         STATUS                                  PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          5 seconds ago   Restarting (3) Less than a second ago   
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago      Restarting (1) 24 seconds ago           
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         4 days ago      Up 38 hours                             5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          4 days ago      Up 38 hours (healthy)                   4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago      Up 38 hours                             0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+cd webreport && docker compose logs --no-color backend
+webreport-backend  | INFO:     Started server process [1]
+webreport-backend  | INFO:     Waiting for application startup.
+webreport-backend  | ERROR:main:Knowledge folder is invalid: dataset 'wrong_db' does not match configured database 'bez_durakov'
+webreport-backend  | ERROR:    Traceback (most recent call last):
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 638, in lifespan
+webreport-backend  |     async with self.lifespan_context(app) as maybe_state:
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 257, in __aenter__
+webreport-backend  |     await self._router._startup()
+webreport-backend  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 6324, in _startup
+webreport-backend  |     await handler()
+webreport-backend  |   File "/app/main.py", line 305, in startup_event
+webreport-backend  |     knowledge = load_knowledge(
+webreport-backend  |                 ^^^^^^^^^^^^^^^
+webreport-backend  |   File "/app/agent/knowledge.py", line 256, in load_knowledge
+webreport-backend  |     raise KnowledgeError(
+webreport-backend  | agent.knowledge.KnowledgeError: dataset 'wrong_db' does not match configured database 'bez_durakov'
+webreport-backend  | 
+webreport-backend  | ERROR:    Application startup failed. Exiting.
+exit=0
+curl --fail --show-error --connect-timeout 3 --max-time 5 http://127.0.0.1:28000/health
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (56) Recv failure: Connection reset by peer
+exit=56
+docker inspect --format='status={{.State.Status}} restart={{.RestartCount}}' webreport-backend
+status=restarting restart=8
+exit=0
+curl --fail --show-error --connect-timeout 3 --max-time 5 http://127.0.0.1:28000/health
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (7) Failed to connect to 127.0.0.1 port 28000 after 0 ms: Couldn't connect to server
+exit=7
+sha256sum bd_shared/config.local.toml
+80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a  bd_shared/config.local.toml
+exit=0
+cd webreport && make generate-env && docker compose up -d --force-recreate backend
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+ Container webreport-litellm Running 
+ Container webreport-mysql Running 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+exit=0
+timeout 60 sh -c 'until curl --fail --silent --output /dev/null http://127.0.0.1:28000/health; do sleep 0.2; done'
+exit=0
+cd webreport && docker compose ps
+NAME                       IMAGE                                                                     COMMAND                  SERVICE          CREATED          STATUS                          PORTS
+webreport-backend          webreport-backend                                                         "python start.py"        backend          11 seconds ago   Up 9 seconds                    5678/tcp, 0.0.0.0:28000->8000/tcp, [::]:28000->8000/tcp
+webreport-data-collector   sha256:fb245d7d5bff06198c03e8f330d87c1c67e848bb561a8a6d37845ee75dc3e579   "python entrypoint.py"   data_collector   9 days ago       Restarting (1) 38 seconds ago   
+webreport-frontend         webreport-frontend                                                        "python start.py"        frontend         4 days ago       Up 38 hours                     5679/tcp, 0.0.0.0:28501->8501/tcp, [::]:28501->8501/tcp
+webreport-litellm          ghcr.io/berriai/litellm:main-stable                                       "docker/prod_entrypo…"   litellm          4 days ago       Up 38 hours (healthy)           4000/tcp
+webreport-mysql            mysql:8.0                                                                 "docker-entrypoint.s…"   mysql            9 days ago       Up 38 hours                     0.0.0.0:3306->3306/tcp, [::]:3306->3306/tcp, 33060/tcp
+exit=0
+curl --fail --show-error --max-time 5 http://127.0.0.1:28000/health
+{"status":"healthy","timestamp":"2026-09-10T00:49:20.768881","services":{"database":true,"agents":true,"llm_proxy":true}}  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100   121  100   121    0     0   115k      0 --:--:-- --:--:-- --:--:--  118k
+exit=0
+cd webreport && docker compose exec -T backend python -c 'import bd_shared.config as c; print(c.KNOWLEDGE_DIR)'
+/bd_shared/knowledge/bez_durakov
+exit=0
+test ! -e bd_shared/knowledge/_qa_invalid_53
+exit=0
