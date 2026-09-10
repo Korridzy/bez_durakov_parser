@@ -1,0 +1,22 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_67.py
+Knowledge document summary exceeds 200 characters: /tmp/tmpd0fxczcx/rules.md
+ Container webreport-backend-run-3c9e9b7e5d1e Creating 
+ Container webreport-backend-run-3c9e9b7e5d1e Created 
+Traceback (most recent call last):
+  File "/app/_probe_67.py", line 25, in <module>
+    load_knowledge(folder, "some_db", limits)
+  File "/app/agent/knowledge.py", line 295, in load_knowledge
+    title, summary = _derive_title_and_summary(text, entry, limits)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/knowledge.py", line 202, in _derive_title_and_summary
+    raise KnowledgeError(
+agent.knowledge.KnowledgeError: Knowledge document summary exceeds 200 characters: /tmp/tmpd0fxczcx/rules.md
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/_probe_67.py", line 31, in <module>
+    raise AssertionError(f"missing actionable detail: {expected}") from error
+AssertionError: missing actionable detail: summary is 201 characters, limit is 200
+
+exit=1
