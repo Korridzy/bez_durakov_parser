@@ -93,14 +93,30 @@ cd webreport
 
 Источник конфигурации для WebReport — `../bd_shared/config.toml`.
 
-Используемые секции:
+Используемые секции и полный список ключей `[webreport]`:
 
-- `[database]` — `url`, `docker_url`, `sqlalchemy_logging`
-- `[application]` — `debug`, `log_level`, `default_game_date`
-- `[webreport]` — `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
-- `[xlsm_fetch]` — `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
+- `[database]`: `url`, `docker_url`, `sqlalchemy_logging`
+- `[application]`: `debug`, `log_level`, `default_game_date`
+- `[webreport]`:
+  - Сеть и запуск: `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
+  - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`
+  - LiteLLM: `litellm_base_url`, `agent_model`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
+  - Ключи провайдеров: `openai_api_key`, `openrouter_api_key`, `opencode_api_key`
+  - Знания:
+    - `knowledge_dir = "knowledge/bez_durakov"`
+    - `knowledge_max_title_chars = 80`
+    - `knowledge_max_summary_chars = 200`
+    - `knowledge_max_persona_chars = 2000`
+    - `knowledge_max_topics = 50`
+    - `knowledge_max_doc_bytes = 65536`
+    - `knowledge_max_bytes_per_turn = 131072`
+- `[xlsm_fetch]`: `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 `../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.
+
+### Папка знаний
+
+По умолчанию `knowledge_dir = "knowledge/bez_durakov"` указывает на поставляемую папку `bd_shared/knowledge/bez_durakov`. Если указанная папка отсутствует, backend записывает предупреждение и продолжает запуск без знаний. Если папка существует, но недействительна, например `manifest.toml` не проходит проверку, backend прерывает запуск.
 
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.

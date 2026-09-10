@@ -271,3 +271,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 `compose_system_prompt()` собирает persona манифеста, заданные в коде правила и список тем. Полный текст `KnowledgeTopic.text` остаётся доступен по точному идентификатору только через `read_knowledge`.
 
 В `startup_event()` загрузка и валидация знаний происходят перед `GameDataService`, probe LiteLLM и выбором режима. Сегодня независим от БД лишь путь prompt и знаний; восемь data tools и regex `FallbackInterpreter` всё ещё привязаны к игре.
+
+## Todo 60
+
+- Полный список ключей `[webreport]` в `webreport/README.md` теперь включает каждый ключ из текущего `config.toml` и `knowledge_max_bytes_per_turn = 131072` из C10.
+- `knowledge_dir` по умолчанию указывает на поставляемую папку. Отсутствующая папка вызывает только предупреждение, а недействительная прерывает запуск. Корневой README ведёт к операторскому разделу руководства.
+- Проверка документации нашла 8 строк с `knowledge_`, отдельно нашла `knowledge_max_bytes_per_turn` и не выявила отсутствующих ключей `[webreport]`.
