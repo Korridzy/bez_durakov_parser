@@ -359,3 +359,8 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - В `webreport/ARCHITECTURE.md` теперь названы `knowledge_dir` и все действующие ключи `knowledge_max_*`, а полный перечень связан с перечислением `[webreport]` в `webreport/README.md`.
 - В `webreport/README.md` `read_knowledge` назван инструментом поиска полного Markdown-документа по требованию.
 - Описание компактации переведено на русский без изменения поведения контекста модели, возобновляемого головного состояния и исторических контрольных точек.
+## Todo 78
+
+- Reconstructed todo 22 from the adjacent history commits `32fdbec` (strict derivation tests) and `95cfd30` (implementation). The happy capture runs the current 13 title/summary contract tests against the working-tree implementation and exits 0.
+- The failure capture obtains the exact `32fdbec:webreport/backend/agent/knowledge.py` blob (`f8d9e468ee8c15c1c2ea4ac5708270bc695cc656`), transports it on Docker stdin, and exec-loads it into a live `agent.knowledge` module without replacing the mounted working-tree file. The mounted current `test_agent_knowledge.py` then runs the same 13 selected tests; all 13 fail for the expected pre-implementation behavior and the process exits 1.
+- Both captures were written by a Python subprocess-capture script with combined stdout/stderr and a final explicit exit marker; no source or test files were changed.
