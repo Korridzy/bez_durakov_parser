@@ -1460,6 +1460,82 @@ class TestStartupInitialization(unittest.TestCase):
             f"Knowledge folder not found at {missing_path.resolve()}; the agent runs without dataset knowledge.",
         )
 
+    def test_shipped_knowledge_logs_once_and_serves_read_knowledge_chat(self):
+        message_module = importlib.import_module("langchain_core.messages")
+        runtime_module = importlib.import_module("agents.report_runtime")
+        main_module = self._get_main_module()
+        knowledge_folder = Path("/bd_shared/knowledge/bez_durakov")
+        rules_text = (knowledge_folder / "rules.md").read_text(encoding="utf-8")
+        model = ScriptedStub(
+            [
+                message_module.AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "read_knowledge",
+                            "args": {"topic_id": "rules"},
+                            "id": "startup-knowledge-1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                message_module.AIMessage(content="Правила прочитаны."),
+            ]
+        )
+
+        asyncio.run(self._reset_startup_state(main_module))
+        with (
+            patch.object(main_module, "KNOWLEDGE_DIR", knowledge_folder),
+            patch.object(main_module, "DATABASE_NAME", "bez_durakov"),
+            patch.object(main_module, "GameDataService", return_value=StubService()),
+            patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
+            patch.object(
+                main_module,
+                "probe_llm_proxy",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(runtime_module, "_new_model_client", return_value=model),
+            self.assertLogs(main_module.logger, level="INFO") as captured_logs,
+        ):
+            client = ASGITestClient(main_module.app)
+            try:
+                response = client.post(
+                    "/api/chat",
+                    json={"message": "Объясни правила", "session_id": "knowledge"},
+                )
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["mode"], "agent")
+        self.assertEqual(
+            body["query_info"],
+            [{"tool": "read_knowledge", "args": {"topic_id": "rules"}}],
+        )
+        tool_messages = [
+            message
+            for message in model.requests[1]
+            if isinstance(message, message_module.ToolMessage)
+        ]
+        self.assertEqual([message.content for message in tool_messages], [rules_text])
+
+        rendered_logs = [record.getMessage() for record in captured_logs.records]
+        expected_info = "Knowledge loaded: dataset=bez_durakov, topics=3"
+        self.assertEqual(
+            rendered_logs.count(expected_info),
+            1,
+            f"missing info line: {expected_info}",
+        )
+        self.assertFalse(
+            any(
+                message.startswith("Knowledge folder is not configured")
+                or message.startswith("Knowledge folder not found at")
+                for message in rendered_logs
+            )
+        )
+
     def _assert_invalid_knowledge_folder_aborts(
         self,
         manifest_text,
