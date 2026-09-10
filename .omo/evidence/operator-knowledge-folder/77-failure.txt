@@ -1,0 +1,4 @@
+Метод подтверждения: после правки перечитан абзац о компактации в разделе `3. Agent system` файла `webreport/ARCHITECTURE.md`. Все четыре предложения написаны по-русски. Затем точечный поиск исходных английских фраз не нашёл совпадений.
+
+$ grep -nE "Knowledge documents remain|Prior-turn documents are removed|historical checkpoint rows may retain|The head is compacted|If a model invocation fails" webreport/ARCHITECTURE.md
+exit=1

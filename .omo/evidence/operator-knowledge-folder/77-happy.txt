@@ -1,0 +1,7 @@
+$ grep -n "knowledge_dir\|knowledge_max" webreport/ARCHITECTURE.md
+97:Папка задаётся ключом `knowledge_dir` секции `[webreport]`. Полный список ключей знаний, включая `knowledge_max_title_chars`, `knowledge_max_summary_chars`, `knowledge_max_persona_chars`, `knowledge_max_topics`, `knowledge_max_doc_bytes` и `knowledge_max_bytes_per_turn`, приведён в перечислении `[webreport]` файла [webreport/README.md](README.md).
+exit=0
+
+$ grep -n "read_knowledge" webreport/README.md
+119:По умолчанию `knowledge_dir = "knowledge/bez_durakov"` указывает на поставляемую папку `bd_shared/knowledge/bez_durakov`. Если указанная папка отсутствует, backend записывает предупреждение и продолжает запуск без знаний. Если папка существует, но недействительна, например `manifest.toml` не проходит проверку, backend прерывает запуск. Когда папка знаний загружена, агент выполняет поиск полного Markdown-документа по требованию инструментом `read_knowledge`, передавая ему точный идентификатор темы.
+exit=0

@@ -353,3 +353,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 ## Todo 69 F2 follow-up
 
 - The knowledge CLI preflight now threads `KNOWLEDGE_MAX_BYTES_PER_TURN` from `bd_shared.config` into `KnowledgeLimits`, closing the F2 gap where a hardcoded 131072 could let an invalid operator budget replace a healthy backend before startup rejected it.
+
+## Todo 77
+
+- В `webreport/ARCHITECTURE.md` теперь названы `knowledge_dir` и все действующие ключи `knowledge_max_*`, а полный перечень связан с перечислением `[webreport]` в `webreport/README.md`.
+- В `webreport/README.md` `read_knowledge` назван инструментом поиска полного Markdown-документа по требованию.
+- Описание компактации переведено на русский без изменения поведения контекста модели, возобновляемого головного состояния и исторических контрольных точек.
