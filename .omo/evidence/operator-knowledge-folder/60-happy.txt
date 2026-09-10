@@ -1,4 +1,6 @@
 $ grep -c "knowledge_" webreport/README.md
 8
+exit=0
 $ grep -c "knowledge_max_bytes_per_turn" webreport/README.md
 1
+exit=0

@@ -1,0 +1,15 @@
+$ awk '
+  /^\[webreport\][[:space:]]*$/ { inside = 1; next }
+  /^\[/ { inside = 0 }
+  inside && /^[[:alnum:]_]+[[:space:]]*=/ {
+    key = $0
+    sub(/[[:space:]]*=.*/, "", key)
+    print key
+  }
+' bd_shared/config.toml |
+  while IFS= read -r key; do
+    grep -Fq "$key" webreport/README.md || printf '%s\n' "$key"
+  done |
+  awk '{ print; missing += 1 } END { printf "missing_keys=%d\n", missing; exit(missing != 0) }'
+missing_keys=0
+exit=0

@@ -17,3 +17,4 @@ Output:
 134:| `knowledge_dir` не задан | `Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.` | Запуск продолжается без знаний. |
 
 C10 check: `knowledge_max_bytes_per_turn` is present at lines 124 and 126. The current `bd_shared/config.py` and `bd_shared/config.toml` have no key or constant with that name; `main.py` currently supplies `max_bytes_per_turn=131072` directly. A later C10 todo will add the configuration key with that default.
+exit=0

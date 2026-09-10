@@ -98,3 +98,5 @@ cd webreport && docker compose exec -T backend python -c 'import bd_shared.confi
 exit=0
 test ! -e bd_shared/knowledge/_qa_invalid_53
 exit=0
+
+Note: this proof was captured with WEBREPORT_RELOAD=false to demonstrate the underlying single-process production behavior. The project's default configuration (WEBREPORT_RELOAD=true, per webreport/backend/start.py and webreport/generate_env.py) runs uvicorn's --reload supervisor, which by design tolerates a crashed worker process without closing the listening port, so a curl probe under the default dev-reload configuration would not observe a clean connection-refused. This is a pre-existing, project-wide characteristic of the reload-supervisor architecture that applies uniformly to any startup-time exception (not specific to knowledge-folder handling) and is out of scope for this feature plan to change. See .omo/notepads/operator-knowledge-folder/decisions.md for the full ruling.

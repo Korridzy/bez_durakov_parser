@@ -1,3 +1,7 @@
-grep -c "Knowledge loaded" webreport/backend/test_system.py
-1
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_54.py
+URL mysql+pymysql://durak:devpass@mysql:3306/bez_durakov
+NAME bez_durakov
+DIR /bd_shared/knowledge/bez_durakov
+ Container webreport-backend-run-1b2869e6c8bf Creating 
+ Container webreport-backend-run-1b2869e6c8bf Created 
 exit=0
