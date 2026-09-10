@@ -433,6 +433,7 @@ class KnowledgeTypesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (folder_path / "notes.txt").write_text("Arbitrary notes.\n", encoding="utf-8")
+            (folder_path / ".gitkeep").touch()
             (folder_path / ".hidden.md").write_text(
                 "# Hidden\n\nSome hidden paragraph text.\n",
                 encoding="utf-8",
@@ -448,6 +449,12 @@ class KnowledgeTypesTests(unittest.TestCase):
             self.assertEqual(knowledge.topics[0].id, "rules")
 
     def test_load_knowledge_rejects_subdirectory_in_folder_root(self):
+        self._assert_root_subdirectory_rejected("subdir")
+
+    def test_load_knowledge_rejects_hidden_subdirectory_in_folder_root(self):
+        self._assert_root_subdirectory_rejected(".git")
+
+    def _assert_root_subdirectory_rejected(self, name):
         knowledge_error = self.knowledge_module.KnowledgeError
         limits = self._knowledge_limits()
 
@@ -461,10 +468,13 @@ class KnowledgeTypesTests(unittest.TestCase):
                 "# Rules\n\nSome summary paragraph text.\n",
                 encoding="utf-8",
             )
-            (folder_path / "subdir").mkdir()
+            subdirectory = folder_path / name
+            subdirectory.mkdir()
 
-            with self.assertRaises(knowledge_error):
+            with self.assertRaises(knowledge_error) as raised:
                 self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+            self.assertEqual(raised.exception.path, subdirectory)
+            self.assertEqual(raised.exception.rule, "no_subdirectories")
 
     def test_load_knowledge_rejects_zero_topic_documents(self):
         knowledge_error = self.knowledge_module.KnowledgeError

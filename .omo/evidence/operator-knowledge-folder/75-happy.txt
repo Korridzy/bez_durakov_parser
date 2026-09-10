@@ -1,0 +1,242 @@
+$ cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_knowledge.py -v
+ Container webreport-backend-run-47270bf5e950 Creating 
+ Container webreport-backend-run-47270bf5e950 Created 
+test_agent_package_and_neutral_prompt_are_free_of_game_domain_strings (__main__.KnowledgeTypesTests.test_agent_package_and_neutral_prompt_are_free_of_game_domain_strings) ... ok
+test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge (__main__.KnowledgeTypesTests.test_compose_system_prompt_adds_retrieval_rule_only_with_knowledge)
+Given loaded knowledge and no knowledge, When prompts are composed, Then only the loaded branch has D7. ... ok
+test_compose_system_prompt_is_database_agnostic_for_library_catalogue (__main__.KnowledgeTypesTests.test_compose_system_prompt_is_database_agnostic_for_library_catalogue) ... ok
+test_compose_system_prompt_suppresses_separator_after_terminal_punctuation (__main__.KnowledgeTypesTests.test_compose_system_prompt_suppresses_separator_after_terminal_punctuation)
+Given punctuated and plain titles, When composed, Then only the plain title receives a separator period. ... ok
+test_compose_system_prompt_with_knowledge_has_full_ordered_structure (__main__.KnowledgeTypesTests.test_compose_system_prompt_with_knowledge_has_full_ordered_structure)
+Given three loaded topics, When composed, Then persona, seven rules, heading and ordered topics are exact. ... ok
+test_compose_system_prompt_without_knowledge_is_byte_exact (__main__.KnowledgeTypesTests.test_compose_system_prompt_without_knowledge_is_byte_exact)
+Given no knowledge, When the prompt is composed, Then it is exactly the neutral persona and six rules. ... ok
+test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets (__main__.KnowledgeTypesTests.test_compose_system_prompt_without_knowledge_omits_forbidden_numeric_budgets)
+Given no knowledge, When the prompt is composed, Then removed literal budget figures stay absent. ... ok
+test_config_preserves_raw_limits_for_backend_validation (__main__.KnowledgeTypesTests.test_config_preserves_raw_limits_for_backend_validation) ... ok
+test_document_failures_carry_structured_rules_and_limit_keys (__main__.KnowledgeTypesTests.test_document_failures_carry_structured_rules_and_limit_keys) ... ok
+test_invalid_toml_limits_abort_real_startup_before_database (__main__.KnowledgeTypesTests.test_invalid_toml_limits_abort_real_startup_before_database) ... ok
+test_knowledge_error_carries_observed_and_permitted_values (__main__.KnowledgeTypesTests.test_knowledge_error_carries_observed_and_permitted_values)
+Given observed and permitted values, When a KnowledgeError is raised, Then both are accessible attributes. ... ok
+test_knowledge_error_carries_path_and_optional_key_and_rule (__main__.KnowledgeTypesTests.test_knowledge_error_carries_path_and_optional_key_and_rule)
+Given a KnowledgeError raised with path, key and rule, When inspected, Then all three are accessible attributes. ... ok
+test_knowledge_error_is_a_plain_exception_subclass (__main__.KnowledgeTypesTests.test_knowledge_error_is_a_plain_exception_subclass)
+Given KnowledgeError, When its MRO is inspected, Then it derives from Exception directly, not ValueError or ToolError. ... ok
+test_knowledge_error_key_and_rule_default_to_none (__main__.KnowledgeTypesTests.test_knowledge_error_key_and_rule_default_to_none)
+Given a KnowledgeError raised with only a path, When inspected, Then key and rule default to None. ... ok
+test_knowledge_exposes_manifest_and_ordered_topics (__main__.KnowledgeTypesTests.test_knowledge_exposes_manifest_and_ordered_topics)
+Given a Knowledge instance, When constructed with a manifest and topics, Then both are accessible and topics preserve order. ... ok
+test_knowledge_limits_holds_six_integer_fields (__main__.KnowledgeTypesTests.test_knowledge_limits_holds_six_integer_fields)
+Given KnowledgeLimits, When constructed with six values, Then all six are accessible as the given integers. ... ok
+test_knowledge_manifest_accepts_only_dataset_and_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_accepts_only_dataset_and_persona)
+Given dataset and persona, When a KnowledgeManifest is constructed, Then both fields are accepted exactly. ... ok
+test_knowledge_manifest_rejects_dataset_outside_pinned_pattern (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_dataset_outside_pinned_pattern)
+Given dataset must match ^[a-z0-9_-]{1,64}$, When it contains uppercase letters, Then the error names dataset. ... ok
+test_knowledge_manifest_rejects_empty_persona_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_empty_persona_and_names_persona)
+Given an empty persona, When a KnowledgeManifest is constructed, Then the error names persona. ... ok
+test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona)
+Given max_persona_chars is supplied in validation context, When persona exceeds it, Then the error names persona. ... ok
+test_knowledge_manifest_rejects_unknown_key_and_names_language (__main__.KnowledgeTypesTests.test_knowledge_manifest_rejects_unknown_key_and_names_language)
+Given extra="forbid", When language is supplied to a KnowledgeManifest, Then the error names language. ... ok
+test_knowledge_topic_exposes_id_title_summary_text (__main__.KnowledgeTypesTests.test_knowledge_topic_exposes_id_title_summary_text)
+Given a KnowledgeTopic, When constructed, Then id, title, summary and text are all accessible. ... ok
+test_load_knowledge_accepts_database_name_string_and_limits (__main__.KnowledgeTypesTests.test_load_knowledge_accepts_database_name_string_and_limits)
+Given a valid folder, database-name string and limits, When loaded, Then a Knowledge value is returned. ... ok
+test_load_knowledge_derives_complete_title_and_multiline_summary (__main__.KnowledgeTypesTests.test_load_knowledge_derives_complete_title_and_multiline_summary)
+Given a valid document, When loaded, Then id, title and joined summary are exact and untruncated. ... ok
+test_load_knowledge_ignores_manifest_non_md_and_dot_prefixed_entries (__main__.KnowledgeTypesTests.test_load_knowledge_ignores_manifest_non_md_and_dot_prefixed_entries) ... ok
+test_load_knowledge_orders_topics_by_full_filename_byte_order_not_stem (__main__.KnowledgeTypesTests.test_load_knowledge_orders_topics_by_full_filename_byte_order_not_stem)
+Given a-.md and a.md, When loaded, Then topics are ordered by full filename UTF-8 bytes, so 'a-' sorts before 'a' (decision C5). ... ok
+test_load_knowledge_rejects_boolean_topics_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_boolean_topics_limit_and_names_key) ... ok
+test_load_knowledge_rejects_bullet_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_bullet_block_after_heading_and_names_file)
+Given a bullet block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_dataset_mismatch_with_both_names (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_dataset_mismatch_with_both_names)
+Given a valid manifest for another dataset, When loaded, Then KnowledgeError names expected and actual datasets. ... ok
+test_load_knowledge_rejects_document_over_max_doc_bytes_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_document_over_max_doc_bytes_and_names_file)
+Given a document exceeding max_doc_bytes, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_document_with_invalid_utf8_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_document_with_invalid_utf8_and_names_file)
+Given a document with invalid UTF-8 bytes, When loaded, Then KnowledgeError names the file, not a raw UnicodeDecodeError. ... ok
+test_load_knowledge_rejects_document_without_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_document_without_heading_and_names_file)
+Given a document without a heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_each_below_one_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_below_one_limit_and_names_key) ... ok
+test_load_knowledge_rejects_each_non_integer_limit_and_names_key (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_each_non_integer_limit_and_names_key) ... ok
+test_load_knowledge_rejects_fence_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_fence_block_after_heading_and_names_file)
+Given a fenced block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_heading_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_heading_block_after_heading_and_names_file)
+Given another heading block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_heading_without_paragraph_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_heading_without_paragraph_and_names_file)
+Given a heading with no following paragraph, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_hidden_subdirectory_in_folder_root (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_hidden_subdirectory_in_folder_root) ... ok
+test_load_knowledge_rejects_html_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_html_block_after_heading_and_names_file)
+Given an HTML block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_manifest_symlink_outside_folder (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_manifest_symlink_outside_folder)
+Given manifest.toml escapes through a symlink, When loaded, Then KnowledgeError names the manifest. ... ok
+test_load_knowledge_rejects_missing_manifest (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_missing_manifest)
+Given an empty knowledge folder, When it is loaded, Then KnowledgeError names the missing manifest. ... ok
+test_load_knowledge_rejects_ordered_list_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_ordered_list_block_after_heading_and_names_file)
+Given an ordered-list block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_persona_over_max_chars_with_observed_limit (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_persona_over_max_chars_with_observed_limit)
+Given an over-long manifest persona, When loaded, Then its length, limit and manifest path are reported. ... ok
+test_load_knowledge_rejects_quote_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_quote_block_after_heading_and_names_file)
+Given a quote block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_subdirectory_in_folder_root (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_subdirectory_in_folder_root) ... ok
+test_load_knowledge_rejects_summary_over_max_chars_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_summary_over_max_chars_and_names_file)
+Given a summary over the configured limit, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_table_block_after_heading_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_table_block_after_heading_and_names_file)
+Given a table block after the heading, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_title_over_max_chars_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_title_over_max_chars_and_names_file)
+Given a title over the configured limit, When loaded, Then KnowledgeError names the file. ... ok
+test_load_knowledge_rejects_topic_count_over_max_topics (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_topic_count_over_max_topics) ... ok
+test_load_knowledge_rejects_topic_stem_outside_pattern_and_names_file (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_topic_stem_outside_pattern_and_names_file) ... ok
+test_load_knowledge_rejects_zero_topic_documents (__main__.KnowledgeTypesTests.test_load_knowledge_rejects_zero_topic_documents) ... ok
+test_load_knowledge_reports_size_rule_before_decode_when_both_apply (__main__.KnowledgeTypesTests.test_load_knowledge_reports_size_rule_before_decode_when_both_apply)
+Given a document that is both oversize and invalid UTF-8, When loaded, Then the error reports the size rule, not a decode failure - proving size is checked first (decision C6). ... ok
+test_load_knowledge_signature_excludes_database_handles (__main__.KnowledgeTypesTests.test_load_knowledge_signature_excludes_database_handles)
+Given load_knowledge, When its signature is inspected, Then it accepts no database handle parameter. ... ok
+test_load_knowledge_strips_only_leading_heading_hashes_and_preserves_markdown (__main__.KnowledgeTypesTests.test_load_knowledge_strips_only_leading_heading_hashes_and_preserves_markdown)
+Given a decorated heading and summary, When loaded, Then trailing hashes and inline Markdown remain verbatim. ... ok
+test_load_knowledge_treats_differently_cased_manifest_as_missing (__main__.KnowledgeTypesTests.test_load_knowledge_treats_differently_cased_manifest_as_missing)
+Given only Manifest.TOML, When the folder is loaded, Then KnowledgeError reports lowercase manifest.toml missing. ... ok
+test_load_knowledge_wraps_dataset_pattern_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_dataset_pattern_validation)
+Given an invalid manifest dataset, When the folder is loaded, Then KnowledgeError names the manifest and dataset. ... ok
+test_load_knowledge_wraps_directory_enumeration_errors (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_directory_enumeration_errors) ... ok
+test_load_knowledge_wraps_entry_inspection_errors (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_entry_inspection_errors) ... ok
+test_load_knowledge_wraps_unknown_manifest_key_validation (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unknown_manifest_key_validation)
+Given a manifest with language, When the folder is loaded, Then KnowledgeError names the manifest and key. ... ok
+test_load_knowledge_wraps_unparseable_toml (__main__.KnowledgeTypesTests.test_load_knowledge_wraps_unparseable_toml)
+Given malformed manifest TOML, When the folder is loaded, Then KnowledgeError identifies the parse failure. ... ok
+test_load_knowledge_yields_three_topics_in_expected_order_with_expected_ids (__main__.KnowledgeTypesTests.test_load_knowledge_yields_three_topics_in_expected_order_with_expected_ids) ... ok
+test_shipped_knowledge_skeleton_loads_under_strict_default_limits (__main__.KnowledgeTypesTests.test_shipped_knowledge_skeleton_loads_under_strict_default_limits) ... ok
+
+----------------------------------------------------------------------
+Ran 62 tests in 8.521s
+
+OK
+exit=0
+
+$ cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent.py
+ Container webreport-backend-run-c4432b386c67 Creating 
+ Container webreport-backend-run-c4432b386c67 Created 
+......./bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+..........................................................................................................................................ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 261, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 324, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 223, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 166, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_agent_report_agent.py", line 24, in ainvoke
+    raise ScriptedModelError("scripted model failure")
+test_agent_report_agent.ScriptedModelError: scripted model failure
+During task with name 'agent' and id '599da28a-5639-c3ae-4541-ecb3b00c70f4'
+............................
+----------------------------------------------------------------------
+Ran 173 tests in 14.791s
+
+OK
+bounded baseline: model_invocations=8 tool_executions=7 data_calls=6
+model_exception: next-turn request and completed head omit document
+recursion: next-turn request and completed head omit document
+timeout: next-turn request and completed head omit document
+read_turn=1 document_bytes=61440 head_messages_bytes=1099 next_first_request_bytes=1461
+read_turn=2 document_bytes=61440 head_messages_bytes=2198 next_first_request_bytes=2560
+read_turn=3 document_bytes=61440 head_messages_bytes=3297 next_first_request_bytes=3659
+exit=0
+
+$ cd webreport && docker compose build backend
+ Image webreport-backend Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 544B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile.backend
+#2 transferring dockerfile: 1.03kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/python:3.11-slim
+#3 DONE 0.6s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 364B done
+#4 DONE 0.0s
+
+#5 [1/8] FROM docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+#5 resolve docker.io/library/python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 0.0s done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 170B done
+#6 DONE 0.0s
+
+#7 [4/8] RUN python -m pip install --no-cache-dir "poetry==2.1.3"
+#7 CACHED
+
+#8 [5/8] RUN mkdir -p /app
+#8 CACHED
+
+#9 [6/8] COPY webreport/backend/pyproject.toml webreport/backend/poetry.lock /tmp/
+#9 CACHED
+
+#10 [2/8] WORKDIR /app
+#10 CACHED
+
+#11 [3/8] RUN apt-get update && apt-get install -y     gcc     g++     && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [7/8] RUN poetry config virtualenvs.create false
+#12 CACHED
+
+#13 [8/8] RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
+#13 CACHED
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers done
+#14 exporting manifest sha256:00fb138d42f5f51173574e8b0f3c25f30a26e2fe96181fcfd2b258647abd8f22 done
+#14 exporting config sha256:226bf9e123059f726c81f6fd90acb14e43cfac1acc750257a03f7e073f47a5cf done
+#14 exporting attestation manifest sha256:de32ca56976bacfb0c5515a425a839b1df015041370aca2f55fbd158c94d734a 0.0s done
+#14 exporting manifest list sha256:dab789337899cce6b1d569e2fa0ebf5abad41fe96479d7ab4cc8f3b46212ffc4 0.0s done
+#14 naming to docker.io/library/webreport-backend:latest done
+#14 unpacking to docker.io/library/webreport-backend:latest 0.0s done
+#14 DONE 0.1s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ Image webreport-backend Built 
+exit=0
+
+$ poetry run ruff check bd_shared/config.py webreport/backend/agent/knowledge.py webreport/backend/test_agent_knowledge.py
+All checks passed!
+exit=0
+
+$ cd webreport && docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-b8c4a2f0b5d7 Creating 
+ Container webreport-backend-run-b8c4a2f0b5d7 Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (3 topics)
+exit=0

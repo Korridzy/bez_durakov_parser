@@ -1,0 +1,8 @@
+$ cd webreport && docker compose run --rm --no-deps backend python /app/_probe_75.py
+ Container webreport-backend-run-f719ba6d9a91 Creating 
+ Container webreport-backend-run-f719ba6d9a91 Created 
+ERROR:main:Knowledge folder is invalid: Knowledge folder contains a subdirectory: /tmp/tmpwa697qc5/.git
+Fixture has manifest.toml and .git/ only; zero topic documents.
+KnowledgeError path=/tmp/tmpwa697qc5/.git key=None rule='no_subdirectories' Knowledge folder contains a subdirectory: /tmp/tmpwa697qc5/.git
+Real backend startup rejected .git/ before database initialization: Knowledge folder contains a subdirectory: /tmp/tmpwa697qc5/.git
+exit=0

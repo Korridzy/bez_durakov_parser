@@ -386,3 +386,10 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - The final Docker agent aggregate passes all 172 tests, including the unchanged compaction assertion that the placeholder retains `rules`. `76-happy.txt` preserves the earlier blocked run and appends the genuine final green aggregate, scoped zero-match scan, clean Ruff over all seven changed Python files, and successful backend build.
 - The final ToolNode probe again accepts only `topic`, rejects the old field with `topic: Field required`, and preserves the document and counters. Its source and before/after outcomes remain in `76-failure.txt`; the temporary probe was removed.
 - LSP is clean on the graph and five other changed Python files. The same three diagnostics remain in untouched session-index tests in `test_system.py`; no suppressions or unrelated fixes were added.
+
+## Todos 74-75
+
+- Every loader raise site now supplies a structured rule; manifest schema errors retain Pydantic's first failing key and error type, while dataset mismatches name `dataset`/`database_match`. Filesystem errors have a path/rule but no invented config key.
+- Directory listing is wrapped around materializing the iterator, covering failures both when listing starts and during iteration. Entry inspection, root directory inspection, and regular-file inspection also retain their filesystem cause inside KnowledgeError.
+- Root directory checks now precede all name skips. Visible and hidden subdirectories share identical path/rule assertions; `.hidden.md` and `.gitkeep` regular files still disappear from discovery. A manifest-plus-.git-only fixture raises `no_subdirectories` in both the loader and real startup before database initialization, not merely the zero-topic error.
+- Final Docker verification passes 62 knowledge tests and 173 aggregate agent tests. Scoped Ruff, the backend image build, and the actual shipped-folder preflight all exit 0. Temporary probes were removed; pre-existing host LSP dependency/object-manifest diagnostics remain explicitly unmodified.

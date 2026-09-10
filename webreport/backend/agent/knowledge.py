@@ -326,10 +326,6 @@ def load_knowledge(
 
     topics: list[KnowledgeTopic] = []
     for entry in entries:
-        if entry.name == "manifest.toml":
-            continue
-        if entry.name.startswith("."):
-            continue
         try:
             is_subdirectory = entry.is_dir()
         except OSError as error:
@@ -344,6 +340,8 @@ def load_knowledge(
                 path=entry,
                 rule="no_subdirectories",
             )
+        if entry.name == "manifest.toml" or entry.name.startswith("."):
+            continue
         if not entry.name.endswith(".md"):
             continue
 
