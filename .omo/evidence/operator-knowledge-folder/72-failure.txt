@@ -1,0 +1,113 @@
+# Todo 72 - negative-control live-model release check
+
+## Negative-control topic isolation
+
+topic_id_unchanged=live-model-release-check
+title_unchanged=True
+first_paragraph_unchanged=True
+old_nonce_present_in_happy_body=True
+old_nonce_absent_from_negative_topic=True
+diff_follows:
+--- happy/live-model-release-check.md
++++ negative/live-model-release-check.md
+@@ -4,4 +4,4 @@
+ 
+ ## Контрольный факт
+ 
+-Точный контрольный маркер этой проверки: `BD72-6CDFB910CD4CAA88A143F223F3173382`.
++Контрольный маркер в отрицательной контрольной версии отсутствует.
+exit=0
+
+## Restart with only the body nonce removed
+
+$ make restart
+make -C webreport restart
+make[1]: Entering directory '/home/homo/git/bez_durakov/parser/webreport'
+[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+PYTHONPATH="/home/homo/git/bez_durakov/parser" poetry run python generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+🔎 Validating the configured knowledge folder...
+docker compose run --rm --no-deps backend python -m agent.knowledge_cli
+ Container webreport-backend-run-e87cadc2a01f Creating 
+ Container webreport-backend-run-e87cadc2a01f Created 
+Knowledge folder is valid: /bd_shared/knowledge/bez_durakov (4 topics)
+🔄 Recreating LiteLLM, backend, and frontend...
+docker compose up -d --force-recreate litellm backend frontend
+ Container webreport-mysql Running 
+ Container webreport-litellm Recreate 
+ Container webreport-litellm Recreated 
+ Container webreport-backend Recreate 
+ Container webreport-backend Recreated 
+ Container webreport-frontend Recreate 
+ Container webreport-frontend Recreated 
+ Container webreport-litellm Starting 
+ Container webreport-litellm Started 
+ Container webreport-litellm Waiting 
+ Container webreport-litellm Healthy 
+ Container webreport-backend Starting 
+ Container webreport-backend Started 
+ Container webreport-frontend Starting 
+ Container webreport-frontend Started 
+✅ Application services recreated
+make[1]: Leaving directory '/home/homo/git/bez_durakov/parser/webreport'
+exit=0
+
+## Wait for healthy backend
+
+$ curl --retry 120 --retry-all-errors --retry-delay 1 --retry-max-time 180 --max-time 190 --fail --silent --show-error http://127.0.0.1:28000/health
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+{"status":"healthy","timestamp":"2026-09-10T03:40:39.239795","services":{"database":true,"agents":true,"llm_proxy":true}}
+exit=0
+
+## Negative-control /api/chat request and response
+
+$ curl --max-time 180 --fail-with-body --silent --show-error -H 'Content-Type: application/json' --data-binary '{"message": "Какой точный контрольный маркер указан во временной теме «Проверка чтения временной темы»? Приведи его без изменений и кратко поясни, откуда он взят.", "session_id": "todo72-negative-df791b8b634a47d2a6516575064034ac"}' http://127.0.0.1:28000/api/chat
+{"success":true,"session_id":"todo72-negative-df791b8b634a47d2a6516575064034ac","mode":"agent","data":null,"query_info":[{"tool":"read_knowledge","args":{"topic_id":"live-model-release-check"}}],"message":"Контрольный маркер отсутствует. Он взят из раздела «Контрольный факт» временной темы «Проверка чтения временной темы».","timestamp":"2026-09-10T03:40:43.334955","error":null,"reasoning":null}
+exit=0
+
+## Backend log excerpt for this probe
+
+$ cd webreport && docker compose logs --since 2026-09-10T03:39:54.818243+00:00 backend
+webreport-backend  | INFO:     Will watch for changes in these directories: ['/app']
+webreport-backend  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+webreport-backend  | INFO:     Started reloader process [1] using WatchFiles
+webreport-backend  | INFO:     Started server process [8]
+webreport-backend  | INFO:     Waiting for application startup.
+webreport-backend  | INFO:main:Knowledge loaded: dataset=bez_durakov, topics=4
+webreport-backend  | INFO:bd_shared.db_helpers:Database connection established
+webreport-backend  | WARNING:main:LiteLLM probe classified verdict=healthy status=200 exception_status=None
+webreport-backend  | WARNING:main:LLM mode elected: agent
+webreport-backend  | INFO:main:Services initialized successfully
+webreport-backend  | INFO:     Application startup complete.
+webreport-backend  | INFO:     172.18.0.1:33270 - "GET /health HTTP/1.1" 200 OK
+webreport-backend  | [92m03:40:39 - LiteLLM:INFO[0m: utils.py:3840 - 
+webreport-backend  | LiteLLM completion() model= opencode/gpt-5.6-luna; provider = litellm_proxy
+webreport-backend  | INFO:LiteLLM:
+webreport-backend  | LiteLLM completion() model= opencode/gpt-5.6-luna; provider = litellm_proxy
+webreport-backend  | [92m03:40:41 - LiteLLM:INFO[0m: utils.py:3840 - 
+webreport-backend  | LiteLLM completion() model= opencode/gpt-5.6-luna; provider = litellm_proxy
+webreport-backend  | INFO:LiteLLM:
+webreport-backend  | LiteLLM completion() model= opencode/gpt-5.6-luna; provider = litellm_proxy
+webreport-backend  | INFO:     172.18.0.1:33282 - "POST /api/chat HTTP/1.1" 200 OK
+exit=0
+
+## Mechanical verdicts
+
+negative_mode_agent_and_success=True
+negative_read_knowledge_exact_topic=True
+negative_answer_contains_original_nonce=False
+negative_answer_excludes_original_nonce=True
+negative_answer_contains_cyrillic=True
+language_spot_check=PASS (live answer contains Russian Cyrillic text)
+tone_spot_check=PASS (the answer is concise, direct, factual, and contains no invented marker; this matches the manifest's analyst persona)
+exit=0

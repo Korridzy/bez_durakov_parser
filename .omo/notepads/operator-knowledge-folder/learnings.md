@@ -278,11 +278,6 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `knowledge_dir` по умолчанию указывает на поставляемую папку. Отсутствующая папка вызывает только предупреждение, а недействительная прерывает запуск. Корневой README ведёт к операторскому разделу руководства.
 - Проверка документации нашла 8 строк с `knowledge_`, отдельно нашла `knowledge_max_bytes_per_turn` и не выявила отсутствующих ключей `[webreport]`.
 
-## Todo 56-57 history serialization regression guard
-
-- Extended `test_reasoning_api.py` with a long `read_knowledge` tool-result turn. `_history_entries` and `GET /api/history` expose exactly the user and final assistant entries, preserve accumulated reasoning, and never expose the document-body sentinel; `POST /api/chat` keeps the data-tool response shape.
-- `_history_entries` was already tool-agnostic because it whitelists `HumanMessage` and `AIMessage` rather than tool names, so todo 57 is an explicit no-op. The deliberate leak probe failed at the explicit `assertNotIn` guard, while the reasoning suite passed.
-
 ## Todo 58
 
 - В `USER_GUIDE.md` добавлен доступный из содержания операторский раздел, отделённый от инструкций для пользователя чата. Он описывает поставляемую структуру папки, два ключа манифеста, правила имени темы, заголовка и первого абзаца, а также то, что `rules.md` является заполняемым оператором скелетом без изменения кода или нового деплоя.
@@ -293,6 +288,11 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 
 - The three AGENTS files point to `load_knowledge()`, the six `KNOWLEDGE_*` constants, `compose_system_prompt()`, and `read_knowledge`.
 - Prompt changes belong in `backend/agent/knowledge.py` with startup wiring in `backend/main.py`, not `backend/agents/report_agents.py`; startup reads the configured folder once.
+
+## Todo 56-57 history serialization regression guard
+
+- Extended `test_reasoning_api.py` with a long `read_knowledge` tool-result turn. `_history_entries` and `GET /api/history` expose exactly the user and final assistant entries, preserve accumulated reasoning, and never expose the document-body sentinel; `POST /api/chat` keeps the data-tool response shape.
+- `_history_entries` was already tool-agnostic because it whitelists `HumanMessage` and `AIMessage` rather than tool names, so todo 57 is an explicit no-op. The deliberate leak probe failed at the explicit `assertNotIn` guard, while the reasoning suite passed.
 
 ## Todo 62
 
@@ -343,3 +343,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - The composed prompt retains the exact scoped D7 bullet, `Before answering a question covered by a listed topic, call read_knowledge with that topic id.`, with the qualifier present and the full bullet occurring once.
 - Added `test_knowledge_retrieval_instruction_is_scoped_and_optional`: a loaded-knowledge scripted turn can answer without any tool call and reports `knowledge_bytes_consumed == 0`.
 - The verbose graph lane ran 11 tests, the full `test_agent.py` aggregate ran 167 tests, and targeted Ruff all exited 0. Prompt evidence is in `71-failure.txt`; the test and aggregate captures are in `71-happy.txt`.
+
+## Todo 72
+
+- The live `opencode/gpt-5.6-luna` agent called `read_knowledge` for the temporary `live-model-release-check` topic and reproduced the fresh nonce that existed only after the summary paragraph. Its Russian answer was concise and factual.
+- With the same topic id, title, and summary retained but only the body nonce removed, a fresh-session answer said that the marker was absent and did not reproduce the old nonce.
+- A fresh-session question outside every listed topic produced an empty `query_info`, proving the live model followed the non-reflexive retrieval qualifier. Separate session ids are essential so checkpoint history cannot leak the happy-case nonce into the negative control.

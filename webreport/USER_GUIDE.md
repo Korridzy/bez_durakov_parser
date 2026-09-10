@@ -164,6 +164,104 @@ Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: 
 
 Пустое значение является штатным отключением знаний: проверка печатает предупреждение и завершается с кодом 0, после чего перезапуск восстанавливает сервис. Затем исправьте или восстановите папку, верните её путь в `knowledge_dir`, ещё раз выполните `make validate-knowledge` и только после успешной проверки — `make restart`.
 
+### Ручная проверка получения знаний на настоящей модели
+
+Эту проверку выполняют после смены модели или обновления LiteLLM. Она намеренно не входит в `make test`: нужны действующий API-ключ и доступная через proxy настоящая модель. На время проверки временная тема попадает в общий system prompt, поэтому проводите её в окно обслуживания и не смешивайте контрольные запросы с пользовательскими сессиями.
+
+1. Убедитесь, что backend работает в режиме `agent`, а `/health` показывает исправный LiteLLM. Создайте резервную копию папки знаний **до** первого изменения:
+
+   ```bash
+   topic_dir=bd_shared/knowledge/bez_durakov
+   backup_dir="$(mktemp -d)"
+   cp -a "$topic_dir/." "$backup_dir/"
+   (cd webreport && docker compose logs backend | grep 'LLM mode elected: agent')
+   curl --fail http://127.0.0.1:28000/health
+   ```
+
+2. Сгенерируйте новый непредсказуемый маркер и создайте отдельную тему `live-model-release-check.md`. Маркер запрещено помещать в первый абзац: этот абзац становится кратким описанием в system prompt, а проверяемый факт должен быть доступен только через `read_knowledge`.
+
+   ```bash
+   export NONCE="BD72-$(python3 -c 'import secrets; print(secrets.token_hex(16).upper())')"
+   python3 - <<'PY'
+   import os
+   from pathlib import Path
+
+   nonce = os.environ["NONCE"]
+   Path("bd_shared/knowledge/bez_durakov/live-model-release-check.md").write_text(
+       "# Проверка чтения временной темы\n\n"
+       "Эта временная тема хранит контрольный маркер для ручной проверки "
+       "получения знаний моделью после смены модели.\n\n"
+       "## Контрольный факт\n\n"
+       f"Точный контрольный маркер этой проверки: `{nonce}`.\n",
+       encoding="utf-8",
+   )
+   PY
+   make restart
+   curl --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 60 \
+     --fail http://127.0.0.1:28000/health
+   ```
+
+3. Отправьте запрос с новым `session_id`, чтобы сохранённая история другой проверки не раскрыла маркер:
+
+   ```json
+   {
+     "message": "Какой точный контрольный маркер указан во временной теме «Проверка чтения временной темы»? Приведи его без изменений и кратко поясни, откуда он взят.",
+     "session_id": "todo72-happy-<новый-uuid>"
+   }
+   ```
+
+   Выполните `POST http://127.0.0.1:28000/api/chat` с `Content-Type: application/json`. Успешный результат обязан одновременно удовлетворять всем условиям:
+
+   - `success` равно `true`, а `mode` равно `agent`;
+   - в `query_info` есть `{"tool":"read_knowledge","args":{"topic_id":"live-model-release-check"}}`;
+   - `message` содержит точное значение `$NONCE`;
+   - ответ написан по-русски, кратко и фактологично, в соответствии с `persona` из манифеста.
+
+   Наличие маркера без вызова `read_knowledge` не считается доказательством: модель могла получить его из краткого описания.
+
+4. В отдельной новой сессии задайте вопрос, не покрытый ни одной темой, например: `Какой сегодня уровень прилива в вымышленном океане планеты Зета-9? Если данных нет, скажи об этом прямо.` Ответ должен быть по-русски, а среди элементов `query_info` не должно быть ни одного вызова `read_knowledge`. Любой такой вызов означает провал проверки нерефлексивного retrieval; остановите релиз и зафиксируйте точный запрос, ответ и модель вместо изменения prompt вслепую.
+
+5. Для отрицательного контроля **не удаляйте тему**. Сохраните имя файла, идентификатор, заголовок и первый абзац без изменений, а замените только абзац тела с маркером, например на:
+
+   ```markdown
+   Контрольный маркер в отрицательной контрольной версии отсутствует.
+   ```
+
+   Выполните `make restart`, дождитесь исправного `/health` и повторите запрос из пункта 3 с ещё одним новым `session_id`. Старое значение `$NONCE` обязано отсутствовать в `message`. Сохранённый первый абзац изолирует источник факта: между двумя запусками изменилось только содержимое, доступное через `read_knowledge`.
+
+6. Запишите в `.omo/evidence/operator-knowledge-folder/72-happy.txt` и `72-failure.txt` точные команды, тела запросов, ответы `/api/chat`, проверки условий и фрагменты `docker compose logs backend`. Длинный вывод захватывайте механически через Python, без shell-перенаправления; каждый блок должен заканчиваться явным кодом возврата:
+
+   ```python
+   import shlex
+   import subprocess
+   from pathlib import Path
+
+   def capture(evidence_path, command, cwd=None):
+       result = subprocess.run(
+           command,
+           cwd=cwd,
+           text=True,
+           stdout=subprocess.PIPE,
+           stderr=subprocess.STDOUT,
+       )
+       output = result.stdout
+       if output and not output.endswith("\n"):
+           output += "\n"
+       with Path(evidence_path).open("a", encoding="utf-8") as stream:
+           stream.write(f"$ {shlex.join(command)}\n{output}exit={result.returncode}\n")
+       return result
+   ```
+
+7. Восстановите исходную поставляемую конфигурацию независимо от результата проверки: удалите только временную тему, сравните `manifest.toml`, `rules.md`, `scoring.md` и `glossary.md` с резервной копией, затем перезапустите backend уже с тремя исходными темами. Завершайте проверку только после обеих команд:
+
+   ```bash
+   rm bd_shared/knowledge/bez_durakov/live-model-release-check.md
+   diff -qr "$backup_dir" "$topic_dir"
+   make restart
+   cd webreport && docker compose ps
+   curl --fail http://127.0.0.1:28000/health
+   ```
+
 ### Сообщения при запуске
 
 Папка отсутствует или не настроена, backend продолжает работу без знаний. Папка с ошибкой манифеста или документа останавливает запуск. В логах используются следующие точные шаблоны:
