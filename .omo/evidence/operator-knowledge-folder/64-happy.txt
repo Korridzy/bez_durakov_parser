@@ -1,6 +1,6 @@
 cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent.py
- Container webreport-backend-run-107a3ec383a0 Creating 
- Container webreport-backend-run-107a3ec383a0 Created 
+ Container webreport-backend-run-7ca2a7b141de Creating 
+ Container webreport-backend-run-7ca2a7b141de Created 
 ................................................................................................................./bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
   Base = declarative_base()
 .................ERROR:agents.report_runtime:Report request failed
@@ -38,10 +38,10 @@ Traceback (most recent call last):
   File "/app/test_agent_report_agent.py", line 24, in ainvoke
     raise ScriptedModelError("scripted model failure")
 test_agent_report_agent.ScriptedModelError: scripted model failure
-During task with name 'agent' and id 'd58db756-a86e-f20e-683a-8c8dfdd8073a'
+During task with name 'agent' and id '19302b13-5d32-58b3-8490-c97cb30c29ac'
 ............................
 ----------------------------------------------------------------------
-Ran 158 tests in 7.336s
+Ran 158 tests in 7.406s
 
 OK
 exit=0

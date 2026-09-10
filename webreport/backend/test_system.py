@@ -1736,6 +1736,78 @@ class TestStartupInitialization(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_configured_knowledge_byte_limit_is_validated_before_mode_election(self):
+        knowledge_module = importlib.import_module("agent.knowledge")
+        main_module = self._get_main_module()
+
+        class ValidationCaptured(Exception):
+            pass
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            invalid_data_initializer = AsyncMock()
+            invalid_proxy_probe = AsyncMock()
+            with (
+                patch.object(main_module, "KNOWLEDGE_DIR", None),
+                patch.object(main_module, "KNOWLEDGE_MAX_BYTES_PER_TURN", 0),
+                patch.object(
+                    main_module,
+                    "initialize_data_service_with_retry",
+                    new=invalid_data_initializer,
+                ),
+                patch.object(
+                    main_module,
+                    "probe_llm_proxy",
+                    new=invalid_proxy_probe,
+                ),
+                self.assertLogs(main_module.logger, level="DEBUG") as captured_logs,
+            ):
+                with self.assertRaises(knowledge_module.KnowledgeError) as raised:
+                    await main_module.startup_event()
+
+            self.assertEqual(
+                raised.exception.key,
+                "knowledge_max_bytes_per_turn",
+            )
+            invalid_data_initializer.assert_not_awaited()
+            invalid_proxy_probe.assert_not_awaited()
+            self.assertNotIn(
+                "LLM mode elected",
+                "\n".join(record.getMessage() for record in captured_logs.records),
+            )
+
+            await self._reset_startup_state(main_module)
+            valid_data_initializer = AsyncMock()
+            valid_proxy_probe = AsyncMock()
+            with (
+                patch.object(main_module, "KNOWLEDGE_DIR", None),
+                patch.object(main_module, "KNOWLEDGE_MAX_BYTES_PER_TURN", 5000),
+                patch.object(
+                    main_module,
+                    "validate_limits",
+                    side_effect=ValidationCaptured,
+                ) as validate_limits,
+                patch.object(
+                    main_module,
+                    "initialize_data_service_with_retry",
+                    new=valid_data_initializer,
+                ),
+                patch.object(
+                    main_module,
+                    "probe_llm_proxy",
+                    new=valid_proxy_probe,
+                ),
+            ):
+                with self.assertRaises(ValidationCaptured):
+                    await main_module.startup_event()
+
+            validated_limits = validate_limits.call_args.args[0]
+            self.assertEqual(validated_limits.max_bytes_per_turn, 5000)
+            valid_data_initializer.assert_not_awaited()
+            valid_proxy_probe.assert_not_awaited()
+
+        asyncio.run(run_test())
+
     def test_regression_startup_retries_database_initialization(self):
         main_module = self._get_main_module()
 

@@ -317,3 +317,7 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - `make validate-knowledge` runs `agent.knowledge_cli` in the backend image with `--no-deps`; the CLI shares startup's config constants, `KnowledgeLimits`, `validate_limits()`, and `load_knowledge()` path.
 - With a 201-character summary selected through an ignored `config.local.toml` override, both restart and rebuild aborted in preflight. The backend container ID and start time remained byte-for-byte unchanged and `/health` stayed healthy.
 - Empty `knowledge_dir` returned exit 0 from the CLI and allowed `make restart`, proving the documented no-knowledge recovery path. The ignored local config was restored to SHA-256 `80766ac2a555d78965a4982eb17cd5224438974f76ef06eeea829ff022a29f7a`, the scratch folder was removed, and the shipped folder was loaded again.
+
+## Todo 64 startup budget wiring follow-up
+
+- Startup now constructs `KnowledgeLimits.max_bytes_per_turn` from `KNOWLEDGE_MAX_BYTES_PER_TURN`, so invalid operator values fail before database initialization or mode election and non-default valid values reach `validate_limits()` unchanged.
