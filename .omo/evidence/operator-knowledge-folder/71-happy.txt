@@ -1,0 +1,77 @@
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent_graph.py -v
+ Container webreport-backend-run-e8b5edd9a3e9 Creating 
+ Container webreport-backend-run-e8b5edd9a3e9 Created 
+test_budget_error_tool_message_can_be_followed_by_final_answer (__main__.GraphTests.test_budget_error_tool_message_can_be_followed_by_final_answer) ... ok
+test_build_graph_injects_caller_supplied_system_prompt (__main__.GraphTests.test_build_graph_injects_caller_supplied_system_prompt) ... ok
+test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip (__main__.GraphTests.test_build_graph_reinjects_caller_supplied_system_prompt_after_tool_round_trip) ... ok
+test_data_call_mark_report_and_russian_answer_complete (__main__.GraphTests.test_data_call_mark_report_and_russian_answer_complete) ... ok
+test_endless_tool_calls_return_controlled_recursion_marker (__main__.GraphTests.test_endless_tool_calls_return_controlled_recursion_marker) ... ok
+test_knowledge_byte_budget_resets_for_each_turn (__main__.GraphTests.test_knowledge_byte_budget_resets_for_each_turn) ... ok
+test_knowledge_reads_stay_unchanged_under_byte_budget (__main__.GraphTests.test_knowledge_reads_stay_unchanged_under_byte_budget) ... ok
+test_knowledge_retrieval_instruction_is_scoped_and_optional (__main__.GraphTests.test_knowledge_retrieval_instruction_is_scoped_and_optional) ... ok
+test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band (__main__.GraphTests.test_knowledge_round_trip_is_free_and_invalid_report_stays_in_band) ... ok
+test_repeated_knowledge_reads_exhaust_per_turn_byte_budget (__main__.GraphTests.test_repeated_knowledge_reads_exhaust_per_turn_byte_budget) ... ok
+test_same_message_tool_calls_execute_in_script_order (__main__.GraphTests.test_same_message_tool_calls_execute_in_script_order) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 3.490s
+
+OK
+exit=0
+cd webreport && docker compose run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend python /app/test_agent.py
+bounded baseline: model_invocations=8 tool_executions=7 data_calls=6
+model_exception: next-turn request and completed head omit document
+recursion: next-turn request and completed head omit document
+timeout: next-turn request and completed head omit document
+read_turn=1 document_bytes=61440 head_messages_bytes=1102 next_first_request_bytes=1464
+read_turn=2 document_bytes=61440 head_messages_bytes=2204 next_first_request_bytes=2566
+read_turn=3 document_bytes=61440 head_messages_bytes=3306 next_first_request_bytes=3668
+ Container webreport-backend-run-8b9e586d41e0 Creating 
+ Container webreport-backend-run-8b9e586d41e0 Created 
+......./bd_shared/db.py:18: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+....................................................................................................................................ERROR:agents.report_runtime:Report request failed
+Traceback (most recent call last):
+  File "/app/agents/report_runtime.py", line 261, in process_user_request
+    return await self._process_agent(user_message, session_id, graph, timeout_seconds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agents/report_runtime.py", line 324, in _process_agent
+    result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 223, in arun
+    return await graph.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 4057, in ainvoke
+    async for chunk in self.astream(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/main.py", line 3407, in astream
+    async for _ in runner.atick(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_runner.py", line 396, in atick
+    await arun_with_retry(
+  File "/usr/local/lib/python3.11/site-packages/langgraph/pregel/_retry.py", line 706, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 733, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/langgraph/_internal/_runnable.py", line 501, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/agent/graph.py", line 166, in call_model
+    response = await bound_model.ainvoke(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_agent_report_agent.py", line 24, in ainvoke
+    raise ScriptedModelError("scripted model failure")
+test_agent_report_agent.ScriptedModelError: scripted model failure
+During task with name 'agent' and id 'c7bf02ea-9b93-001d-d687-7c1c4207c80e'
+............................
+----------------------------------------------------------------------
+Ran 167 tests in 8.721s
+
+OK
+exit=0
+poetry run ruff check webreport/backend/test_agent_graph.py
+All checks passed!
+exit=0

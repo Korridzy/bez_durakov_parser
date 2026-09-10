@@ -337,3 +337,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - Both compaction points run inside call_model: previous-turn results in the outbound copy before invocation, then current-turn results in the final-answer update. Failed invocation copies are safe even while their uncompacted checkpoint head remains; the head changes only on a completed model-node update. Historical checkpoint rows are not erased and remain subject to thread deletion.
 - The 12-case checkpointer suite, 166-case agent aggregate, and 62-case reasoning suite pass; targeted Ruff and the backend Docker build pass. The failure evidence includes deterministic cancellation at the post-read model invocation plus recursion and repeated-model-exception recovery, stale-file reload coverage is in the checkpointer suite, and no new node or budget increase was added.
 - Three 61,440-byte reads produce head sizes 1,102/2,204/3,306 bytes and next-first-request sizes 1,464/2,566/3,668 bytes. Real ASGI chat/history routes with the reasoning filter produce head sizes 1,116/2,232/3,348 and outbound sizes 1,961/3,033/4,105; all four chat requests and the history request return HTTP 200 with question/answer continuity and reasoning preserved. SQLite file size is deliberately not measured. Temporary probes were removed.
+
+## Todo 71
+
+- The composed prompt retains the exact scoped D7 bullet, `Before answering a question covered by a listed topic, call read_knowledge with that topic id.`, with the qualifier present and the full bullet occurring once.
+- Added `test_knowledge_retrieval_instruction_is_scoped_and_optional`: a loaded-knowledge scripted turn can answer without any tool call and reports `knowledge_bytes_consumed == 0`.
+- The verbose graph lane ran 11 tests, the full `test_agent.py` aggregate ran 167 tests, and targeted Ruff all exited 0. Prompt evidence is in `71-failure.txt`; the test and aggregate captures are in `71-happy.txt`.

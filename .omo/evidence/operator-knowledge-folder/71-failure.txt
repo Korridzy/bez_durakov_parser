@@ -1,0 +1,8 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_71.py
+retrieval bullet from composed prompt:
+- Before answering a question covered by a listed topic, call read_knowledge with that topic id.
+qualifier substring present: True
+D7 bullet count: 1
+ Container webreport-backend-run-7940c86599c2 Creating 
+ Container webreport-backend-run-7940c86599c2 Created 
+exit=0

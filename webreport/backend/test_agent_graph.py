@@ -376,6 +376,47 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["messages"][-1].content, "Правила прочитаны.")
         self.assertEqual(service.calls, [])
 
+    async def test_knowledge_retrieval_instruction_is_scoped_and_optional(self) -> None:
+        knowledge = self.load_fixture_knowledge()
+        retrieval_rule = (
+            "Before answering a question covered by a listed topic, "
+            "call read_knowledge with that topic id."
+        )
+        composed_prompt = self.knowledge.compose_system_prompt(knowledge)
+
+        self.assertIn("covered by a listed topic", composed_prompt)
+        self.assertEqual(composed_prompt.count(f"- {retrieval_rule}"), 1)
+
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(
+            registry,
+            self.config,
+            knowledge=knowledge,
+        )
+        model = ScriptedModel([self.messages.AIMessage(content="No topic needed.")])
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            composed_prompt,
+        )
+
+        result = await self.graph_module.arun(
+            graph,
+            "Ответь без обращения к темам",
+            "knowledge-optional",
+        )
+
+        self.assertEqual(model.requests[0][0].content, composed_prompt)
+        self.assertEqual(model.invocation_count, 1)
+        self.assertEqual(result["messages"][-1].content, "No topic needed.")
+        self.assertEqual(result["knowledge_bytes_consumed"], 0)
+        self.assertFalse(
+            any(isinstance(message, self.messages.ToolMessage) for message in result["messages"])
+        )
+        self.assertEqual(service.calls, [])
+
     async def test_build_graph_injects_caller_supplied_system_prompt(self) -> None:
         service: ServiceView = StubService()
         registry = self.registry_module.ToolRegistry(service)
