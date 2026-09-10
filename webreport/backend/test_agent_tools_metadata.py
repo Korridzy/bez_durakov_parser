@@ -18,13 +18,29 @@ class ToolMetadataTests(ToolsCaseBase):
         hints = typing.get_type_hints(self.state_module.GraphState, include_extras=True)
         message_args = typing.get_args(hints["messages"])
 
-        self.assertEqual(set(hints), {"messages", "report_payload", "rows_consumed"})
+        self.assertEqual(
+            set(hints),
+            {
+                "messages",
+                "report_payload",
+                "rows_consumed",
+                "knowledge_bytes_consumed",
+            },
+        )
         self.assertIs(typing.get_origin(hints["messages"]), typing.Annotated)
         self.assertIs(message_args[0], list)
         self.assertIs(message_args[1], self.graph.add_messages)
         self.assertEqual(hints["report_payload"], dict | None)
         self.assertIs(hints["rows_consumed"], int)
-        json.dumps({"messages": [], "report_payload": None, "rows_consumed": 0})
+        self.assertIs(hints["knowledge_bytes_consumed"], int)
+        json.dumps(
+            {
+                "messages": [],
+                "report_payload": None,
+                "rows_consumed": 0,
+                "knowledge_bytes_consumed": 0,
+            }
+        )
 
     def test_build_tools_without_knowledge_keeps_current_catalogue(self):
         """Given no knowledge, When tools are built, Then the current ten-tool catalogue is unchanged."""

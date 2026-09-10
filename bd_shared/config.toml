@@ -40,6 +40,7 @@ knowledge_max_summary_chars = 200
 knowledge_max_persona_chars = 2000
 knowledge_max_topics = 50
 knowledge_max_doc_bytes = 65536
+knowledge_max_bytes_per_turn = 131072
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"

@@ -8,3 +8,4 @@ opencode_api_key = ""
 # knowledge_max_persona_chars = 2000
 # knowledge_max_topics = 50
 # knowledge_max_doc_bytes = 65536
+# knowledge_max_bytes_per_turn = 131072

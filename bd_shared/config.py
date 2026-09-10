@@ -96,6 +96,9 @@ KNOWLEDGE_MAX_SUMMARY_CHARS = int(config["webreport"].get("knowledge_max_summary
 KNOWLEDGE_MAX_PERSONA_CHARS = int(config["webreport"].get("knowledge_max_persona_chars", 2000))
 KNOWLEDGE_MAX_TOPICS = int(config["webreport"].get("knowledge_max_topics", 50))
 KNOWLEDGE_MAX_DOC_BYTES = int(config["webreport"].get("knowledge_max_doc_bytes", 65536))
+KNOWLEDGE_MAX_BYTES_PER_TURN = int(
+    config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
+)
 _knowledge_dir_value = config["webreport"].get("knowledge_dir") or None
 if _knowledge_dir_value is None:
     _knowledge_dir_path = None

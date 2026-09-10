@@ -1,0 +1,8 @@
+cd webreport && docker compose run --rm --no-deps backend python /app/_probe_64.py
+first_content яяя
+second_content Tool error: knowledge byte budget of 10 is exhausted
+rows_consumed 0
+knowledge_bytes_consumed 6
+ Container webreport-backend-run-b3c59a2a4330 Creating 
+ Container webreport-backend-run-b3c59a2a4330 Created 
+exit=0

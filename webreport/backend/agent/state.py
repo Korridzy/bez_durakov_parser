@@ -11,5 +11,6 @@ GraphState = TypedDict(
         "messages": message_list,
         "report_payload": dict | None,
         "rows_consumed": int,
+        "knowledge_bytes_consumed": int,
     },
 )

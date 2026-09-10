@@ -53,6 +53,7 @@ class ToolsCaseBase(unittest.IsolatedAsyncioTestCase):
             "messages": [],
             "report_payload": None,
             "rows_consumed": 0,
+            "knowledge_bytes_consumed": 0,
         }
         tool_call = {
             "name": name,
@@ -71,6 +72,10 @@ class ToolsCaseBase(unittest.IsolatedAsyncioTestCase):
                 "messages": [*current["messages"], message],
                 "report_payload": current["report_payload"],
                 "rows_consumed": current["rows_consumed"],
+                "knowledge_bytes_consumed": current.get(
+                    "knowledge_bytes_consumed",
+                    0,
+                ),
             }
         )
 

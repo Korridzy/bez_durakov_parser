@@ -300,6 +300,7 @@ class ReportAgentSystem:
                     MESSAGES.AIMessage(content=message),
                 ],
                 "rows_consumed": 0,
+                "knowledge_bytes_consumed": 0,
                 "report_payload": None,
             },
             {"configurable": {"thread_id": session_id}, "recursion_limit": 2},

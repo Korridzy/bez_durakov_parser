@@ -61,18 +61,21 @@ class ConversationState(TypedDict):
     messages: list[MessageView]
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
+    knowledge_bytes_consumed: int
 
 
 class AgentState(TypedDict):
     messages: list[AgentMessageView]
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
+    knowledge_bytes_consumed: int
 
 
 class StateUpdate(TypedDict, total=False):
     messages: list[MessageView]
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
+    knowledge_bytes_consumed: int
 
 
 class ThreadConfig(TypedDict):
@@ -127,6 +130,7 @@ def build_graph(
             "messages": list(state["messages"]),
             "report_payload": state["report_payload"],
             "rows_consumed": state["rows_consumed"],
+            "knowledge_bytes_consumed": state["knowledge_bytes_consumed"],
         }
         emitted_messages: list[MessageView] = []
         for current_call in state["messages"][-1].tool_calls:
@@ -137,6 +141,7 @@ def build_graph(
                 ],
                 "report_payload": accumulated["report_payload"],
                 "rows_consumed": accumulated["rows_consumed"],
+                "knowledge_bytes_consumed": accumulated["knowledge_bytes_consumed"],
             }
             prior_message_count = len(call_state["messages"])
             accumulated = await single_tool_graph.ainvoke(call_state)
@@ -145,6 +150,7 @@ def build_graph(
             "messages": emitted_messages,
             "report_payload": accumulated["report_payload"],
             "rows_consumed": accumulated["rows_consumed"],
+            "knowledge_bytes_consumed": accumulated["knowledge_bytes_consumed"],
         }
 
     builder = StateGraph(GraphState)
@@ -170,6 +176,7 @@ async def arun(
             {
                 "messages": [HumanMessage(content=user_message)],
                 "rows_consumed": 0,
+                "knowledge_bytes_consumed": 0,
                 "report_payload": None,
             },
             {

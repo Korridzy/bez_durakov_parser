@@ -305,3 +305,9 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - Limit violations preserve their existing rule and path text, then append the observed value and configured limit; `KnowledgeError.observed` and `.permitted` expose the same values without prose parsing.
 - Persona limits are converted from the Pydantic validation wrapper into a structured `KnowledgeError`, while direct `KnowledgeManifest` validation remains actionable too.
 - The todo-67 verbose knowledge lane was intentionally red on four new message assertions; after implementation the knowledge lane passed 56 tests and the five-case probe printed non-`None` observed/permitted values for title, summary, persona, topic count, and document size.
+
+## Todo 63-64 per-turn knowledge byte budget
+
+- `knowledge_bytes_consumed` mirrors the row counter through sequential graph tool calls and resets to zero at every `arun` entry; the tool refuses an over-budget document with an in-band error instead of truncating it.
+- Budget accounting uses UTF-8 bytes. The graph tests use Cyrillic fixture text so character counting cannot accidentally satisfy the byte contract.
+- Knowledge reads leave `rows_consumed` untouched; the direct two-read probe ended with `rows_consumed 0` and `knowledge_bytes_consumed 6` after the second read was refused.

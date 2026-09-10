@@ -19,6 +19,7 @@ Command = _types.Command
 if TYPE_CHECKING:
     class ToolState(TypedDict):
         rows_consumed: int
+        knowledge_bytes_consumed: int
 else:
     ToolState = importlib.import_module("agent.state").GraphState
 
@@ -44,6 +45,7 @@ class ToolEnvelope(TypedDict):
 class AgentToolConfig(Protocol):
     AGENT_MAX_ROWS_PER_FETCH: int
     AGENT_MAX_ROWS_PER_RUN: int
+    KNOWLEDGE_MAX_BYTES_PER_TURN: int
 
 
 class BuiltTool(Protocol):
@@ -225,11 +227,43 @@ def build_tools(
         return existing_tools
 
     @tool
-    async def read_knowledge(topic_id: str) -> str:
+    async def read_knowledge(
+        topic_id: str,
+        *,
+        state: Annotated[ToolState, InjectedState],
+        tool_call_id: Annotated[str, InjectedToolCallId],
+    ) -> CommandResult | str:
         """Return the full Markdown of one knowledge topic. Pass the topic id exactly as listed under Knowledge topics in the system prompt."""
+        consumed = state["knowledge_bytes_consumed"]
+        if consumed < 0 or consumed > cfg.KNOWLEDGE_MAX_BYTES_PER_TURN:
+            return "Tool error: knowledge_bytes_consumed state is outside the configured turn budget"
+        remaining = cfg.KNOWLEDGE_MAX_BYTES_PER_TURN - consumed
+        if remaining == 0:
+            return (
+                "Tool error: knowledge byte budget of "
+                f"{cfg.KNOWLEDGE_MAX_BYTES_PER_TURN} is exhausted"
+            )
+
         for topic in knowledge.topics:
             if topic.id == topic_id:
-                return topic.text
+                document_bytes = len(topic.text.encode("utf-8"))
+                if document_bytes > remaining:
+                    return (
+                        "Tool error: knowledge byte budget of "
+                        f"{cfg.KNOWLEDGE_MAX_BYTES_PER_TURN} is exhausted"
+                    )
+                new_total = consumed + document_bytes
+                return Command(
+                    update={
+                        "knowledge_bytes_consumed": new_total,
+                        "messages": [
+                            ToolMessage(
+                                content=topic.text,
+                                tool_call_id=tool_call_id,
+                            )
+                        ],
+                    }
+                )
 
         available_topics = ", ".join(topic.id for topic in knowledge.topics)
         return (

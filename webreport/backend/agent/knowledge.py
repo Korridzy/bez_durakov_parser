@@ -65,6 +65,7 @@ def validate_limits(limits: KnowledgeLimits) -> None:
         ("knowledge_max_persona_chars", limits.max_persona_chars),
         ("knowledge_max_topics", limits.max_topics),
         ("knowledge_max_doc_bytes", limits.max_doc_bytes),
+        ("knowledge_max_bytes_per_turn", limits.max_bytes_per_turn),
     )
     for config_key, value in limit_values:
         if type(value) is not int or value < 1:
