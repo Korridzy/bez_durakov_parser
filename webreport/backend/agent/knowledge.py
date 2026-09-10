@@ -68,11 +68,15 @@ def validate_limits(limits: KnowledgeLimits) -> None:
         ("knowledge_max_bytes_per_turn", limits.max_bytes_per_turn),
     )
     for config_key, value in limit_values:
-        if type(value) is not int or value < 1:
+        if not (isinstance(value, int) and not isinstance(value, bool) and value >= 1):
             raise KnowledgeError(
-                f"Invalid knowledge limit {config_key}: must be an integer greater than or equal to 1",
+                f"Invalid knowledge limit {config_key}: observed {value!r} ({type(value).__name__}); "
+                "must be an integer greater than or equal to 1",
                 path=None,
                 key=config_key,
+                rule="integer_minimum",
+                observed=value,
+                permitted=1,
             )
 
 

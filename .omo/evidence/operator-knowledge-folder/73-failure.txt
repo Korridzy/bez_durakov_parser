@@ -1,0 +1,25 @@
+Fixture: temporarily set bd_shared/config.local.toml [webreport].knowledge_max_topics = "abc"; preserve all other settings.
+
+$ poetry run python3 -c 'import bd_shared.config'
+exit=0
+
+$ poetry run python3 parse_data.py --help
+usage: parse_data.py [-h] [--no-save] [-v] directory
+
+Parse all XLSM files in a directory.
+
+positional arguments:
+  directory      Path to the directory containing XLSM files
+
+options:
+  -h, --help     show this help message and exit
+  --no-save      Do not save data to database
+  -v, --verbose  Display detailed parsing results
+exit=0
+
+$ poetry run python3 /tmp/tmpms9gdhhg/generate_env.py
+Generated environment files: .env, .env.mysql, .env.backend, .env.data_collector, .env.frontend, .env.litellm
+exit=0
+
+Local config restored byte-for-byte; generator copy and generated env files removed with TemporaryDirectory.
+exit=0

@@ -2,10 +2,15 @@
 
 import importlib
 import inspect
+import os
+import runpy
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Final
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -1122,6 +1127,82 @@ class KnowledgeTypesTests(unittest.TestCase):
         for forbidden_string in forbidden_strings:
             with self.subTest(path="compose_system_prompt(None)", forbidden_string=forbidden_string):
                 self.assertNotIn(forbidden_string, neutral_prompt)
+
+    def test_config_preserves_raw_limits_for_backend_validation(self):
+        config_module = importlib.import_module("bd_shared.config")
+        config_source = inspect.getfile(config_module)
+        base_config = Path(config_source).with_name("test_config.toml").read_text()
+        fields = tuple(vars(self._knowledge_limits()))
+        cases = (("\"abc\"", "abc"), ("true", True), ("false", False),
+                 ("1.5", 1.5), ("0", 0), ("-1", -1), ("1", 1), ("17", 17))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            for field in fields:
+                key = f"knowledge_{field}"
+                for toml_value, expected in cases:
+                    with self.subTest(key=key, value=expected):
+                        config_path.write_text(base_config.replace(
+                            "[webreport]\n", f"[webreport]\n{key} = {toml_value}\n"
+                        ))
+                        with patch.dict(os.environ, {"BD_CONFIG_FILE": str(config_path)}):
+                            raw_config = runpy.run_path(config_source)
+                        value = raw_config[key.upper()]
+                        self.assertEqual(value, expected)
+                        self.assertIs(type(value), type(expected))
+                        limits = self.knowledge_module.KnowledgeLimits(**{
+                            name: raw_config[f"KNOWLEDGE_{name.upper()}"]
+                            for name in fields
+                        })
+                        if type(expected) is int and expected >= 1:
+                            self.knowledge_module.validate_limits(limits)
+                        else:
+                            with self.assertRaises(self.knowledge_module.KnowledgeError) as raised:
+                                self.knowledge_module.validate_limits(limits)
+                            error = raised.exception
+                            self.assertEqual(error.key, key)
+                            self.assertEqual(error.rule, "integer_minimum")
+                            self.assertEqual(error.observed, expected)
+                            self.assertIs(type(error.observed), type(expected))
+                            self.assertEqual(error.permitted, 1)
+
+    def test_invalid_toml_limits_abort_real_startup_before_database(self):
+        config_module = importlib.import_module("bd_shared.config")
+        base_config = Path(inspect.getfile(config_module)).with_name("test_config.toml").read_text()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            probe_path = Path(temp_dir) / "startup_probe.py"
+            probe_path.write_text(
+                "import asyncio\n"
+                "from unittest.mock import AsyncMock, patch\n"
+                "import main\n"
+                "from agent.knowledge import KnowledgeError\n"
+                "async def probe():\n"
+                "    assert main.KNOWLEDGE_DIR is None\n"
+                "    with patch.object(main, 'initialize_data_service_with_retry', "
+                "new=AsyncMock()) as db:\n"
+                "        try:\n"
+                "            await main.startup_event()\n"
+                "        except KnowledgeError as error:\n"
+                "            assert error.key == 'knowledge_max_topics'\n"
+                "            db.assert_not_called()\n"
+                "        else:\n"
+                "            raise AssertionError('invalid limit accepted')\n"
+                "asyncio.run(probe())\n"
+            )
+            for value in ('"abc"', 'true', '1.5', '0'):
+                with self.subTest(value=value):
+                    config_path.write_text(base_config.replace(
+                        "[webreport]\n", f"[webreport]\nknowledge_max_topics = {value}\n"
+                    ))
+                    result = subprocess.run(
+                        [sys.executable, str(probe_path)],
+                        env={**os.environ, "BD_CONFIG_FILE": str(config_path),
+                             "PYTHONPATH": os.pathsep.join((str(Path(__file__).parent),
+                                                           os.environ.get("PYTHONPATH", "")))},
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_load_knowledge_rejects_each_below_one_limit_and_names_key(self):
         knowledge_error = self.knowledge_module.KnowledgeError

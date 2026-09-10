@@ -91,14 +91,12 @@ PROBE_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("probe_request_timeo
 LLM_MAX_RETRIES = int(config["webreport"].get("llm_max_retries", 0))
 LLM_REQUEST_TIMEOUT_SECONDS = int(config["webreport"].get("llm_request_timeout_seconds", 60))
 
-KNOWLEDGE_MAX_TITLE_CHARS = int(config["webreport"].get("knowledge_max_title_chars", 80))
-KNOWLEDGE_MAX_SUMMARY_CHARS = int(config["webreport"].get("knowledge_max_summary_chars", 200))
-KNOWLEDGE_MAX_PERSONA_CHARS = int(config["webreport"].get("knowledge_max_persona_chars", 2000))
-KNOWLEDGE_MAX_TOPICS = int(config["webreport"].get("knowledge_max_topics", 50))
-KNOWLEDGE_MAX_DOC_BYTES = int(config["webreport"].get("knowledge_max_doc_bytes", 65536))
-KNOWLEDGE_MAX_BYTES_PER_TURN = int(
-    config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
-)
+KNOWLEDGE_MAX_TITLE_CHARS = config["webreport"].get("knowledge_max_title_chars", 80)
+KNOWLEDGE_MAX_SUMMARY_CHARS = config["webreport"].get("knowledge_max_summary_chars", 200)
+KNOWLEDGE_MAX_PERSONA_CHARS = config["webreport"].get("knowledge_max_persona_chars", 2000)
+KNOWLEDGE_MAX_TOPICS = config["webreport"].get("knowledge_max_topics", 50)
+KNOWLEDGE_MAX_DOC_BYTES = config["webreport"].get("knowledge_max_doc_bytes", 65536)
+KNOWLEDGE_MAX_BYTES_PER_TURN = config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
 _knowledge_dir_value = config["webreport"].get("knowledge_dir") or None
 if _knowledge_dir_value is None:
     _knowledge_dir_path = None
