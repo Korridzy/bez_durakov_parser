@@ -288,3 +288,8 @@ The fresh post-Todo-4 scan contained 21 findings across these 10 files. The comp
 - В `USER_GUIDE.md` добавлен доступный из содержания операторский раздел, отделённый от инструкций для пользователя чата. Он описывает поставляемую структуру папки, два ключа манифеста, правила имени темы, заголовка и первого абзаца, а также то, что `rules.md` является заполняемым оператором скелетом без изменения кода или нового деплоя.
 - Текущие `bd_shared/config.py` и `bd_shared/config.toml` содержат шесть проверяемых ключей. Полный поиск не нашёл `knowledge_max_bytes_per_turn` как ключ или константу: сейчас `main.py` передаёт `131072` напрямую, а поздний todo C10 добавит ключ с тем же значением по умолчанию. Руководство явно отмечает это состояние и всё же называет седьмой ключ, как требует Todo 58.
 - Шаблоны сообщений запуска переписаны из литералов `main.py`; итоговая сверка отсортированных сообщений `Knowledge folder` была пустой, `exit=0`.
+
+## Todo 61
+
+- The three AGENTS files point to `load_knowledge()`, the six `KNOWLEDGE_*` constants, `compose_system_prompt()`, and `read_knowledge`.
+- Prompt changes belong in `backend/agent/knowledge.py` with startup wiring in `backend/main.py`, not `backend/agents/report_agents.py`; startup reads the configured folder once.

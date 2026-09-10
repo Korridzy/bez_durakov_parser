@@ -1,0 +1,2 @@
+$ grep -n "system prompt" webreport/AGENTS.md
+32:| Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |

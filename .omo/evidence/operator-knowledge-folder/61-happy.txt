@@ -1,0 +1,10 @@
+$ for f in AGENTS.md bd_shared/AGENTS.md webreport/AGENTS.md; do echo "== $f"; grep -n "knowledge" $f; done
+== AGENTS.md
+40:| Operator knowledge | `bd_shared/knowledge/` + `webreport/backend/agent/knowledge.py` | `load_knowledge()` reads the manifest and topics; `read_knowledge` returns topic text on demand |
+67:- **DO NOT** hardcode a dataset persona in agent code; put it in the knowledge manifest
+96:- The agent's persona now comes from the knowledge manifest, not from code.
+== bd_shared/AGENTS.md
+17:| `knowledge/` | Operator knowledge folders: manifest plus Markdown topics for `read_knowledge` |
+== webreport/AGENTS.md
+32:| Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |
+33:| Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic_id)` returns loaded Markdown text |

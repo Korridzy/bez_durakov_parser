@@ -37,6 +37,7 @@ parser/
 | DB models / ORM | `bd_shared/db.py` | SQLAlchemy models: Game, Team, GameTeam, Vybor, Chisla, Pref, Pairs, Razobl, Auction, Mot |
 | Add game to DB | `bd_shared/db_helpers.py` | `save_game_to_database()` with duplicate detection |
 | Configuration | `bd_shared/config.toml` + `bd_shared/config.py` | TOML config loaded via `tomllib`. Override with `BD_CONFIG_FILE` env var |
+| Operator knowledge | `bd_shared/knowledge/` + `webreport/backend/agent/knowledge.py` | `load_knowledge()` reads the manifest and topics; `read_knowledge` returns topic text on demand |
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | FastAPI + Streamlit + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
@@ -54,6 +55,7 @@ parser/
 - **Tests**: No test framework configured. Tests are standalone scripts (`test_alembic_migration.py`, `webreport/test_system.py`)
 - **No CI/CD**: No GitHub Actions. Manual deployment only
 - **Monorepo-ish**: Root + `webreport/` have separate `pyproject.toml`. No Poetry workspaces — managed via Docker Compose for web components
+- **Knowledge**: The configured folder is read once at backend startup, and its manifest supplies the agent persona
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
@@ -62,6 +64,7 @@ parser/
 - **DO NOT** bypass `normalize_team_name()` when storing/comparing team names
 - **DO NOT** write new DB query methods in webreport services — use existing `Database` class methods only
 - LangGraph agent tools must use existing `GameDataService` methods, never write raw SQL. The only sanctioned exception is the checkpoint saver’s own thread-recency enumeration query against its `checkpoints` table.
+- **DO NOT** hardcode a dataset persona in agent code; put it in the knowledge manifest
 
 ## COMMANDS
 
@@ -90,6 +93,7 @@ cd webreport && make test-e2e                    # Offline Playwright reasoning-
 - `range/` is entirely gitignored — contains ad-hoc analysis scripts and reports
 - Game rounds: Выбор (vybor), Числа (chisla), Преферанс (pref), Пары (pairs), Разоблачение (razobl), Аукцион (auction), Момент Истины (mot)
 - Default game date `02.03.2022` in config triggers a warning — means date was not set in the source file
+- The agent's persona now comes from the knowledge manifest, not from code.
 - At backend startup, a deep LiteLLM probe elects either `agent` mode or keyless `fallback` mode. The process never switches modes after election.
 - LiteLLM is internal-only at `litellm:4000`. The checkpoint-backed backend is limited to one replica.
 - ChatLiteLLM (`langchain-litellm >=0.7,<0.8`) is the backend model client. Its LiteLLM SDK is deliberately installed in the backend image, reversing the prior SDK-out-of-image rule. The manifest keeps that version range with a dependency-level Python `<3.15` marker because the literal range was not lockable under the project Python bound; the shipped image uses Python 3.11.

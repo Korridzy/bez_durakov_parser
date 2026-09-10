@@ -29,7 +29,8 @@ webreport/
 |------|----------|-------|
 | Add API endpoint | `backend/main.py` | FastAPI routes. Pydantic models in same file |
 | Add data query | `backend/services/game_data_service.py` | Must use existing `bd_shared.Database` methods only |
-| Modify AI behavior | `backend/agents/report_agents.py` | LangGraph ReAct adapter and system prompt |
+| Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |
+| Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic_id)` returns loaded Markdown text |
 | Agent mode | `backend/main.py` | Startup LiteLLM probe elects `agent` or `fallback` |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
@@ -41,6 +42,7 @@ webreport/
 
 - **Data access**: `GameDataService` → `bd_shared.Database` methods only. Never raw SQL, never new ORM queries
 - **Agent tools**: Agents call `GameDataService` methods — never access DB directly
+- **Knowledge prompt**: The prompt is composed at startup, and the configured folder is read exactly once
 - **Startup-elected mode**: A deep LiteLLM probe selects `agent` mode when the configured model is available, otherwise keyless `fallback` mode. The selected mode is immutable for the process lifetime.
 - **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. Game data remains MySQL-only.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
