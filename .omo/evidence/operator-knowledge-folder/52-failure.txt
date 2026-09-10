@@ -1,0 +1,3 @@
+grep -n "LLM mode elected" webreport/backend/test_system.py
+1524:                self.assertNotIn("LLM mode elected", "\n".join(rendered_logs))
+exit=0

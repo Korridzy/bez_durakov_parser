@@ -6,6 +6,7 @@ import sys
 import asyncio
 import importlib
 import json as json_module
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -1457,6 +1458,113 @@ class TestStartupInitialization(unittest.TestCase):
         self._assert_startup_without_knowledge(
             missing_path,
             f"Knowledge folder not found at {missing_path.resolve()}; the agent runs without dataset knowledge.",
+        )
+
+    def _assert_invalid_knowledge_folder_aborts(
+        self,
+        manifest_text,
+        expected_fragments,
+        *,
+        expect_manifest_path=True,
+    ):
+        knowledge_module = importlib.import_module("agent.knowledge")
+        main_module = self._get_main_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            manifest_path = folder / "manifest.toml"
+            if manifest_text is not None:
+                manifest_path.write_text(manifest_text, encoding="utf-8")
+
+            async def run_test():
+                await self._reset_startup_state(main_module)
+                data_service_initializer = AsyncMock()
+                proxy_probe = AsyncMock()
+                with (
+                    patch.object(main_module, "KNOWLEDGE_DIR", folder),
+                    patch.object(main_module, "DATABASE_NAME", "bez_durakov"),
+                    patch.object(main_module, "KNOWLEDGE_MAX_PERSONA_CHARS", 5),
+                    patch.object(
+                        main_module,
+                        "initialize_data_service_with_retry",
+                        new=data_service_initializer,
+                    ),
+                    patch.object(
+                        main_module,
+                        "probe_llm_proxy",
+                        new=proxy_probe,
+                    ),
+                    self.assertLogs(
+                        main_module.logger,
+                        level="DEBUG",
+                    ) as captured_logs,
+                ):
+                    with self.assertRaises(
+                        knowledge_module.KnowledgeError
+                    ) as raised:
+                        await main_module.startup_event()
+
+                detail = str(raised.exception)
+                if expect_manifest_path:
+                    self.assertIn(str(manifest_path), detail)
+                for fragment in expected_fragments:
+                    self.assertIn(fragment, detail)
+
+                rendered_logs = [record.getMessage() for record in captured_logs.records]
+                self.assertEqual(
+                    [
+                        (record.levelname, record.getMessage())
+                        for record in captured_logs.records
+                        if record.getMessage().startswith(
+                            "Knowledge folder is invalid:"
+                        )
+                    ],
+                    [("ERROR", f"Knowledge folder is invalid: {detail}")],
+                )
+                self.assertNotIn("LLM mode elected", "\n".join(rendered_logs))
+                data_service_initializer.assert_not_awaited()
+                proxy_probe.assert_not_awaited()
+                self.assertIsNone(main_module.checkpoint_connection)
+                self.assertIsNone(main_module.checkpoint_saver)
+                self.assertIsNone(main_module.agent_system)
+
+            asyncio.run(run_test())
+
+    def test_invalid_knowledge_folder_missing_manifest_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(None, ("manifest.toml",))
+
+    def test_invalid_knowledge_folder_unparseable_manifest_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts("[[[\n", ("TOML",))
+
+    def test_invalid_knowledge_folder_unknown_key_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(
+            'dataset = "bez_durakov"\npersona = "x"\nlanguage = "ru"\n',
+            ("language",),
+        )
+
+    def test_invalid_knowledge_folder_bad_dataset_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(
+            'dataset = "Bad_Dataset"\npersona = "x"\n',
+            ("dataset",),
+        )
+
+    def test_invalid_knowledge_folder_empty_persona_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(
+            'dataset = "bez_durakov"\npersona = ""\n',
+            ("persona",),
+        )
+
+    def test_invalid_knowledge_folder_overlong_persona_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(
+            'dataset = "bez_durakov"\npersona = "xxxxxx"\n',
+            ("persona", "max_persona_chars"),
+        )
+
+    def test_invalid_knowledge_folder_dataset_mismatch_aborts_before_mode_election(self):
+        self._assert_invalid_knowledge_folder_aborts(
+            'dataset = "wrong_db"\npersona = "x"\n',
+            ("wrong_db", "bez_durakov"),
+            expect_manifest_path=False,
         )
 
     def test_knowledge_loads_once_before_database_and_probe_in_each_mode(self):
