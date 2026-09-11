@@ -29,8 +29,8 @@ make start
 ### 🏗️ Архитектура (SOA)
 - ✅ **Frontend** - Streamlit UI с двумя представлениями (Чат и Отчёт)
 - ✅ **Backend** - FastAPI REST API
-- ✅ **Agents** - LangGraph ReAct agent с startup-elected `agent` или `fallback` mode
-- ✅ **Services** - Сервисный слой (использует только существующие методы db.py)
+- ✅ **Agents** - LangGraph ReAct agent над инструментами, найденными в модуле оператора
+- ✅ **Модуль инструментов** - модуль из `dataset.tools_module`, получающий движок от backend
 
 ### 📁 Структура
 ```
@@ -43,8 +43,9 @@ webreport/
 │   └── ...
 ├── 💻 Код
 │   ├── backend/main.py        - FastAPI
-│   ├── backend/agents/report_agents.py
-│   ├── backend/services/game_data_service.py
+│   ├── backend/agents/report_runtime.py
+│   ├── backend/agent/toolmodule.py
+│   ├── ../bd_shared/tools/bez_durakov.py
 │   └── frontend/main.py       - Streamlit
 ├── 📥 Data collector
 │   ├── data_collector/entrypoint.py
@@ -81,9 +82,9 @@ webreport/
 
 ### 🔌 REST API
 - `/api/chat` - диалог с агентом
-- `/api/games` - данные игр
-- `/api/teams` - команды
-- `/api/scores` - очки
+- `/api/history/{session_id}` - история диалога
+- `/api/clear/{session_id}` - очистка истории
+- `/health` - готовность сервиса
 
 Документация: http://localhost:28000/docs
 
@@ -111,10 +112,10 @@ webreport/
 - **LiteLLM** - internal model proxy `litellm:4000`
 - **SQLAlchemy** - ORM (из основного проекта)
 - **Pandas** - Data processing
-- **MySQL** - game data database (из bd_shared/config.toml)
+- **MySQL, PostgreSQL или SQLite** - база набора данных (из bd_shared/config.toml)
 - **SQLite** - backend checkpoint store `../vm/backend/checkpoints`
 
-Backend при запуске выполняет глубокий LiteLLM probe и выбирает один режим: `agent`, когда модель доступна, или keyless `fallback`. Выбор не меняется до перезапуска процесса. LiteLLM не публикует host port, он доступен только на `litellm:4000` внутри сети. Поддерживается только один backend replica.
+Backend при запуске выполняет глубокий LiteLLM probe. Без доступной модели процесс остаётся запущенным и отвечает 503, а каждая следующая попытка чата повторяет проверку один раз. LiteLLM не публикует host port, он доступен только на `litellm:4000` внутри сети. Поддерживается только один backend replica.
 
 ---
 
@@ -125,8 +126,10 @@ Backend при запуске выполняет глубокий LiteLLM probe 
 make help          # Справка
 make start         # Запуск
 make stop          # Остановка
-make restart       # Перезапуск
-make test          # Тесты
+make restart       # Перезапуск после обеих проверок
+make validate-knowledge # Проверить папку знаний
+make validate-tools     # Проверить модуль инструментов оператора
+make test          # Тесты, включая обе приёмочные полосы
 make logs          # Логи
 ```
 
@@ -205,14 +208,12 @@ docker compose logs -f
 
 ## 🔧 Интеграция с проектом
 
-### Используемые методы из db.py
-Система использует **ТОЛЬКО существующие методы**:
-
-- `Database.__init__(db_url)`
-- `Database.get_all_games()`
-- `Database.get_game_data(game_id)`
-- `Database.get_game_ids_by_date(start_date, end_date)`
-- `initialize_database()` из db_helpers.py
+### Модуль инструментов оператора
+Backend не содержит запросов к набору данных. Он импортирует модуль, названный в
+`dataset.tools_module`, вызывает его фабрику `build_service(engine)` и превращает каждый
+публичный метод возвращённого объекта в инструмент агента. Для этого развёртывания модуль —
+`bd_shared/tools/bez_durakov.py`, и он работает через `bd_shared.Database` вокруг движка,
+который построил backend.
 
 ### Модели ORM
 - `Game`
@@ -232,8 +233,9 @@ docker compose logs -f
 ### Для разработчиков
 1. Прочитать **ARCHITECTURE.md**
 2. Изучить код в порядке:
-   - `backend/services/game_data_service.py`
-   - `backend/agents/report_agents.py`
+   - `../bd_shared/tools/bez_durakov.py`
+   - `backend/agent/toolmodule.py`
+   - `backend/agents/report_runtime.py`
    - `backend/main.py`
    - `frontend/main.py`
 
@@ -254,12 +256,14 @@ docker compose logs -f
 
 ## ✅ Чеклист перед первым запуском
 
-- [ ] База данных доступна (MySQL)
+- [ ] База данных доступна (MySQL, PostgreSQL или SQLite)
 - [ ] Создан `bd_shared/config.local.toml` для server-specific настроек
 - [ ] Python 3.11+
 - [ ] Порты 8000 и 8501 свободны
+- [ ] `make validate-knowledge` проходит
+- [ ] `make validate-tools` проходит
 - [ ] Выполнен `make start` из каталога `webreport/`
-- [ ] (Опционально) `openai_api_key` указан в `[webreport]` файла `bd_shared/config.local.toml`
+- [ ] `openai_api_key` указан в `[webreport]` файла `bd_shared/config.local.toml`, иначе backend будет отвечать 503
 
 ---
 

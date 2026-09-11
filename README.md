@@ -40,7 +40,7 @@ $ cp bd_shared/config.local.toml.example bd_shared/config.local.toml
 $ chmod 600 bd_shared/config.local.toml
 ```
 
-Далее пропишите в `bd_shared/config.local.toml` параметры доступа к БД. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
+Далее пропишите в `bd_shared/config.local.toml` параметры доступа к БД. Парсер работает с MySQL, а WebReport дополнительно принимает PostgreSQL и SQLite. По умолчанию используется локальный контейнер с MySQL, который можно запустить командой:
 
 ```bash
 $ make mysql-start
@@ -132,7 +132,7 @@ $ python four_buckets.py
 
 Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и Streamlit. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
 
-При запуске backend выполняет глубокую проверку LiteLLM и один раз выбирает режим `agent` или `fallback`. Этот выбор действует до остановки процесса. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
+При запуске backend выполняет глубокую проверку LiteLLM. Если модель недоступна, процесс остаётся запущенным, но отказывается отвечать, и `/health` вместе с `/api/chat` возвращают 503. Каждая следующая попытка чата повторяет проверку один раз, и первый успешный результат собирает агента и отвечает на этот же запрос. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
 
 #### Запуск WebReport
 

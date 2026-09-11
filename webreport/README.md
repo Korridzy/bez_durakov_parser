@@ -21,11 +21,12 @@
 3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
    - обращается к модели через `ChatLiteLLM` и внутренний LiteLLM proxy `litellm:4000`
    - сохраняет state в service-local SQLite checkpoint store `../vm/backend/checkpoints`
-   - при запуске выбирает `agent` или `fallback` режим и не меняет его до перезапуска
+   - при запуске проверяет доступность модели; без неё backend отказывается отвечать и повторяет проверку при следующем запросе
 
-4. **Services** - сервисный слой
-   - GameDataService - доступ к данным игр
-   - Использует ТОЛЬКО существующие методы из db.py и db_helpers.py
+4. **Модуль инструментов оператора** - слой доступа к данным
+   - путь модуля задаётся ключом `dataset.tools_module`
+   - каждый публичный метод возвращаемого объекта становится инструментом агента
+   - для этого развёртывания это `bd_shared/tools/bez_durakov.py`
 
 ## 📁 Структура проекта
 
@@ -33,9 +34,12 @@
 webreport/
 ├── backend/
 │   ├── agents/
-│   │   └── report_agents.py       # LangGraph / fallback agent system
-│   ├── services/
-│   │   └── game_data_service.py   # Access to bd_shared.Database methods
+│   │   └── report_runtime.py      # LangGraph agent over the discovered tools
+│   ├── agent/
+│   │   ├── toolmodule.py          # Loads the operator module and discovers its tools
+│   │   ├── engine.py              # Builds the one engine, read-only per dialect
+│   │   └── tools_cli.py           # `make validate-tools` preflight
+│   ├── acceptance_fixture.py       # Dialect-neutral stand-in operator module for the lanes
 │   ├── main.py                     # FastAPI application and API routes
 │   ├── start.py                    # Container launcher for Uvicorn/debugger
 │   ├── test_system.py              # Docker-based backend tests
@@ -93,7 +97,7 @@ cd webreport
 
 Источник конфигурации для WebReport — `../bd_shared/config.toml`.
 
-Используемые секции и полный список ключей `[webreport]`:
+Используемые секции и полный список ключей `[webreport]` и `[dataset]`:
 
 - `[database]`: `url`, `docker_url`, `sqlalchemy_logging`
 - `[application]`: `debug`, `log_level`, `default_game_date`
@@ -102,21 +106,23 @@ cd webreport
   - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`
   - LiteLLM: `litellm_base_url`, `agent_model`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
   - Ключи провайдеров: `openai_api_key`, `openrouter_api_key`, `opencode_api_key`
-  - Знания:
-    - `knowledge_dir = "knowledge/bez_durakov"`
+  - Пределы знаний:
     - `knowledge_max_title_chars = 80`
     - `knowledge_max_summary_chars = 200`
     - `knowledge_max_persona_chars = 2000`
     - `knowledge_max_topics = 50`
     - `knowledge_max_doc_bytes = 65536`
     - `knowledge_max_bytes_per_turn = 131072`
+- `[dataset]`:
+  - `tools_module = "bd_shared.tools.bez_durakov"` — точка импорта модуля с фабрикой `build_service(engine)`
+  - `knowledge_dir = "knowledge/bez_durakov"` — папка знаний, переехавшая сюда из `[webreport]`
 - `[xlsm_fetch]`: `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 `../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.
 
 ### Папка знаний
 
-По умолчанию `knowledge_dir = "knowledge/bez_durakov"` указывает на поставляемую папку `bd_shared/knowledge/bez_durakov`. Если указанная папка отсутствует, backend записывает предупреждение и продолжает запуск без знаний. Если папка существует, но недействительна, например `manifest.toml` не проходит проверку, backend прерывает запуск. Когда папка знаний загружена, агент выполняет поиск полного Markdown-документа по требованию инструментом `read_knowledge`, передавая ему точный идентификатор темы.
+По умолчанию `dataset.knowledge_dir = "knowledge/bez_durakov"` указывает на поставляемую папку `bd_shared/knowledge/bez_durakov`. Если указанная папка отсутствует, backend записывает предупреждение и продолжает запуск без знаний. Если папка существует, но недействительна, например `manifest.toml` не проходит проверку, backend прерывает запуск. Когда папка знаний загружена, агент выполняет поиск полного Markdown-документа по требованию инструментом `read_knowledge`, передавая ему точный идентификатор темы.
 
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
@@ -177,7 +183,7 @@ openai_api_key = "your-api-key-here"
 ```
 
 `generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.local.toml` игнорируется Git и предназначен для настоящих ключей.
-При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, процесс выбирает LangGraph `agent` mode. Если ключ отсутствует или probe не проходит, процесс выбирает keyless `fallback` mode. Режим фиксирован до перезапуска backend.
+При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, собирается агент LangGraph. Если модель недоступна, процесс остаётся запущенным, но отказывается отвечать, и `/health` вместе с `/api/chat` возвращают 503 с одним русским предложением. Каждая следующая попытка чата повторяет проверку ровно один раз, и первый успешный результат собирает агента и отвечает на этот же запрос.
 
 После изменения ключа перезапустите стек командой `make restart`.
 
@@ -254,13 +260,6 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 - `GET /api/history/{session_id}` - получить историю диалога
 - `POST /api/clear/{session_id}` - очистить историю
 
-#### Data
-- `GET /api/games` - получить все игры
-- `GET /api/games/{game_id}` - получить данные игры
-- `GET /api/teams` - получить все команды
-- `GET /api/teams/{team_name}/stats` - статистика команды
-- `GET /api/scores` - очки команд по играм
-
 ## 🔧 Технический стек
 
 - **Python 3.11+**
@@ -324,7 +323,19 @@ Backend в Docker подключается к БД по имени хоста `m
 1. Проверьте логи backend на результат глубокого LiteLLM probe: `make logs SERVICE=backend`.
 2. Проверьте LiteLLM из Compose-сети по адресу `http://litellm:4000`, он не имеет host port.
 3. Укажите `openai_api_key` в секции `[webreport]` файла `../bd_shared/config.local.toml` и перезапустите backend через `make restart`.
-4. Без ключа или при неуспешном probe backend намеренно запускается в keyless `fallback` mode. Он не переключается в `agent` mode во время работы, перезапуск нужен для новой проверки.
+4. Если ключ отсутствует или probe не проходит, backend остаётся запущенным и отвечает 503, пока проверка не пройдёт. Перезапуск для этого не нужен, повторная проверка выполняется при следующей попытке чата.
+
+### Приёмочная полоса PostgreSQL не стартует
+
+`make test-postgres` поднимает одноразовый `postgres:16-alpine`. Первый запуск на машине, где
+этого образа ещё нет, требует доступа к Docker Hub, дальше он работает офлайн. Полоса
+объявлена в отдельном файле `docker-compose.test.yml`, который рабочий стек никогда не
+загружает, и после прогона удаляется только сервис `postgres_test`.
+
+Нужен Docker Compose не ниже 2.24: полоса использует тег `!override` в `depends_on`, чтобы
+заменить карту зависимостей, а не дополнить её. На более старых версиях теги сливаются
+аддитивно, и полоса потянет за собой `mysql` и `litellm` из основного compose-файла. Проверить
+версию можно командой `docker compose version`.
 
 ### Порты заняты
 
@@ -345,7 +356,10 @@ make start          # Запуск в фоне
 make stop           # Остановка
 make restart        # Перезапуск
 make logs           # Все логи (Ctrl+C для выхода)
-make test           # Тесты backend в Docker
+make test           # Backend-набор плюс обе приёмочные полосы (SQLite и PostgreSQL)
+make test-postgres  # Только приёмочная полоса против одноразового PostgreSQL
+make validate-knowledge # Проверить папку знаний
+make validate-tools # Проверить модуль инструментов оператора
 make test-e2e-setup # Один раз: установить e2e-зависимости и Chromium
 make test-e2e       # Offline Playwright e2e против stub backend
 make fetch-data     # Ручной запуск XLSM fetch
@@ -371,15 +385,14 @@ docker compose down -v              # Остановить и удалить vol
 
 ### Добавление новых методов запросов
 
-1. Добавьте метод в `GameDataService` (`backend/services/game_data_service.py`)
-2. Используйте ТОЛЬКО существующие методы из db.py и db_helpers.py
-3. Обновите LangGraph tools или fallback interpreter для нужного маршрута
-4. При необходимости добавьте новый endpoint в API
+1. Добавьте публичный метод с docstring и аннотациями типов в модуль, указанный в `dataset.tools_module`
+2. Проверьте его командой `make validate-tools`, она печатает список найденных инструментов
+3. Ничего больше менять не нужно: backend узнаёт инструмент из сигнатуры метода
 
 ### Расширение функциональности агентов
 
-1. Редактируйте system messages в `backend/agents/report_agents.py`
-2. Добавляйте новые инструменты (tools) для агентов
+1. Редактируйте persona в `manifest.toml` папки знаний; правила работы собираются в `backend/agent/knowledge.py` функцией `compose_system_prompt`
+2. Добавляйте новые инструменты как публичные методы модуля из `dataset.tools_module`
 3. Настройте model and temperature through the configuration consumed by LiteLLM
 
 ## 📄 Лицензия

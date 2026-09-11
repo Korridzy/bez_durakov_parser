@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-SOA web system: Streamlit chat UI → FastAPI REST API → LangGraph ReAct agent → `GameDataService` → `bd_shared` game-data layer. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints at `../vm/backend/checkpoints`.
+SOA web system: Streamlit chat UI → FastAPI REST API → LangGraph ReAct agent → the operator tool module named by `dataset.tools_module` → the configured database. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints at `../vm/backend/checkpoints`.
 
 ## STRUCTURE
 
@@ -10,8 +10,10 @@ SOA web system: Streamlit chat UI → FastAPI REST API → LangGraph ReAct agent
 webreport/
 ├── backend/
 │   ├── main.py                        # FastAPI app, endpoints, Pydantic models
-│   ├── agents/report_agents.py        # LangGraph report agent and fixed-mode adapter
-│   └── services/game_data_service.py  # DB abstraction over bd_shared.Database
+│   ├── agents/report_runtime.py       # LangGraph report agent over the discovered tools
+│   ├── agent/toolmodule.py            # Loads the operator module and discovers its tools
+│   ├── agent/engine.py                # Builds the one engine, read-only per dialect
+│   └── ../bd_shared/tools/bez_durakov.py  # The default operator module for this deployment
 ├── frontend/
 │   └── main.py                        # Streamlit UI: chat view + report view
 ├── docker-compose.yml                 # MySQL + backend + frontend on webreport-network
@@ -28,36 +30,36 @@ webreport/
 | Task | Location | Notes |
 |------|----------|-------|
 | Add API endpoint | `backend/main.py` | FastAPI routes. Pydantic models in same file |
-| Add data query | `backend/services/game_data_service.py` | Must use existing `bd_shared.Database` methods only |
+| Add data query | the module named by `dataset.tools_module` | For this deployment that is `bd_shared/tools/bez_durakov.py`. Every public method becomes a tool |
 | Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |
 | Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic)` returns loaded Markdown text |
-| Agent mode | `backend/main.py` | Startup LiteLLM probe elects `agent` or `fallback` |
+| Model availability | `backend/main.py` | A startup probe decides whether the agent is built; without a model the backend refuses to serve and re-probes on each chat attempt |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
-| Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections |
+| Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir` |
 | Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives OpenAI, OpenRouter, and OpenCode keys from `.env.litellm` |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
 ## CONVENTIONS
 
-- **Data access**: `GameDataService` → `bd_shared.Database` methods only. Never raw SQL, never new ORM queries
-- **Agent tools**: Agents call `GameDataService` methods — never access DB directly
+- **Data access**: this repository's `backend/agent/` and `backend/agents/` never reach the dataset themselves. They discover their tool surface from the object the operator's `build_service(engine)` returns, and the backend injects the one engine it built.
+- **Agent tools**: every public method of that object becomes a tool, named after the method, described by its docstring and parameterised by its type hints. A helper that should not be a tool takes a leading underscore, and a property is never a tool.
 - **Knowledge prompt**: The prompt is composed at startup, and the configured folder is read exactly once
-- **Startup-elected mode**: A deep LiteLLM probe selects `agent` mode when the configured model is available, otherwise keyless `fallback` mode. The selected mode is immutable for the process lifetime.
-- **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. Game data remains MySQL-only.
+- **Model availability**: a deep LiteLLM probe runs at startup. Without a reachable model the process stays up and refuses to serve, answering 503 from `/health` and `/api/chat`. Each later chat attempt re-probes once, and the first healthy verdict builds the agent and answers that request.
+- **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. The game data this deployment serves remains MySQL.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
 - **Config flow**: `bd_shared/config.toml` + optional `config.local.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
 - **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
-- **Container networking**: Backend connects to MySQL at `mysql:3306` (Docker network), not localhost
+- **Container networking**: with the bundled MySQL the backend connects at `mysql:3306` on the Docker network, not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
 - **Dev container pattern**: backend, frontend, and data_collector install dependencies in the image and mount service code at runtime; code-only changes should not require image rebuilds
 
 ## ANTI-PATTERNS
 
-- **DO NOT** write new DB query methods here — add them to `bd_shared/db.py` `Database` class
+- **DO NOT** put dataset queries in `backend/agent/` or `backend/agents/` — they belong in the operator tool module
 - **DO NOT** import `bd_shared` without the Docker mount path (`sys.path.insert(0, '/')` is already in service)
 - **DO NOT** hardcode ports — always read from generated env vars or `bd_shared/config.toml`
-- **DO NOT** switch between `agent` and `fallback` modes after startup. Restart the backend to run the LiteLLM probe and elect a new mode.
+- **DO NOT** build a second engine anywhere in the backend. Startup builds exactly one, makes it read-only for MySQL, PostgreSQL and SQLite, and injects it.
 - **DO NOT** use broad Docker `COPY` patterns when explicit file/directory copies are sufficient; prefer narrow `COPY` instructions unless the image strictly needs the whole tree
 
 ## COMMANDS
@@ -65,11 +67,11 @@ webreport/
 ```bash
 make start      # docker compose up -d (generates all env files first)
 make stop       # docker compose down
-make restart    # regenerate env files, then force-recreate LiteLLM, backend, and frontend
+make restart    # regenerate env files, run both preflights, then force-recreate LiteLLM, backend, and frontend
 make logs       # docker compose logs -f
 make build      # docker compose build
 make rebuild    # down + build + up
-make test       # Run backend/test_system.py in backend container
+make test       # Run the backend suite plus both acceptance lanes (SQLite and PostgreSQL)
 make clean      # Remove __pycache__, .pyc files
 ```
 

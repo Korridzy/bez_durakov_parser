@@ -19,28 +19,28 @@
 │                         REST API                                │
 │                      (FastAPI Backend)                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │ Chat API     │  │ Data API     │  │ Health API   │         │
-│  │ /api/chat    │  │ /api/games   │  │ /health      │         │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘         │
-└─────────┼──────────────────┼──────────────────────────────────┘
-          │                  │
-          ▼                  ▼
+│  │ Chat API     │  │ History API  │  │ Health API   │         │
+│  │ /api/chat    │  │ /api/history │  │ /health      │         │
+│  └──────┬───────┘  └──────────────┘  └──────────────┘         │
+└─────────┼──────────────────────────────────────────────────────┘
+          │
+          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                  BACKEND, ONE REPLICA ONLY                       │
-│  Startup: deep LiteLLM probe elects `agent` or `fallback` once  │
+│  Startup: one read-only engine, then the operator tool module    │
+│  Without a reachable model the backend refuses to serve (503)    │
 │                                                                 │
-│  agent: LangGraph ReAct graph ────────┐                         │
-│  fallback: deterministic interpreter ─┼─> GameDataService      │
-│                                        │       │                │
-│  SQLite checkpoint store               │       ▼                │
-│  ../vm/backend/checkpoints             │  bd_shared.Database    │
-│  persists LangGraph thread state       │       │                │
-└───────────────────────────┬────────────┴───────┼────────────────┘
-                            │ HTTP model calls    │ game-data calls
+│  LangGraph ReAct graph over discovered tools ──┐                │
+│                                                 │               │
+│  SQLite checkpoint store                        ▼               │
+│  ../vm/backend/checkpoints            operator tool module      │
+│  persists LangGraph thread state       (dataset.tools_module)   │
+└───────────────────────────┬─────────────────────┼───────────────┘
+                            │ HTTP model calls    │ read-only queries
                             ▼                     ▼
                  ┌──────────────────┐  ┌─────────────────────────┐
-                 │ LiteLLM proxy    │  │ MySQL game data         │
-                 │ litellm:4000     │  │ via SQLAlchemy          │
+                 │ LiteLLM proxy    │  │ MySQL, PostgreSQL or    │
+                 │ litellm:4000     │  │ SQLite via SQLAlchemy   │
                  │ internal only    │  └─────────────────────────┘
                  └──────────────────┘
 ```
@@ -75,12 +75,11 @@
 **Основные endpoints**:
 - `POST /api/chat` - обработка сообщений пользователя
 - `GET /api/history/{session_id}` - получение истории диалога
-- `GET /api/games` - список всех игр
-- `GET /api/teams` - список всех команд
-- `GET /api/scores` - очки команд
+- `POST /api/clear/{session_id}` - очистка истории диалога
+- `GET /health` - готовность сервиса
 
 ### 3. Agent system (LangGraph)
-**Файл**: `agents/report_agents.py`
+**Файл**: `agents/report_runtime.py`
 
 **Ответственность**:
 - Интерпретация требований пользователя
@@ -88,17 +87,19 @@
 - Анализ результатов
 - Формирование ответов
 
-**Режимы работы**:
-- **`agent`**: LangGraph ReAct graph вызывает инструменты `GameDataService` через LiteLLM на `litellm:4000`.
-- **`fallback`**: Keyless deterministic interpreter обрабатывает поддержанные запросы и сохраняет ход в checkpoint store.
+**Путь исполнения**: LangGraph ReAct graph вызывает инструменты, найденные на объекте оператора, обращаясь к модели через LiteLLM на `litellm:4000`.
 
-При запуске порядок фиксирован: сначала backend загружает и проверяет папку знаний, включая `manifest.toml` и документы тем. Затем инициализируются `GameDataService` и checkpoint store, после чего выполняется глубокая проверка LiteLLM и выбирается режим `agent` или `fallback`. Выбранный режим не меняется до перезапуска процесса.
+При запуске порядок фиксирован: сначала backend загружает и проверяет папку знаний, включая `manifest.toml` и документы тем. Затем строится единственный движок, проверяется доступность базы и вызывается фабрика модуля инструментов, после чего инициализируется checkpoint store и выполняется глубокая проверка LiteLLM. Если модель недоступна, процесс остаётся запущенным и отказывается отвечать до первой успешной повторной проверки.
 
-Папка задаётся ключом `knowledge_dir` секции `[webreport]`. Полный список ключей знаний, включая `knowledge_max_title_chars`, `knowledge_max_summary_chars`, `knowledge_max_persona_chars`, `knowledge_max_topics`, `knowledge_max_doc_bytes` и `knowledge_max_bytes_per_turn`, приведён в перечислении `[webreport]` файла [webreport/README.md](README.md).
+Папка задаётся ключом `knowledge_dir` секции `[dataset]`. Полный список ключей знаний, включая `knowledge_max_title_chars`, `knowledge_max_summary_chars`, `knowledge_max_persona_chars`, `knowledge_max_topics`, `knowledge_max_doc_bytes` и `knowledge_max_bytes_per_turn`, приведён в перечислении `[webreport]` файла [webreport/README.md](README.md).
 
 При запуске агентской системы системный prompt составляется из persona из `manifest.toml`, независимых от БД правил работы, заданных в коде, и списка тем. Список содержит идентификатор, заголовок и краткое описание каждой темы. Полные Markdown документы не загружаются в prompt заранее: при наличии знаний агент вызывает `read_knowledge` с точным идентификатором темы и получает полный документ только по требованию.
 
-Сейчас независим от БД только путь prompt и знаний: persona, правила работы, список тем и поиск документа. Замена папки знаний изменяет этот путь целиком без изменения кода. Путь данных пока зависит от игры: восемь инструментов данных, включая `get_team_wins` и `get_top_teams`, работают через `GameDataService`, а `FallbackInterpreter` с regex по-прежнему сопоставляет русские игровые ключевые слова. Обобщение этих частей отложено для будущей работы «Multi-DB Universal Agent». Поэтому другая БД получает подходящие persona и предметные знания, но пока не подходящие запросы.
+Оба пути теперь независимы от предметной области. Путь prompt и знаний берёт persona, правила работы, список тем и поиск документа из настроенной папки. Путь данных берёт весь набор инструментов из объекта, который возвращает фабрика `build_service(engine)` модуля, названного в `dataset.tools_module`.
+
+**Обнаружение инструментов.** Загрузчик импортирует модуль, вызывает `build_service` с уже построенным движком и читает каждый публичный атрибут возвращённого объекта через `inspect.getattr_static`, чтобы дескрипторы не выполнялись. Некаллируемый атрибут и `property` пропускаются молча, а метод становится инструментом с именем метода, описанием из первого абзаца docstring и схемой аргументов из аннотаций типов. Отсутствие docstring, отсутствие аннотации параметра, неподдерживаемая аннотация и имя из зарезервированного набора прерывают запуск с одной строкой, которую печатает и `make validate-tools`.
+
+**Только чтение.** Backend строит ровно один движок и делает его доступным только для чтения на момент установления соединения: для PostgreSQL параметром подключения `options=-c default_transaction_read_only=on`, для SQLite формой файлового URI `mode=ro`, для MySQL инструкцией `SET SESSION TRANSACTION READ ONLY` в обработчике `connect`. Для диалекта вне этого набора обёртка не применяется, и режим только для чтения зависит от прав учётной записи.
 
 Документы знаний остаются доступными в ходе, в котором они были прочитаны. Документы из предыдущих ходов удаляются из контекста модели и из возобновляемого головного состояния; исторические строки контрольных точек могут сохранять их до удаления потока из-за вытеснения по TTL/LRU. Головное состояние компактируется после каждого завершённого обновления узла модели, включая чтения в текущем ходе, когда модель возвращает окончательный ответ. При сбое вызова модели головное состояние может остаться некомпактированным, хотя исходящая копия уже исключает документы из предыдущих ходов.
 
@@ -122,20 +123,26 @@ Backend хранит состояние LangGraph по thread ID в service-loca
 
 SQLite saver рассчитан на один backend replica. Горизонтальное масштабирование backend не поддерживается.
 
-### 5. Service Layer
-**Файл**: `services/game_data_service.py`
+### 5. Модуль инструментов оператора
+**Файл**: задаётся ключом `dataset.tools_module`. Для этого развёртывания —
+`bd_shared/tools/bez_durakov.py`.
 
 **Ответственность**:
-- Бизнес-логика работы с данными
-- Абстракция над базой данных
-- Использование ТОЛЬКО существующих методов из db.py
+- Знать предметную область, которой backend не знает
+- Предоставить фабрику `build_service(engine)`, возвращающую объект-сервис
+- Обращаться к базе только через внедрённый движок, доступный лишь для чтения
 
-**Основные методы**:
-- `get_all_games_summary()` - сводка по всем играм
-- `get_game_by_id(game_id)` - данные конкретной игры
-- `get_team_statistics(team_name)` - статистика команды
-- `get_team_game_scores()` - очки команд по играм
-- `get_all_teams()` - список всех команд
+**Контракт**:
+- Фабрика получает готовый движок и не открывает соединение при построении
+- Каждый публичный метод возвращённого объекта становится инструментом агента
+- Имя инструмента равно имени метода, описание берётся из первого абзаца docstring,
+  схема аргументов строится из аннотаций типов
+- Метод с ведущим подчёркиванием и `property` инструментами не становятся
+- Отсутствие docstring, отсутствие аннотации параметра, неподдерживаемая аннотация и
+  зарезервированное имя прерывают запуск одной строкой, называющей модуль и метод
+
+Модуль проверяется командой `make validate-tools` до запуска, без подключения к базе.
+Полный контракт для оператора описан в [USER_GUIDE.md](USER_GUIDE.md).
 
 ### 6. Database Access Layer
 **Файлы**: `db.py`, `db_helpers.py` (из основного проекта)
@@ -160,13 +167,13 @@ SQLite saver рассчитан на один backend replica. Горизонт�
    ↓
 2. Frontend отправляет POST /api/chat
    ↓
-3. Backend передаёт запрос в startup-elected execution path
+3. Backend передаёт запрос агенту, собранному при запуске
    ↓
-4. LangGraph ReAct agent или fallback interpreter интерпретирует запрос
+4. LangGraph ReAct agent выбирает инструмент из найденных на объекте оператора
    ↓
-5. AgentSystem вызывает метод GameDataService
+5. Реестр вызывает соответствующий метод модуля инструментов
    ↓
-6. GameDataService использует методы из db.py
+6. Метод обращается к базе через внедрённый движок, доступный только для чтения
    ↓
 7. Database возвращает данные
    ↓
@@ -221,7 +228,7 @@ SQLite saver рассчитан на один backend replica. Горизонт�
 | Model client | ChatLiteLLM (`langchain-litellm`) | Calls the internal LiteLLM proxy and supports reasoning round-trip |
 | Model proxy | LiteLLM | Internal model access at `litellm:4000` |
 | ORM | SQLAlchemy | Database abstraction |
-| Database | MySQL | Data storage |
+| Database | MySQL, PostgreSQL or SQLite | Data storage, chosen by the operator |
 | HTTP Server | Uvicorn | ASGI server |
 | Data Processing | Pandas | Data manipulation |
 | Validation | Pydantic | Data validation |
@@ -254,10 +261,10 @@ SQLite saver рассчитан на один backend replica. Горизонт�
 ## Расширяемость
 
 ### Добавление новых функций
-1. **Новый тип отчёта**: Добавить метод в GameDataService
+1. **Новый инструмент**: добавить публичный метод с docstring и аннотациями в модуль из `dataset.tools_module`, затем проверить его командой `make validate-tools`
 2. **Новый endpoint**: Добавить в backend/main.py
 3. **Новая визуализация**: Добавить в frontend/main.py
-4. **Новый инструмент агента**: Добавить в LangGraph tool layer и сохранить доступ только через `GameDataService`
+4. **Другая база**: изменить `[database]` и `[dataset]` в конфигурации, код backend при этом не меняется
 
 ### Интеграция с другими системами
 - REST API позволяет интеграцию с любыми клиентами

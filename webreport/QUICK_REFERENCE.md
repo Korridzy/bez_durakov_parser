@@ -33,11 +33,14 @@ make start
 make help          # Справка
 make start         # Запуск всего стека
 make stop          # Остановка контейнеров
-make restart       # Перезапуск сервисов
+make restart       # Перезапуск сервисов после обеих проверок
+make validate-knowledge # Проверить папку знаний
+make validate-tools     # Проверить модуль инструментов оператора
 make logs          # Логи
 make build         # Сборка образов
 make rebuild       # Пересборка и запуск
-make test          # Тесты
+make test          # Тесты, включая обе приёмочные полосы
+make test-postgres # Приёмочная полоса против одноразового PostgreSQL
 make clean         # Очистка
 ```
 
@@ -134,12 +137,13 @@ agent_model = "opencode/big-pickle"
 
 Алиасы LiteLLM: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free`, `opencode/nemotron-3-ultra-free`.
 
-При запуске backend выполняет глубокий LiteLLM probe и один раз выбирает `agent` или keyless `fallback` mode. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
+При запуске backend выполняет глубокий LiteLLM probe. Без доступной модели процесс остаётся запущенным и отвечает 503, а каждая следующая попытка чата повторяет проверку один раз. LiteLLM доступен только внутри Compose-сети как `litellm:4000`. Backend хранит agent state в SQLite по пути `../vm/backend/checkpoints`; данные набора лежат в базе, указанной в `[database]`. Используйте один backend replica, горизонтальное масштабирование не поддерживается.
 
 ### Секции в `bd_shared/config.toml` и `config.local.toml`
 - `[database]` — настройки подключения к БД
 - `[application]` — общие флаги приложения
-- `[webreport]` — порты, CORS (`allowed_origins`), `openai_api_key` и debug-настройки WebReport
+- `[webreport]` — порты, CORS (`allowed_origins`), `openai_api_key`, пределы знаний и debug-настройки WebReport
+- `[dataset]` — `tools_module` и `knowledge_dir`
 - `[xlsm_fetch]` — URL источника, режимы загрузки, расписание и timezone
 
 Для `[xlsm_fetch].modes` используйте только `browser_selenium`.
@@ -154,18 +158,8 @@ GET  /api/history/{session_id}
 POST /api/clear/{session_id}
 ```
 
-### Данные
-```bash
-GET /api/games              # Все игры
-GET /api/games/{game_id}    # Конкретная игра
-GET /api/teams              # Все команды
-GET /api/teams/{name}/stats # Статистика команды
-GET /api/scores             # Очки
-```
-
 ### Система
 ```bash
-GET /                       # Информация
 GET /health                 # Здоровье
 ```
 
@@ -238,7 +232,7 @@ docker compose up -d --build
 - ✅ Порты 8000 и 8501 свободны
 - ✅ Python 3.11+
 - ✅ Зависимости установлены
-- ⚠️ OpenAI API key опционален (fallback режим)
+- ⚠️ Нужна доступная языковая модель: без неё backend отвечает 503
 
 ## 🆘 Помощь
 
