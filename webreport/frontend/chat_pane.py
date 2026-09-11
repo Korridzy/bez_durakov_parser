@@ -45,7 +45,7 @@ def render_chat_pane(clear_conversation: Callable[[], None]) -> None:
     selected_request_id = _selected_request_id()
     with st.container(height=520, key="chat-pane-scroll", border=False, autoscroll=True):
         if not st.session_state.chat_history:
-            st.info("История диалога пуста. Начните с запроса к данным игр.")
+            st.info("История диалога пуста. Начните с запроса к данным.")
         for message in st.session_state.chat_history:
             _render_message(message, selected_request_id)
 

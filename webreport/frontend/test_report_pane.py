@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import report_pane
@@ -43,8 +44,12 @@ class _Streamlit:
     def markdown(self, _body: str) -> None:
         return None
 
-    def columns(self, _count: object) -> tuple[_Container, _Container, _Container]:
-        return (_Container(), _Container(), _Container())
+    def columns(self, spec: int | Sequence[float]) -> tuple[_Container, ...]:
+        # The fake's arity follows the production call, so a change to the metric row
+        # surfaces here as an unpack error rather than passing silently. Streamlit accepts
+        # either a count or a list of relative widths, and the pane uses both.
+        count = spec if isinstance(spec, int) else len(spec)
+        return tuple(_Container() for _ in range(count))
 
     def button(self, _label: str, **_kwargs: object) -> bool:
         return False
