@@ -15,17 +15,24 @@ database_config = cast(dict[str, object], config["database"])
 webreport_config = cast(dict[str, object], config["webreport"])
 xlsm_fetch_config = cast(dict[str, object], config["xlsm_fetch"])
 docker_database_url = make_url(cast(str, database_config["docker_url"]))
-database_name = docker_database_url.database
-database_user = docker_database_url.username
-database_password = docker_database_url.password
 env_directory = Path(__file__).resolve().parent
 
-if not database_name:
-    raise ValueError("database.docker_url must include a database name")
-if not database_user:
-    raise ValueError("database.docker_url must include a username")
-if not database_password:
-    raise ValueError("database.docker_url must include a non-empty password")
+# The three credential checks belong to the bundled MySQL, which is the only service these
+# values reach. A SQLite or PostgreSQL URL carries no MySQL credentials, and raising for it
+# would cost the operator every make target, so the bundled service gets placeholders that
+# nothing connects to.
+if docker_database_url.get_backend_name() == "mysql":
+    database_name = docker_database_url.database
+    database_user = docker_database_url.username
+    database_password = docker_database_url.password
+    if not database_name:
+        raise ValueError("database.docker_url must include a database name")
+    if not database_user:
+        raise ValueError("database.docker_url must include a username")
+    if not database_password:
+        raise ValueError("database.docker_url must include a non-empty password")
+else:
+    database_name = database_user = database_password = "unused"
 
 
 def dotenv_quote(value: str) -> str:
