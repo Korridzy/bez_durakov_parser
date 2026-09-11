@@ -7,6 +7,7 @@ acceptance commands use.
 import importlib
 import inspect
 import threading
+import typing
 import unittest
 from datetime import date
 from unittest.mock import patch
@@ -36,16 +37,64 @@ class RegistryDispatchTests(RegistryCaseBase):
 
     def test_stub_mirrors_real_service(self):
         """Given the real GameDataService, When signatures are compared, Then the double matches."""
-        service_module = importlib.import_module("services.game_data_service")
+        service_module = importlib.import_module("bd_shared.tools.bez_durakov")
 
         for name in TOOL_NAMES:
             with self.subTest(tool=name):
-                real = inspect.signature(getattr(service_module.GameDataService, name))
-                stub = inspect.signature(getattr(StubService, name))
+                real_method = getattr(service_module.GameDataService, name)
+                stub_method = getattr(StubService, name)
+                real = inspect.signature(real_method)
+                stub = inspect.signature(stub_method)
                 self.assertEqual(
                     list(real.parameters)[1:],
                     list(stub.parameters)[1:],
                 )
+
+    def test_stub_carries_the_docstrings_and_hints_discovery_requires(self):
+        """Given discovery's rules, When the double is inspected, Then it satisfies them like the real class.
+
+        Discovery refuses a method without a docstring or with an unannotated parameter, so a
+        double that lost either would fail every registry family at construction rather than
+        at the assertion that cares.
+        """
+        service_module = importlib.import_module("bd_shared.tools.bez_durakov")
+
+        for name in TOOL_NAMES:
+            with self.subTest(tool=name):
+                real_method = getattr(service_module.GameDataService, name)
+                stub_method = getattr(StubService, name)
+
+                self.assertTrue(inspect.getdoc(real_method))
+                self.assertTrue(inspect.getdoc(stub_method))
+
+                real_hints = typing.get_type_hints(real_method)
+                stub_hints = typing.get_type_hints(stub_method)
+                real_hints.pop("return", None)
+                stub_hints.pop("return", None)
+                self.assertEqual(real_hints, stub_hints)
+
+    def test_names_follow_the_discovered_service_rather_than_a_fixed_list(self):
+        """Given a service with a different method set, When a registry is built, Then names follow it."""
+
+        class NarrowService:
+            """A service that shares no method name with the default one."""
+
+            def list_stations(self) -> dict:
+                """Return every station."""
+                return {}
+
+            def station_total(self, station: str) -> dict:
+                """Return the total for one station."""
+                return {"station": station}
+
+            def _helper(self) -> None:
+                """Underscored, so never a tool."""
+
+        registry = self.ToolRegistry(NarrowService())
+
+        self.assertEqual(registry.names, frozenset({"list_stations", "station_total"}))
+        self.assertEqual(registry.param_specs["station_total"], ("station",))
+        self.assertEqual(registry.param_specs["list_stations"], ())
 
     async def test_execute_raw_dispatches_identical_kwargs_for_all_eight(self):
         """Given each tool, When execute_raw runs, Then the service receives the same kwargs."""

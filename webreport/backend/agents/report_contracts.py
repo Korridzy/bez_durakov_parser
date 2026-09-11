@@ -1,26 +1,8 @@
-from collections.abc import Awaitable, Callable, Mapping
-from datetime import date
-from typing import Literal, NotRequired, Protocol, TypeAlias, TypedDict, runtime_checkable
+from collections.abc import Mapping
+from typing import NotRequired, Protocol, TypedDict, runtime_checkable
 
-from agent.graph import (
-    ConversationState,
-    JsonValue,
-    MessageView,
-    ModelClient,
-    RunConfig,
-    StateUpdate,
-    ToolCall,
-)
-from agent.tools import AgentToolConfig, ToolArgs
-
-Mode: TypeAlias = Literal["agent", "fallback"]
-
-
-class QueryPlan(TypedDict):
-    method: str
-    params: ToolArgs
-    description: str
-    year: NotRequired[int | None]
+from agent.graph import JsonValue, ModelClient, ToolCall
+from agent.tools import AgentToolConfig
 
 
 class QueryTrace(TypedDict):
@@ -34,26 +16,8 @@ class ReportResponse(TypedDict):
     data: object | None
     timestamp: str
     message: str
-    mode: Mode
     reasoning: str | None
     error: NotRequired[str]
-
-
-class GameDataServiceView(Protocol):
-    def get_all_games_summary(self) -> object: ...
-    def get_game_by_id(self, game_id: int) -> object: ...
-    def get_games_by_date_range(
-        self, start_date: date, end_date: date | None = None
-    ) -> object: ...
-    def get_team_game_scores(self, game_id: int | None = None) -> object: ...
-    def get_all_teams(self) -> object: ...
-    def get_team_statistics(self, team_name: str) -> object: ...
-    def get_team_wins(self, team_name: str, year: int | None = None) -> object: ...
-    def get_top_teams(self, limit: int = 10) -> object: ...
-
-
-class Interpreter(Protocol):
-    def interpret(self, user_message: str) -> QueryPlan: ...
 
 
 class ResponseRegistry(Protocol):
@@ -71,46 +35,6 @@ class StoredMessage(Protocol):
 @runtime_checkable
 class ToolCallingMessage(StoredMessage, Protocol):
     tool_calls: list[ToolCall]
-
-
-class MessageFactory(Protocol):
-    def __call__(self, *, content: str) -> MessageView: ...
-
-
-@runtime_checkable
-class MessageModule(Protocol):
-    AIMessage: MessageFactory
-    HumanMessage: MessageFactory
-
-
-class HistoryGraph(Protocol):
-    async def ainvoke(
-        self, input_state: ConversationState, config: RunConfig
-    ) -> ConversationState: ...
-
-
-HistoryNode: TypeAlias = Callable[[ConversationState], Awaitable[StateUpdate]]
-
-
-class StateGraphBuilder(Protocol):
-    def add_node(self, name: str, node: HistoryNode) -> None: ...
-    def set_entry_point(self, name: str) -> None: ...
-    def set_finish_point(self, name: str) -> None: ...
-    def compile(self, *, checkpointer: object) -> HistoryGraph: ...
-
-
-class StateGraphFactory(Protocol):
-    def __call__(self, state_schema: object) -> StateGraphBuilder: ...
-
-
-@runtime_checkable
-class LangGraphModule(Protocol):
-    StateGraph: StateGraphFactory
-
-
-@runtime_checkable
-class StateModule(Protocol):
-    GraphState: object
 
 
 class SaverFactory(Protocol):
@@ -146,15 +70,6 @@ class ConfigModule(AgentToolConfig, Protocol):
     AGENT_MODEL: str
     LLM_MAX_RETRIES: int
     LLM_REQUEST_TIMEOUT_SECONDS: int
-
-
-class InterpreterFactory(Protocol):
-    def __call__(self) -> Interpreter: ...
-
-
-@runtime_checkable
-class InterpreterModule(Protocol):
-    FallbackInterpreter: InterpreterFactory
 
 
 class RuntimeDependencyError(RuntimeError):

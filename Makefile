@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 PYTHON_VERSION ?= 3.11
 
-.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop validate-knowledge restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -19,6 +19,7 @@ help:
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
 	@echo "  make webreport-stop   - Stop WebReport stack"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
+	@echo "  make validate-tools   - Validate the configured operator tool module"
 	@echo "  make restart          - Recreate LiteLLM, backend, and frontend"
 	@echo "  make mysql-start     - Start only MySQL container"
 	@echo "  make mysql-stop      - Stop only MySQL container"
@@ -84,6 +85,7 @@ test:
 		"$$@" || status=$$?; \
 	}; \
 	run poetry run python test_alembic_migration.py; \
+	run poetry run python bd_shared/test_db_engine.py; \
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
 	run $(MAKE) -C webreport test; \
 	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py'; \
@@ -171,6 +173,9 @@ webreport-stop:
 
 validate-knowledge:
 	cd webreport && $(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.knowledge_cli
+
+validate-tools:
+	cd webreport && $(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.tools_cli
 
 restart:
 	$(MAKE) -C webreport restart

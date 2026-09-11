@@ -27,6 +27,19 @@ GAME_DOMAIN_FORBIDDEN_STRINGS: Final[tuple[str, ...]] = (
     "разоблачение",
     "аукцион",
     "момент истины",
+    # The eight former tool names, plus the two English words they were built from. Verified
+    # that neither scanned package contains "stream" or any other benign superstring of
+    # "team", so a plain substring assertion is safe.
+    "get_all_games_summary",
+    "get_all_teams",
+    "get_game_by_id",
+    "get_games_by_date_range",
+    "get_team_game_scores",
+    "get_team_statistics",
+    "get_team_wins",
+    "get_top_teams",
+    "game",
+    "team",
 )
 
 
@@ -1192,20 +1205,29 @@ class KnowledgeTypesTests(unittest.TestCase):
             for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS:
                 self.assertNotIn(forbidden_string.lower(), prompt_lower)
 
-    def test_agent_package_and_neutral_prompt_are_free_of_game_domain_strings(self):
-        agent_path = Path(__file__).parent / "agent"
+    def test_agent_packages_and_neutral_prompt_are_free_of_dataset_strings(self):
+        """Both agent packages learn their surface from the operator's module, so neither names one.
+
+        The scan deliberately stops at these two packages. acceptance_fixture.py sits in
+        webreport/backend/ rather than inside either, because it is a stand-in operator
+        module and must be free to name its own domain; a later reader should not widen this
+        to the whole backend directory.
+        """
+        backend_path = Path(__file__).parent
+        scanned_packages = (backend_path / "agent", backend_path / "agents")
         forbidden_strings = tuple(
             forbidden_string.lower() for forbidden_string in GAME_DOMAIN_FORBIDDEN_STRINGS
         )
 
-        for source_path in sorted(agent_path.rglob("*.py")):
-            source = source_path.read_text(encoding="utf-8").lower()
-            for forbidden_string in forbidden_strings:
-                with self.subTest(
-                    path=source_path.relative_to(agent_path),
-                    forbidden_string=forbidden_string,
-                ):
-                    self.assertNotIn(forbidden_string, source)
+        for package_path in scanned_packages:
+            for source_path in sorted(package_path.rglob("*.py")):
+                source = source_path.read_text(encoding="utf-8").lower()
+                for forbidden_string in forbidden_strings:
+                    with self.subTest(
+                        path=source_path.relative_to(backend_path),
+                        forbidden_string=forbidden_string,
+                    ):
+                        self.assertNotIn(forbidden_string, source)
 
         neutral_prompt = self.knowledge_module.compose_system_prompt(None).lower()
         for forbidden_string in forbidden_strings:
@@ -1262,7 +1284,7 @@ class KnowledgeTypesTests(unittest.TestCase):
                 "from agent.knowledge import KnowledgeError\n"
                 "async def probe():\n"
                 "    assert main.KNOWLEDGE_DIR is None\n"
-                "    with patch.object(main, 'initialize_data_service_with_retry', "
+                "    with patch.object(main, 'initialize_tool_service_with_retry', "
                 "new=AsyncMock()) as db:\n"
                 "        try:\n"
                 "            await main.startup_event()\n"

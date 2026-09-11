@@ -9,15 +9,21 @@ import asyncio
 import importlib
 import logging
 import uuid
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import Engine, text
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError, NoSuchModuleError
 
 from bd_shared.config import (
     AGENT_MODEL,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
     DATABASE_NAME,
+    DATABASE_URL,
+    DATASET_CONFIG_ERROR,
+    DATASET_TOOLS_MODULE,
     KNOWLEDGE_DIR,
     KNOWLEDGE_MAX_BYTES_PER_TURN,
     KNOWLEDGE_MAX_DOC_BYTES,
@@ -41,9 +47,10 @@ from agent.knowledge import (
     load_knowledge,
     validate_limits,
 )
+from agent.engine import build_read_only_engine
 from agent.reasoning import extract_reasoning, extract_text
-from agents.report_agents import ReportAgentSystem
-from services.game_data_service import GameDataService
+from agent.toolmodule import ToolSpec, load_tool_module
+from agents.report_runtime import ReportAgentSystem
 from session_store import MAX_SESSIONS, SessionIndex
 
 aiosqlite = importlib.import_module("aiosqlite")
@@ -66,7 +73,6 @@ class ChatResponse(BaseModel):
     """Chat response model."""
     success: bool
     session_id: str
-    mode: str
     data: Optional[Any] = None
     query_info: list[Dict[str, Any]]
     message: str
@@ -97,8 +103,8 @@ class HealthResponse(TypedDict):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Game Data Report API",
-    description="REST API for generating game data reports using AI agents",
+    title="Data Report API",
+    description="REST API for generating reports over the configured dataset using AI agents",
     version="1.0.0"
 )
 
@@ -115,7 +121,8 @@ app.add_middleware(
 agent_system: Optional[ReportAgentSystem] = None
 checkpoint_connection = None
 checkpoint_saver = None
-data_service: Optional[GameDataService] = None
+tool_engine: Engine | None = None
+tool_service: object | None = None
 knowledge: Knowledge | None = None
 llm_proxy_healthy: bool = False
 sessions: SessionIndex = SessionIndex(
@@ -129,6 +136,11 @@ STARTUP_RETRY_ATTEMPTS = 5
 STARTUP_RETRY_DELAY_SECONDS = 2
 PERMANENT_PROBE_STATUSES = frozenset({400, 401, 403, 404})
 probe_sleep = asyncio.sleep
+# The startup retry loop gets its own seam for the same reason the probe has one: a test that
+# drives the five attempts should not have to monkeypatch the stdlib.
+startup_sleep = asyncio.sleep
+probe_lock = asyncio.Lock()
+MODEL_UNAVAILABLE_MESSAGE = "Для ответа нужна доступная языковая модель."
 
 
 def _internal_error(e: Exception) -> HTTPException:
@@ -137,27 +149,75 @@ def _internal_error(e: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=detail)
 
 
-async def initialize_data_service_with_retry() -> GameDataService:
-    last_error: Exception | None = None
+def _log_unreachable(url: URL | None, *, attempts: int, reason: str) -> None:
+    """One line, naming the connection target and nothing that could be a credential.
 
+    `url` is None when the URL itself would not parse, which is the one case where there is
+    no target to name.
+    """
+    logger.error(
+        "Database is unreachable after %d attempts: dialect=%s host=%s port=%s database=%s reason=%s",
+        attempts,
+        url.get_backend_name() if url is not None else "unparsed",
+        (url.host if url is not None else None) or "none",
+        (url.port if url is not None else None) or "none",
+        (url.database if url is not None else None) or "none",
+        reason,
+    )
+
+
+async def initialize_tool_service_with_retry() -> tuple[Engine, object, tuple[ToolSpec, ...]]:
+    """Build the one engine, prove it reachable, then hand it to the operator's factory.
+
+    The engine is built once before the loop, because create_engine never connects and a
+    rebuilt engine would discard the pool on every attempt.
+    """
+    # make_url is inside the try because a malformed URL raises from make_url itself, and
+    # that is exactly the misconfiguration an operator swapping databases hits first; leaving
+    # it outside would give them a raw traceback instead of the one promised line.
+    url: URL | None = None
+    try:
+        url = make_url(DATABASE_URL)
+        engine = build_read_only_engine(DATABASE_URL)
+    except (ArgumentError, NoSuchModuleError, ValueError) as exc:
+        _log_unreachable(url, attempts=0, reason=str(exc))
+        raise
+
+    last_error: Exception | None = None
     for attempt in range(1, STARTUP_RETRY_ATTEMPTS + 1):
         try:
-            return GameDataService()
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            break
         except Exception as exc:
             last_error = exc
             logger.warning(
-                "Database initialization attempt %d/%d failed: %s",
+                "Database connection attempt %d/%d failed: %s",
                 attempt,
                 STARTUP_RETRY_ATTEMPTS,
                 exc,
             )
             if attempt < STARTUP_RETRY_ATTEMPTS:
-                await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
+                await startup_sleep(STARTUP_RETRY_DELAY_SECONDS)
+    else:
+        _log_unreachable(url, attempts=STARTUP_RETRY_ATTEMPTS, reason=str(last_error))
+        raise last_error if last_error is not None else RuntimeError(
+            "Database connection failed without an exception"
+        )
 
-    if last_error is None:
-        raise RuntimeError("Database initialization failed without an exception")
+    try:
+        service, specs = load_tool_module(DATASET_TOOLS_MODULE, engine)
+    except Exception:
+        # The connection check above already checked a connection out of the pool, and the
+        # caller only learns about the engine through the return value it never receives, so
+        # this is the only place that can hand it back.
+        engine.dispose()
+        raise
 
-    raise last_error
+    logger.info(
+        "Tool module loaded: %s (%d tools)", DATASET_TOOLS_MODULE, len(specs)
+    )
+    return engine, service, specs
 
 
 ProbeVerdict = Literal["healthy", "permanent", "transient"]
@@ -201,6 +261,28 @@ def _classify_probe_response(status_code: Optional[int], body: Any) -> ProbeVerd
     return "transient"
 
 
+async def probe_once() -> tuple[ProbeVerdict, Optional[int], Any]:
+    """One probe request with the configured timeout and no retries."""
+    status_code = None
+    body = None
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{LITELLM_BASE_URL}/health",
+            params={"model": AGENT_MODEL},
+            timeout=PROBE_REQUEST_TIMEOUT_SECONDS,
+        )
+        status_code = response.status_code
+        if status_code not in PERMANENT_PROBE_STATUSES:
+            try:
+                body = response.json()
+            except (requests.RequestException, ValueError):
+                body = None
+        return _classify_probe_response(status_code, body), status_code, body
+    except requests.RequestException:
+        return "transient", status_code, body
+
+
 async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
     status_code = None
     body = None
@@ -208,24 +290,7 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
     proxy_is_healthy = False
 
     for attempt in range(1, PROBE_RETRY_ATTEMPTS + 1):
-        status_code = None
-        body = None
-        try:
-            response = await asyncio.to_thread(
-                requests.get,
-                f"{LITELLM_BASE_URL}/health",
-                params={"model": AGENT_MODEL},
-                timeout=PROBE_REQUEST_TIMEOUT_SECONDS,
-            )
-            status_code = response.status_code
-            if status_code not in PERMANENT_PROBE_STATUSES:
-                try:
-                    body = response.json()
-                except (requests.RequestException, ValueError):
-                    body = None
-            verdict = _classify_probe_response(status_code, body)
-        except requests.RequestException:
-            verdict = "transient"
+        verdict, status_code, body = await probe_once()
 
         match verdict:
             case "healthy":
@@ -248,6 +313,15 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
         _probe_exception_status(body),
     )
     return proxy_is_healthy
+
+
+def _build_agent_system(saver: object) -> ReportAgentSystem:
+    """Build the agent over the discovered tools. Called at startup and on recovery."""
+    return ReportAgentSystem(
+        service=tool_service,
+        checkpointer=saver,
+        knowledge=knowledge,
+    )
 
 
 async def rebuild_session_index() -> None:
@@ -279,7 +353,11 @@ async def rebuild_session_index() -> None:
 async def startup_event():
     """Initialize services on startup."""
     global agent_system, checkpoint_connection, checkpoint_saver
-    global data_service, knowledge, llm_proxy_healthy
+    global tool_engine, tool_service, knowledge, llm_proxy_healthy
+
+    if DATASET_CONFIG_ERROR is not None:
+        logger.error("%s", DATASET_CONFIG_ERROR)
+        raise RuntimeError(DATASET_CONFIG_ERROR)
 
     try:
         knowledge_limits = KnowledgeLimits(
@@ -293,7 +371,7 @@ async def startup_event():
         validate_limits(knowledge_limits)
         if KNOWLEDGE_DIR is None:
             logger.warning(
-                "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge."
+                "Knowledge folder is not configured (dataset.knowledge_dir is unset); the agent runs without dataset knowledge."
             )
             knowledge = None
         elif not KNOWLEDGE_DIR.exists():
@@ -317,7 +395,9 @@ async def startup_event():
         logger.error("Knowledge folder is invalid: %s", error)
         raise
 
-    data_service = await initialize_data_service_with_retry()
+    # The discovered specs are logged by the helper and re-derived by ToolRegistry from the
+    # same service object, so startup keeps only the engine it must dispose and the service.
+    tool_engine, tool_service, _ = await initialize_tool_service_with_retry()
 
     connection = await aiosqlite.connect(CHECKPOINT_DB_PATH)
     saver = AsyncSqliteSaver(connection)
@@ -329,17 +409,12 @@ async def startup_event():
         checkpoint_saver = saver
 
         llm_proxy_healthy = await probe_llm_proxy(sleep=probe_sleep)
-        mode = "agent" if llm_proxy_healthy else "fallback"
-        logger.warning("LLM mode elected: %s", mode)
 
         await rebuild_session_index()
 
-        agent_system = ReportAgentSystem(
-            service=data_service,
-            checkpointer=saver,
-            mode=mode,
-            knowledge=knowledge,
-        )
+        # An unreachable model refuses to serve rather than refusing to run: the process
+        # stays up, /health and /api/chat answer 503, and the next chat attempt re-probes.
+        agent_system = _build_agent_system(saver) if llm_proxy_healthy else None
         startup_complete = True
     finally:
         if not startup_complete:
@@ -352,64 +427,102 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    global checkpoint_connection, checkpoint_saver
+    global checkpoint_connection, checkpoint_saver, tool_engine
 
     if checkpoint_connection is not None:
         await checkpoint_connection.close()
     checkpoint_connection = None
     checkpoint_saver = None
 
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "name": "Game Data Report API",
-        "version": "1.0.0",
-        "status": "running",
-        "endpoints": {
-            "health": "/health",
-            "chat": "/api/chat",
-            "history": "/api/history/{session_id}",
-            "clear": "/api/clear/{session_id}",
-            "games": "/api/games",
-            "teams": "/api/teams"
-        }
-    }
+    # The backend owns exactly one engine, so it is also the one that returns its pooled
+    # connections to the driver instead of leaving them for the garbage collector.
+    if tool_engine is not None:
+        tool_engine.dispose()
+    tool_engine = None
 
 
 @app.get("/health", response_model=None)
-async def health_check() -> HealthResponse:
+async def health_check(response: Response) -> HealthResponse:
     """Health check endpoint."""
-    if data_service is None:
-        raise HTTPException(status_code=503, detail="Data service not available")
+    if tool_service is None:
+        raise HTTPException(status_code=503, detail="Tool service not available")
+
+    if not llm_proxy_healthy:
+        response.status_code = 503
 
     return {
-        "status": "healthy",
+        "status": "healthy" if llm_proxy_healthy else "degraded",
         "timestamp": datetime.now().isoformat(),
         "services": {
-            "database": data_service is not None,
+            "database": tool_service is not None,
             "agents": agent_system is not None,
             "llm_proxy": llm_proxy_healthy,
         }
     }
 
 
+async def _recover_agent_system() -> Optional[ReportAgentSystem]:
+    """Run the probe once and build the agent on a healthy verdict.
+
+    Serialised under probe_lock so two concurrent requests cannot build twice, and
+    re-checked inside the lock so the loser of the race reuses what the winner built.
+    """
+    global agent_system, llm_proxy_healthy
+
+    saver = checkpoint_saver
+    if saver is None:
+        return None
+
+    async with probe_lock:
+        if agent_system is not None:
+            return agent_system
+
+        verdict, status_code, body = await probe_once()
+        llm_proxy_healthy = verdict == "healthy"
+        if not llm_proxy_healthy:
+            logger.warning(
+                "LiteLLM re-probe classified verdict=%s status=%s exception_status=%s",
+                verdict,
+                status_code,
+                _probe_exception_status(body),
+            )
+            return None
+
+        agent_system = _build_agent_system(saver)
+        return agent_system
+
+
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(message: ChatMessage):
+async def chat(message: ChatMessage, response: Response):
     """
     Process user message and generate report.
 
     Args:
         message: User's chat message with requirements
+        response: Injected so a refusal can carry a status code and still return the envelope
 
     Returns:
         Chat response with report data
     """
+    if tool_service is None:
+        raise HTTPException(status_code=503, detail="Tool service not available")
+
     system = agent_system
+    if system is None:
+        system = await _recover_agent_system()
+
     saver = checkpoint_saver
     if system is None or saver is None:
-        raise HTTPException(status_code=503, detail="Agent system not available")
+        response.status_code = 503
+        return ChatResponse(
+            success=False,
+            session_id=message.session_id or uuid.uuid4().hex,
+            data=None,
+            query_info=[],
+            message=MODEL_UNAVAILABLE_MESSAGE,
+            timestamp=datetime.now().isoformat(),
+            error="llm_proxy_unavailable",
+        )
 
     session_id = message.session_id or uuid.uuid4().hex
     pinned_added = False
@@ -443,7 +556,6 @@ async def chat(message: ChatMessage):
         return ChatResponse(
             success=result["success"],
             session_id=session_id,
-            mode=result["mode"],
             data=result.get("data"),
             query_info=result["query_info"],
             message=result["message"],
@@ -570,132 +682,3 @@ async def clear_history(session_id: str):
         "success": True,
         "message": f"History cleared for session {session_id}"
     }
-
-
-@app.get("/api/games")
-async def get_games(limit: Optional[int] = None):
-    """
-    Get all games summary.
-
-    Args:
-        limit: Optional limit on number of results
-
-    Returns:
-        Games summary
-    """
-    if not data_service:
-        raise HTTPException(status_code=503, detail="Data service not available")
-
-    try:
-        df = data_service.get_all_games_summary()
-        if limit:
-            df = df.head(limit)
-        return {
-            "success": True,
-            "data": df.to_dict(orient='records'),
-            "count": len(df)
-        }
-    except Exception as e:
-        raise _internal_error(e)
-
-
-@app.get("/api/games/{game_id}")
-async def get_game(game_id: int):
-    """
-    Get specific game data.
-
-    Args:
-        game_id: Game ID
-
-    Returns:
-        Game data
-    """
-    if not data_service:
-        raise HTTPException(status_code=503, detail="Data service not available")
-
-    try:
-        data = data_service.get_game_by_id(game_id)
-        if not data:
-            raise HTTPException(status_code=404, detail=f"Game {game_id} not found")
-
-        return {
-            "success": True,
-            "data": data
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise _internal_error(e)
-
-
-@app.get("/api/teams")
-async def get_teams():
-    """
-    Get all teams.
-
-    Returns:
-        All teams
-    """
-    if not data_service:
-        raise HTTPException(status_code=503, detail="Data service not available")
-
-    try:
-        df = data_service.get_all_teams()
-        return {
-            "success": True,
-            "data": df.to_dict(orient='records'),
-            "count": len(df)
-        }
-    except Exception as e:
-        raise _internal_error(e)
-
-
-@app.get("/api/teams/{team_name}/stats")
-async def get_team_stats(team_name: str):
-    """
-    Get statistics for a specific team.
-
-    Args:
-        team_name: Team name
-
-    Returns:
-        Team statistics
-    """
-    if not data_service:
-        raise HTTPException(status_code=503, detail="Data service not available")
-
-    try:
-        stats = data_service.get_team_statistics(team_name)
-        return {
-            "success": True,
-            "data": stats
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise _internal_error(e)
-
-
-@app.get("/api/scores")
-async def get_scores(game_id: Optional[int] = None):
-    """
-    Get team game scores.
-
-    Args:
-        game_id: Optional game ID filter
-
-    Returns:
-        Team scores
-    """
-    if not data_service:
-        raise HTTPException(status_code=503, detail="Data service not available")
-
-    try:
-        df = data_service.get_team_game_scores(game_id)
-        return {
-            "success": True,
-            "data": df.to_dict(orient='records'),
-            "count": len(df)
-        }
-    except Exception as e:
-        raise _internal_error(e)

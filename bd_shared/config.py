@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TypeAlias
 from sqlalchemy.engine import make_url
 
@@ -48,7 +48,25 @@ DEFAULT_GAME_DATE = datetime.strptime(DEFAULT_GAME_DATE_STR, "%d.%m.%Y").date()
 
 _bd_docker = os.environ.get('BD_DOCKER', '').lower() in ('1', 'true', 'yes')
 DATABASE_URL = config["database"]["docker_url"] if _bd_docker else config["database"]["url"]
-DATABASE_NAME = make_url(DATABASE_URL).database
+
+
+def _derive_database_name(url_string: str) -> str:
+    """Derive the dataset name from a database URL without opening a connection.
+
+    Server URLs yield the URL database, file-based URLs yield the file stem, and a URL
+    with no usable database part is rejected.
+    """
+    url = make_url(url_string)
+    database = url.database
+    if not database or database == ":memory:":
+        raise ValueError(
+            f"database URL of scheme '{url.drivername}' has no database part; "
+            "in-memory SQLite is not supported"
+        )
+    return PurePosixPath(database).stem if url.host is None else database
+
+
+DATABASE_NAME = _derive_database_name(DATABASE_URL)
 
 # Function for getting the configuration (optional)
 def get_config():
@@ -97,7 +115,34 @@ KNOWLEDGE_MAX_PERSONA_CHARS = config["webreport"].get("knowledge_max_persona_cha
 KNOWLEDGE_MAX_TOPICS = config["webreport"].get("knowledge_max_topics", 50)
 KNOWLEDGE_MAX_DOC_BYTES = config["webreport"].get("knowledge_max_doc_bytes", 65536)
 KNOWLEDGE_MAX_BYTES_PER_TURN = config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
-_knowledge_dir_value = config["webreport"].get("knowledge_dir") or None
+
+
+def _dataset_config_error(webreport_section: dict, dataset_section: dict) -> str | None:
+    """Report a [dataset] misconfiguration as a message instead of raising.
+
+    The env generator, the network guard and the alembic test all import this module, so a
+    missing key must not stop the import. The two call sites that need the dataset, backend
+    startup and the tools preflight, raise on a non-None value.
+    """
+    if not (dataset_section.get("tools_module") or ""):
+        return (
+            "dataset.tools_module is not configured; add a [dataset] section with "
+            "tools_module (knowledge_dir moved there from [webreport])"
+        )
+    if "knowledge_dir" in webreport_section:
+        return (
+            "webreport.knowledge_dir has moved to dataset.knowledge_dir; "
+            "remove it from [webreport]"
+        )
+    return None
+
+
+# Operator dataset configuration
+_dataset = config.get("dataset", {})
+DATASET_TOOLS_MODULE: str = str(_dataset.get("tools_module") or "")
+DATASET_CONFIG_ERROR: str | None = _dataset_config_error(config["webreport"], _dataset)
+
+_knowledge_dir_value = _dataset.get("knowledge_dir") or None
 if _knowledge_dir_value is None:
     _knowledge_dir_path = None
 else:

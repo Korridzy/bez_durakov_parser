@@ -1,7 +1,6 @@
 import unicodedata
 from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, ForeignKey, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, selectinload
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, selectinload
 import datetime
 import logging
 from .config import LOG_LEVEL, SQLALCHEMY_LOGGING
@@ -255,12 +254,13 @@ class TeamGameScore(Base):
     total_points = Column(Numeric)    # Sum of all category points
 
 class Database:
-    def __init__(self, db_url=None):
-        # If no db_url is provided, use url from config
-        if db_url is None:
-            db_url = DATABASE_URL
+    def __init__(self, db_url=None, engine=None):
+        # An injected engine wins, so a caller that already owns one (the webreport backend
+        # owns exactly one, built read only) binds it instead of building a second.
+        if engine is None:
+            engine = create_engine(db_url if db_url is not None else DATABASE_URL)
 
-        self.engine = create_engine(db_url)
+        self.engine = engine
         self.Session = sessionmaker(bind=self.engine)
 
     def get_or_create_team(self, session, team_name):

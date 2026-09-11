@@ -1,20 +1,21 @@
 [database]
-# Fixed test database - no dynamic updates needed
-url = "mysql+pymysql://root:devpass@localhost:3306/bez_durakov_test"
-docker_url = "mysql+pymysql://root:devpass@mysql:3306/bez_durakov_test"
-sqlalchemy_logging = true
+# Acceptance lane on a throwaway SQLite file. The backend opens it read only; the
+# acceptance test seeds it through a separate writable engine.
+url = "sqlite:////tmp/bd-acceptance/fixture.db"
+docker_url = "sqlite:////tmp/bd-acceptance/fixture.db"
+sqlalchemy_logging = false
 
 [application]
 debug = true
-log_level = "DEBUG"
+log_level = "INFO"
 default_game_date = "02.03.2022"
 
 [webreport]
 backend_port = 28000
 frontend_port = 28501
 allowed_origins = ["http://localhost:28501", "http://127.0.0.1:28501"]
-debug = true
-reload = true
+debug = false
+reload = false
 backend_debug_port = 5678
 frontend_debug_port = 5679
 agent_recursion_limit = 8
@@ -23,17 +24,18 @@ chat_request_timeout_seconds = 150
 agent_max_rows_per_fetch = 256
 agent_max_rows_per_run = 1024
 checkpoint_ttl_seconds = 3600
-checkpoint_db_path = "/data/checkpoints.db"
+checkpoint_db_path = "/tmp/test-checkpoints.db"
 litellm_base_url = "http://litellm:4000"
 agent_model = "gpt-4o"
-probe_retry_attempts = 4
+probe_retry_attempts = 1
 probe_retry_delay_seconds = 1
-probe_request_timeout_seconds = 9
-llm_max_retries = 1
-llm_request_timeout_seconds = 59
+probe_request_timeout_seconds = 5
+llm_max_retries = 0
+llm_request_timeout_seconds = 60
 
 [dataset]
-tools_module = "bd_shared.tools.bez_durakov"
+tools_module = "acceptance_fixture"
+knowledge_dir = "/app/acceptance_knowledge"
 
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"

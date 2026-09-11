@@ -47,20 +47,24 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         cls.messages = importlib.import_module("langchain_core.messages")
         cls.knowledge = importlib.import_module("agent.knowledge")
         cls.pd = importlib.import_module("pandas")
-        cls.report_module = importlib.import_module("agents.report_agents")
+        cls.report_module = importlib.import_module("agents.report_runtime")
         cls.runtime_module = importlib.import_module("agents.report_runtime")
         cls.support = importlib.import_module("test_agent_support")
 
-    def make_system(self, saver, *, mode="fallback", model=None, timeout: float = 60):
+    def make_system(self, saver, *, model=None, timeout: float = 60):
+        """Build a system over a stub service. A None model builds the real LiteLLM client."""
         service = self.support.StubService()
         system = self.report_module.ReportAgentSystem(
             service=service,
             model_client=model,
             checkpointer=saver,
-            mode=mode,
             timeout_seconds=timeout,
         )
         return system, service
+
+    def answering_model(self, answer="Готово."):
+        """A model that answers immediately, for cases that only need a completed turn."""
+        return ScriptedModel([self.messages.AIMessage(content=answer)])
 
     def load_fixture_knowledge(self):
         return self.knowledge.load_knowledge(
@@ -76,7 +80,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-    async def test_agent_mode_threads_knowledge_into_tools_graph_and_prompt(self):
+    async def test_knowledge_is_threaded_into_tools_graph_and_prompt(self):
         knowledge = self.load_fixture_knowledge()
         model = ScriptedModel([self.messages.AIMessage(content="Правила загружены.")])
         service = self.support.StubService()
@@ -90,7 +94,6 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
                 service=service,
                 model_client=model,
                 checkpointer=self.memory.InMemorySaver(),
-                mode="agent",
                 knowledge=knowledge,
             )
             response = await system.process_user_request("Объясни правила", "knowledge-agent")
@@ -110,16 +113,15 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         )
         prompt_composer.assert_called_once_with(knowledge)
         self.assertEqual(response["message"], "Правила загружены.")
-        self.assertEqual(response["mode"], "agent")
+        self.assertNotIn("mode", response)
 
-    def test_agent_mode_with_explicit_none_keeps_current_ten_tools(self):
+    def test_explicit_none_knowledge_keeps_the_ten_tool_catalogue(self):
         model = ScriptedModel([])
 
         self.report_module.ReportAgentSystem(
             service=self.support.StubService(),
             model_client=model,
             checkpointer=self.memory.InMemorySaver(),
-            mode="agent",
             knowledge=None,
         )
 
@@ -128,94 +130,11 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             [*self.support.TOOL_NAMES, "read_rows", "mark_report"],
         )
 
-    async def test_fallback_accepts_knowledge_without_using_agent_construction(self):
-        knowledge = self.load_fixture_knowledge()
-        service = self.support.StubService()
-        service.results["get_all_games_summary"] = [{"game_id": 1}]
-
-        with (
-            patch.object(self.runtime_module, "build_tools") as tools_builder,
-            patch.object(self.runtime_module, "build_graph") as graph_builder,
-            patch.object(self.runtime_module, "compose_system_prompt") as prompt_composer,
-        ):
-            system = self.report_module.ReportAgentSystem(
-                service=service,
-                checkpointer=self.memory.InMemorySaver(),
-                mode="fallback",
-                knowledge=knowledge,
-            )
-            response = await system.process_user_request(
-                "покажи все игры",
-                "knowledge-fallback",
-            )
-
-        self.assertIsInstance(system._execution, self.runtime_module.FallbackExecution)
-        tools_builder.assert_not_called()
-        graph_builder.assert_not_called()
-        prompt_composer.assert_not_called()
-        self.assertEqual(
-            {key: value for key, value in response.items() if key != "timestamp"},
-            {
-                "success": True,
-                "query_info": [{"tool": "get_all_games_summary", "args": {}}],
-                "data": [{"game_id": 1}],
-                "message": "Report generated (fallback mode): покажи все игры",
-                "mode": "fallback",
-                "reasoning": None,
-            },
-        )
-
-    async def test_fallback_preserves_frozen_routes_and_response_shapes(self):
-        cases = (
-            ("покажи все игры", "get_all_games_summary", {}, [{"game_id": 1}]),
-            ("топ 10 команд", "get_top_teams", {"limit": 10}, [{"team": "А"}]),
-            (
-                "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды",
-                "get_team_wins",
-                {"team_name": "Однажды было дважды", "year": 2025},
-                {"wins": [7]},
-            ),
-            (
-                "статистика команды Однажды было дважды",
-                "get_team_statistics",
-                {"team_name": "Однажды было дважды"},
-                {"games": 4},
-            ),
-            ("очки всех команд", "get_team_game_scores", {}, [{"score": 42}]),
-        )
-        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            system, service = self.make_system(saver)
-            service.results.update(
-                {
-                    "get_all_games_summary": self.pd.DataFrame([{"game_id": 1}]),
-                    "get_top_teams": self.pd.DataFrame([{"team": "А"}]),
-                    "get_team_wins": {"wins": [7]},
-                    "get_team_statistics": {"games": 4},
-                    "get_team_game_scores": self.pd.DataFrame([{"score": 42}]),
-                }
-            )
-            for index, (prompt, name, args, data) in enumerate(cases):
-                with self.subTest(prompt=prompt):
-                    response = await system.process_user_request(prompt, f"fallback-{index}")
-                    self.assertEqual(response["query_info"][0], {"tool": name, "args": args})
-                    self.assertEqual(response["data"], data)
-                    self.assertEqual(response["mode"], "fallback")
-
-    async def test_fallback_never_builds_the_agent_graph(self):
-        with patch.object(self.runtime_module, "build_graph") as graph_builder:
-            system, _ = self.make_system(self.memory.InMemorySaver())
-        await system.process_user_request("покажи все игры", "fixed-fallback")
-        graph_builder.assert_not_called()
-
-    async def test_report_agent_system_is_exported_from_typed_runtime(self):
-        runtime_module = importlib.import_module("agents.report_runtime")
-
-        self.assertIs(self.report_module.ReportAgentSystem, runtime_module.ReportAgentSystem)
-
     def test_import_orders_are_safe_in_independent_processes(self):
         import_orders = (
-            "import agents.report_agents; import agents.report_runtime",
-            "import agents.report_runtime; from agents.report_agents import ReportAgentSystem",
+            "import agents.report_runtime",
+            "from agents.report_runtime import ReportAgentSystem",
+            "import agents.report_contracts; import agents.report_runtime",
         )
         child_environment = os.environ.copy()
         child_environment["PYTHONPATH"] = "/"
@@ -230,17 +149,6 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
                     env=child_environment,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
-
-    async def test_score_route_discrepancy_remains_explicit(self):
-        interpreter = self.report_module.FallbackInterpreter()
-
-        raw = interpreter._interpret_request("очки всех команд")
-        public = interpreter.interpret("очки всех команд")
-
-        self.assertEqual(raw["method"], "get_team_statistics")
-        self.assertEqual(raw["params"], {"team_name": "команд"})
-        self.assertEqual(public["method"], "get_team_game_scores")
-        self.assertEqual(public["params"], {})
 
     async def test_default_agent_client_targets_litellm_without_real_key(self):
         client = FailingModel()
@@ -257,7 +165,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(self.runtime_module, "build_graph") as graph_builder,
         ):
-            self.make_system(self.memory.InMemorySaver(), mode="agent")
+            self.make_system(self.memory.InMemorySaver())
         chat_litellm.assert_called_once_with(
             model="litellm_proxy/gpt-4o",
             api_base="http://litellm:4000",
@@ -270,9 +178,9 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(graph_builder.call_args.args[0].client, client)
 
-    async def test_fallback_turn_is_checkpointed_as_human_assistant_pair(self):
+    async def test_a_turn_is_checkpointed_as_a_human_assistant_pair(self):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            system, service = self.make_system(saver)
+            system, service = self.make_system(saver, model=self.answering_model())
             service.results["get_all_games_summary"] = []
             await system.process_user_request("покажи все игры", "history-thread")
             checkpoint = await saver.aget({"configurable": {"thread_id": "history-thread"}})
@@ -289,7 +197,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            system, service = self.make_system(saver, mode="agent", model=model)
+            system, service = self.make_system(saver, model=model)
             service.results["get_all_teams"] = self.pd.DataFrame([{"team_name": "А"}])
             response = await system.process_user_request("Покажи команды", "marked-thread")
         self.assertTrue(response["success"])
@@ -310,7 +218,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            system, service = self.make_system(saver, mode="agent", model=model)
+            system, service = self.make_system(saver, model=model)
             service.results.update({"get_all_teams": [], "get_top_teams": []})
             response = await system.process_user_request("Сравни команды", "trace-thread")
         self.assertEqual(
@@ -320,27 +228,25 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["message"], "Сравнение готово.")
         self.assertIsNone(response["data"])
 
-    async def test_timeout_cancels_agent_run_without_fallback(self):
+    async def test_timeout_cancels_the_agent_run_and_returns_a_controlled_failure(self):
         model = SlowModel()
         system, service = self.make_system(
-            self.memory.InMemorySaver(), mode="agent", model=model, timeout=0.05
+            self.memory.InMemorySaver(), model=model, timeout=0.05
         )
         response = await system.process_user_request("покажи все игры", "timeout-thread")
         self.assertFalse(response["success"])
         self.assertTrue(model.cancelled)
-        self.assertEqual(response["mode"], "agent")
         self.assertEqual(response["query_info"], [])
         self.assertEqual(service.calls, [])
         self.assertRegex(response["message"], "[А-Яа-я]")
 
     async def test_model_error_is_controlled_without_regex_data(self):
         system, service = self.make_system(
-            self.memory.InMemorySaver(), mode="agent", model=FailingModel()
+            self.memory.InMemorySaver(), model=FailingModel()
         )
-        service.results["get_all_games_summary"] = [{"fallback": True}]
+        service.results["get_all_games_summary"] = [{"unused": True}]
         response = await system.process_user_request("покажи все игры", "error-thread")
         self.assertFalse(response["success"])
-        self.assertEqual(response["mode"], "agent")
         self.assertEqual(response["query_info"], [])
         self.assertIsNone(response["data"])
         self.assertEqual(service.calls, [])
@@ -353,12 +259,11 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             )
 
         model = ScriptedModel([], repeat_factory=repeat)
-        system, service = self.make_system(self.memory.InMemorySaver(), mode="agent", model=model)
+        system, service = self.make_system(self.memory.InMemorySaver(), model=model)
         service.results["get_all_teams"] = []
         response = await system.process_user_request("Не останавливайся", "recursion-thread")
         self.assertFalse(response["success"])
         self.assertEqual(response["query_info"], [])
-        self.assertEqual(response["mode"], "agent")
         self.assertRegex(response["message"], "[А-Яа-я]")
 
     async def test_each_agent_turn_resets_transient_graph_state(self):
@@ -373,7 +278,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            system, service = self.make_system(saver, mode="agent", model=model)
+            system, service = self.make_system(saver, model=model)
             service.results["get_team_game_scores"] = self.pd.DataFrame([{"score": 7}])
             await system.process_user_request("Первый", "two-turn-thread")
             second = await system.process_user_request("Второй", "two-turn-thread")

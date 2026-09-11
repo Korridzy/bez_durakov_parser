@@ -1,14 +1,17 @@
 """
-Database service layer for accessing game data.
-Uses existing db.py and db_helpers.py methods.
+The bez_durakov operator tool module, shipped as the repository's default.
+
+Every public method of the object build_service returns becomes an agent tool, named after
+the method, described by its docstring and parameterised by its type hints. The engine is
+injected by the backend, which owns the only one and has already made it read only.
 """
 import logging
 from typing import List, Dict, Optional, Any
 from datetime import date
 import pandas as pd
+from sqlalchemy import Engine
 
-from bd_shared.db import normalize_team_name
-from bd_shared.db_helpers import initialize_database
+from bd_shared.db import Database, normalize_team_name
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +19,9 @@ logger = logging.getLogger(__name__)
 class GameDataService:
     """Service for retrieving and processing game data."""
 
-    def __init__(self):
-        """Initialize database connection."""
-        self.db = initialize_database()
-        if not self.db:
-            raise RuntimeError("Failed to initialize database")
+    def __init__(self, engine: Engine):
+        """Bind the injected engine. No connection is opened here."""
+        self.db = Database(engine=engine)
 
     def get_all_games_summary(self) -> pd.DataFrame:
         """
@@ -58,7 +59,7 @@ class GameDataService:
 
     def get_games_by_date_range(self, start_date: date, end_date: Optional[date] = None) -> List[int]:
         """
-        Get game IDs within a date range.
+        Get game IDs within an inclusive date range.
 
         Args:
             start_date: Start date
@@ -71,7 +72,7 @@ class GameDataService:
 
     def get_team_game_scores(self, game_id: Optional[int] = None) -> pd.DataFrame:
         """
-        Get team game scores from the view.
+        Get team game scores, optionally for one game.
 
         Args:
             game_id: Optional game ID to filter
@@ -287,3 +288,8 @@ class GameDataService:
 
         team_totals = team_totals.sort_values('total_points', ascending=False).head(limit)
         return team_totals.reset_index()
+
+
+def build_service(engine: Engine) -> GameDataService:
+    """Build the bez_durakov service around the injected engine, opening no connection."""
+    return GameDataService(engine)

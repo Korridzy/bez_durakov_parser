@@ -1,6 +1,7 @@
 DOCKER_COMPOSE ?= docker compose
+COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
 
-.PHONY: help generate-env validate-knowledge test test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env validate-knowledge validate-tools test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -11,6 +12,7 @@ help:
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
+	@echo "  make validate-tools - Validate the configured operator tool module"
 	@echo "  make restart     - Validate, then recreate LiteLLM, backend, and frontend"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
@@ -18,6 +20,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test           - Run the offline backend suite (no running stack needed)"
+	@echo "  make test-postgres  - Run the acceptance lane against a throwaway PostgreSQL"
 	@echo "  make test-e2e-setup - One-time: install frontend dev deps and Chromium (needs network)"
 	@echo "  make test-e2e       - Run the offline stub-backed Playwright lane"
 	@echo ""
@@ -60,7 +63,11 @@ validate-knowledge:
 	@echo "🔎 Validating the configured knowledge folder..."
 	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.knowledge_cli
 
-restart: generate-env validate-knowledge
+validate-tools:
+	@echo "🔎 Validating the configured operator tool module..."
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.tools_cli
+
+restart: generate-env validate-knowledge validate-tools
 	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
 	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
 	@echo "✅ Application services recreated"
@@ -73,7 +80,7 @@ build: generate-env
 	$(DOCKER_COMPOSE) build
 	@echo "✅ Build complete"
 
-rebuild: generate-env validate-knowledge
+rebuild: generate-env validate-knowledge validate-tools
 	@echo "🔨 Rebuilding and restarting services..."
 	$(DOCKER_COMPOSE) down
 	$(DOCKER_COMPOSE) build
@@ -82,8 +89,22 @@ rebuild: generate-env validate-knowledge
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_top_team_limit.py && python /app/test_reasoning.py"
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_reasoning.py && python /app/test_knowledge_cli.py && python /app/test_tools_cli.py"
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_CONFIG_FILE=test_config_sqlite.toml backend python /app/test_acceptance_swap.py
+	$(MAKE) test-postgres
 	@echo ""
+
+test-postgres: generate-env
+	@echo "🐘 Running the PostgreSQL acceptance lane..."
+	@set +e; \
+	 $(COMPOSE_TEST) up -d --wait postgres_test; \
+	 status=$$?; \
+	 if [ $$status -eq 0 ]; then \
+	   $(COMPOSE_TEST) run --rm -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_CONFIG_FILE=test_config_postgres.toml backend python /app/test_acceptance_swap.py; \
+	   status=$$?; \
+	 fi; \
+	 $(COMPOSE_TEST) rm -fsv postgres_test; \
+	 exit $$status
 
 test-e2e-setup:
 	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."

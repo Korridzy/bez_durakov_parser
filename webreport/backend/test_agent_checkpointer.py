@@ -248,7 +248,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
             service.results["get_all_teams"] = []
             agent = self.runtime.ReportAgentSystem(
                 service=service, model_client=model, checkpointer=saver,
-                mode="agent", knowledge=knowledge,
+                knowledge=knowledge,
             )
             if failure_mode == "timeout":
                 with patch.object(model, "ainvoke", side_effect=block_after_read), patch.object(

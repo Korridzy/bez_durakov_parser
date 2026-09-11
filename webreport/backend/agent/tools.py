@@ -5,16 +5,20 @@ from typing import Annotated, Protocol, TYPE_CHECKING, TypeAlias, TypedDict
 
 from .knowledge import Knowledge
 from .registry import ToolError, ToolRegistry
+from .toolmodule import ParamSpec, ToolSpec
 _messages = importlib.import_module("langchain_core.messages")
 _tool_api = importlib.import_module("langchain_core.tools")
 _prebuilt = importlib.import_module("langgraph.prebuilt")
 _types = importlib.import_module("langgraph.types")
+_pydantic = importlib.import_module("pydantic")
 
 ToolMessage = _messages.ToolMessage
 InjectedToolCallId = _tool_api.InjectedToolCallId
 tool = _tool_api.tool
+StructuredTool = _tool_api.StructuredTool
 InjectedState = _prebuilt.InjectedState
 Command = _types.Command
+create_model = _pydantic.create_model
 
 if TYPE_CHECKING:
     class ToolState(TypedDict):
@@ -26,7 +30,7 @@ else:
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
-ToolArgument: TypeAlias = str | int | bool | None
+ToolArgument: TypeAlias = str | int | float | bool | None
 ToolArgs: TypeAlias = dict[str, ToolArgument]
 
 
@@ -61,6 +65,12 @@ class CommandResult(Protocol):
     update: Mapping[str, JsonValue | list[ToolMessageResult]] | None
 
 
+def _field(param: ParamSpec) -> tuple[object, object]:
+    """One pydantic field: the wire annotation and either its default or a required marker."""
+    annotation = param.wire_type | None if param.optional else param.wire_type
+    return annotation, (param.default if param.has_default else ...)
+
+
 def _parse_handle(handle: dict[str, str | ToolArgs]) -> QueryHandle:
     if set(handle) != {"tool", "args"}:
         raise ToolError("A handle must contain exactly 'tool' and 'args'")
@@ -90,54 +100,29 @@ def build_tools(
             "summary": f"{rows} rows; columns: {columns}",
         }
 
-    @tool
-    async def get_all_games_summary() -> ToolEnvelope | str:
-        """Return metadata and a handle for all game summaries."""
-        return await metadata("get_all_games_summary", {})
+    def build_data_tool(spec: ToolSpec) -> BuiltTool:
+        """Turn one discovered spec into a StructuredTool over the metadata envelope.
 
-    @tool
-    async def get_game_by_id(game_id: int) -> ToolEnvelope | str:
-        """Return metadata and a handle for one game by numeric ID."""
-        return await metadata("get_game_by_id", {"game_id": game_id})
-
-    @tool
-    async def get_games_by_date_range(
-        start_date: str,
-        end_date: str | None = None,
-    ) -> ToolEnvelope | str:
-        """Return metadata and a handle for an inclusive ISO-date range."""
-        return await metadata(
-            "get_games_by_date_range",
-            {"start_date": start_date, "end_date": end_date},
+        The args schema is generated from the type hints the operator's method carries, with
+        a date rendered as a JSON string so the handle args stay JSON primitives; the
+        registry coerces the string back to a date just before the call.
+        """
+        args_schema = create_model(
+            f"{spec.name}_args",
+            **{param.name: _field(param) for param in spec.params},
         )
 
-    @tool
-    async def get_team_game_scores(game_id: int | None = None) -> ToolEnvelope | str:
-        """Return metadata and a handle for team scores, optionally by game ID."""
-        return await metadata("get_team_game_scores", {"game_id": game_id})
+        async def call(**kwargs: ToolArgument) -> ToolEnvelope | str:
+            return await metadata(spec.name, kwargs)
 
-    @tool
-    async def get_all_teams() -> ToolEnvelope | str:
-        """Return metadata and a handle for all teams."""
-        return await metadata("get_all_teams", {})
+        return StructuredTool.from_function(
+            coroutine=call,
+            name=spec.name,
+            description=spec.description,
+            args_schema=args_schema,
+        )
 
-    @tool
-    async def get_team_statistics(team_name: str) -> ToolEnvelope | str:
-        """Return metadata and a handle for one team's statistics."""
-        return await metadata("get_team_statistics", {"team_name": team_name})
-
-    @tool
-    async def get_team_wins(
-        team_name: str,
-        year: int | None = None,
-    ) -> ToolEnvelope | str:
-        """Return metadata and a handle for a team's wins, optionally by year."""
-        return await metadata("get_team_wins", {"team_name": team_name, "year": year})
-
-    @tool
-    async def get_top_teams(limit: int = 10) -> ToolEnvelope | str:
-        """Return metadata and a handle for the top teams by total points."""
-        return await metadata("get_top_teams", {"limit": limit})
+    data_tools = [build_data_tool(spec) for spec in registry.specs.values()]
 
     @tool
     async def read_rows(
@@ -211,18 +196,7 @@ def build_tools(
             }
         )
 
-    existing_tools = [
-        get_all_games_summary,
-        get_game_by_id,
-        get_games_by_date_range,
-        get_team_game_scores,
-        get_all_teams,
-        get_team_statistics,
-        get_team_wins,
-        get_top_teams,
-        read_rows,
-        mark_report,
-    ]
+    existing_tools = [*data_tools, read_rows, mark_report]
     if knowledge is None:
         return existing_tools
 

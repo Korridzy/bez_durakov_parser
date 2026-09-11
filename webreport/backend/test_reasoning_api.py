@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import ClassVar, final
 
+import fastapi
+
 # Parent of the mounted bd_shared directory, same convention as main.py:16
 sys.path.insert(0, '/')
 
@@ -102,7 +104,6 @@ def _report_response(**overrides: object) -> dict[str, object]:
         "success": True,
         "data": None,
         "message": "готовый ответ",
-        "mode": "agent",
         "query_info": [{"tool": "list_games", "args": {}}],
         "timestamp": "2026-08-07T00:00:00",
     }
@@ -302,7 +303,6 @@ class TestChatResponseShape(_MainImports, unittest.TestCase):
         fields: dict[str, object] = {
             "success": True,
             "session_id": "s-1",
-            "mode": "agent",
             "query_info": [],
             "message": "ответ",
             "timestamp": "2026-08-07T00:00:00",
@@ -339,11 +339,17 @@ class TestChatEndpointReasoning(
     """/api/chat forwards the reasoning the agent system reports."""
 
     async def _chat(self, response: Mapping[str, object], session_id: str = "s-1"):
+        """Drive the handler directly, supplying the Response that FastAPI would inject."""
         self.main.agent_system = StubAgentSystem(response)
         self.main.checkpoint_saver = StubSaver()
-        return await self.main.chat(
-            self.main.ChatMessage(message="покажи игры", session_id=session_id)
+        self.main.tool_service = object()
+        http_response = fastapi.Response()
+        envelope = await self.main.chat(
+            self.main.ChatMessage(message="покажи игры", session_id=session_id),
+            http_response,
         )
+        self.assertEqual(http_response.status_code, 200)
+        return envelope
 
     async def test_chat_forwards_reasoning_to_the_response(self):
         """Given a reasoning-bearing result, When chatting, Then JSON carries it."""

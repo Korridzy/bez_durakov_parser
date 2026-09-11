@@ -163,6 +163,59 @@ class ToolMetadataTests(ToolsCaseBase):
         self.assertEqual(set(read_properties), {"handle", "offset", "limit"})
         self.assertEqual(set(mark_properties), {"handle"})
 
+    def test_generated_descriptions_are_the_docstring_summary_plus_the_envelope_note(self):
+        """Given discovered tools, When descriptions are read, Then each is a summary plus the envelope note.
+
+        This is the only guard on the prompt's quality: without it the descriptions could
+        silently degrade into whatever the service docstrings happen to say about DataFrames.
+        """
+        toolmodule = importlib.import_module("agent.toolmodule")
+        expected_summaries = {
+            "get_all_games_summary": "Get summary of all games.",
+            "get_all_teams": "Get all teams.",
+            "get_game_by_id": "Get full game data by ID.",
+            "get_games_by_date_range": "Get game IDs within an inclusive date range.",
+            "get_team_game_scores": "Get team game scores, optionally for one game.",
+            "get_team_statistics": "Get statistics for a specific team.",
+            "get_team_wins": "Get games won by a specific team.",
+            "get_top_teams": "Get top teams by total points.",
+        }
+
+        self.assertEqual(set(expected_summaries), set(TOOL_NAMES))
+        for name, summary in expected_summaries.items():
+            with self.subTest(tool=name):
+                self.assertEqual(
+                    self.tools[name].description,
+                    f"{summary}\n{toolmodule.ENVELOPE_NOTE}",
+                )
+
+    def test_generated_schemas_preserve_defaults_and_requiredness(self):
+        """Given a defaulted parameter, When the schema is generated, Then the default survives."""
+        top_teams = self.tools["get_top_teams"].args_schema.model_json_schema()
+        statistics = self.tools["get_team_statistics"].args_schema.model_json_schema()
+        wins = self.tools["get_team_wins"].args_schema.model_json_schema()
+
+        self.assertEqual(top_teams["properties"]["limit"]["default"], 10)
+        self.assertNotIn("required", top_teams)
+        self.assertEqual(statistics["required"], ["team_name"])
+        self.assertEqual(wins["required"], ["team_name"])
+        self.assertIsNone(wins["properties"]["year"]["default"])
+
+    async def test_handle_arguments_stay_json_primitives(self):
+        """Given a date argument, When the envelope comes back, Then every handle value is a primitive."""
+        self.service.results["get_games_by_date_range"] = [3, 4]
+
+        state = await self.invoke_tool(
+            "get_games_by_date_range",
+            {"start_date": "2025-01-01", "end_date": "2025-12-31"},
+        )
+        handle = self.latest_json(state)["handle"]
+
+        for key, value in handle["args"].items():
+            with self.subTest(argument=key):
+                self.assertIsInstance(value, (str, int, float, bool, type(None)))
+        self.assertEqual(handle["args"]["start_date"], "2025-01-01")
+
     async def test_all_data_tools_return_metadata_without_records(self):
         """Given all service result shapes, When data tools run, Then only metadata is exposed."""
         rows = self.pd.DataFrame([{"game_id": 1}, {"game_id": 2}])

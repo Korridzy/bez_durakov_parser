@@ -105,7 +105,7 @@ class _RuntimeImports:
     def setUpClass(cls) -> None:
         cls.memory = importlib.import_module("langgraph.checkpoint.memory")
         cls.messages = importlib.import_module("langchain_core.messages")
-        cls.report_agents = importlib.import_module("agents.report_agents")
+        cls.report_agents = importlib.import_module("agents.report_runtime")
         cls.support = importlib.import_module("test_agent_support")
 
     def make_agent(self, model, *, timeout: float = 60):
@@ -117,7 +117,6 @@ class _RuntimeImports:
                 service=service,
                 model_client=model,
                 checkpointer=saver,
-                mode="agent",
                 timeout_seconds=timeout,
             ),
             saver,
@@ -180,22 +179,6 @@ class TestReasoningPropagation(_RuntimeImports, unittest.IsolatedAsyncioTestCase
         # Then only text blocks reach the string response boundary.
         self.assertEqual("A\n\nB", response["message"])
 
-    async def test_fallback_response_always_has_none_reasoning(self) -> None:
-        # Given the keyless fallback mode.
-        saver = self.memory.InMemorySaver()
-        service = self.support.StubService()
-        service.results["get_all_games_summary"] = []
-        system = self.report_agents.ReportAgentSystem(
-            service=service,
-            checkpointer=saver,
-            mode="fallback",
-        )
-
-        # When a fallback request completes.
-        response = await system.process_user_request("покажи все игры", "fallback")
-
-        # Then it cannot claim model reasoning.
-        self.assertIsNone(response["reasoning"])
 
 
 class TestFailurePartialReasoning(_RuntimeImports, unittest.IsolatedAsyncioTestCase):

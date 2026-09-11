@@ -6,6 +6,7 @@ import sys
 import asyncio
 import importlib
 import json as json_module
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,11 +14,14 @@ from typing import Any
 import unittest
 from unittest.mock import AsyncMock, call, patch
 
+import fastapi
+
 _test_agent_support = importlib.import_module("test_agent_support")
 _test_agent_graph = importlib.import_module("test_agent_graph")
 _test_net_guard = importlib.import_module("test_net_guard")
 StubService = _test_agent_support.StubService
 ScriptedStub = _test_agent_graph.ScriptedModel
+_tool_call = _test_agent_graph.tool_call
 
 # Import the app and set up in-process ASGI testing
 testclient = None
@@ -150,13 +154,23 @@ try:
         testclient = None
     else:
         startup_service = StubService()
-        with patch("main.probe_llm_proxy", new=AsyncMock(return_value=False)), patch(
-            "main.GameDataService", return_value=startup_service
-        ):
+        startup_engine = importlib.import_module("sqlalchemy").create_engine("sqlite://")
+        startup_specs = importlib.import_module("agent.toolmodule").discover(startup_service)
+        # The seam is the whole startup helper, not the service class: patching it bypasses
+        # the connection check entirely, which the lane runs with a stopped database.
+        # The probe returns True so /health still answers 200 and the agent is built over
+        # the stub; ChatLiteLLM constructs without connecting, so this stays offline.
+        with patch(
+            "main.initialize_tool_service_with_retry",
+            new=AsyncMock(return_value=(startup_engine, startup_service, startup_specs)),
+        ), patch("main.probe_llm_proxy", new=AsyncMock(return_value=True)):
             # One loop owns startup, the saver, all synchronous calls, and shutdown.
             testclient = ASGITestClient(app)
 except Exception as e:
+    import traceback
+
     print(f"⚠️ Warning: Could not initialize in-process test client: {e}")
+    traceback.print_exc()
     testclient = None
 
 
@@ -166,21 +180,31 @@ def setUpModule():
 
 
 class TestGameDataService(unittest.TestCase):
-    """Test the GameDataService."""
+    """Test the default tool module against the MySQL test database.
+
+    Set BD_REQUIRE_MYSQL to turn an unreachable database from a class-wide skip into a
+    failure, which is what makes this class a usable gate rather than a silent pass.
+    """
 
     @classmethod
     def setUpClass(cls):
         """Set up test fixtures."""
         try:
-            from services.game_data_service import GameDataService
-            service = GameDataService()
+            from bd_shared.config import DATABASE_URL
+            from bd_shared.tools.bez_durakov import build_service
+
+            from agent.engine import build_read_only_engine
+
+            service = build_service(build_read_only_engine(DATABASE_URL))
             # SQLAlchemy connects lazily, so without this probe an unreachable
             # database leaves every sibling's "Service not available" skip dead.
             with service.db.engine.connect():
                 pass
             cls.service = service
         except Exception as e:
-            print(f"⚠️ Warning: Could not initialize GameDataService: {e}")
+            if os.environ.get("BD_REQUIRE_MYSQL"):
+                raise
+            print(f"⚠️ Warning: Could not initialize the default tool module: {e}")
             cls.service = None
 
     def test_service_initialization(self):
@@ -189,6 +213,32 @@ class TestGameDataService(unittest.TestCase):
             self.skipTest("Service not available")
 
         self.assertIsNotNone(self.service.db, "Initialized service should own a database handle")
+
+    def test_write_is_refused_on_mysql(self):
+        """Given the injected engine, When a write runs, Then MySQL refuses it.
+
+        The statement is never committed, so a mechanism that failed would leave nothing
+        behind; the assertion is on the refusal itself.
+        """
+        if self.service is None:
+            self.skipTest("Service not available")
+
+        sqlalchemy = importlib.import_module("sqlalchemy")
+
+        with self.service.db.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    sqlalchemy.text("SELECT @@session.transaction_read_only")
+                ).scalar(),
+                1,
+            )
+            with self.assertRaises(Exception) as caught:
+                connection.execute(
+                    sqlalchemy.text("INSERT INTO teams (team_name) VALUES ('bd-readonly-probe')")
+                )
+
+        self.assertIn("read only transaction", str(caught.exception).lower())
+        print("✅ MySQL refuses a write through the injected engine")
 
     def test_get_all_games_summary(self):
         """Test getting all games summary."""
@@ -348,35 +398,52 @@ class TestGameDataService(unittest.TestCase):
 
 
 class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
-    """Test the ReportAgentSystem."""
+    """The report system on the only path it now has, driven by a scripted model.
+
+    The service-level assertions are unchanged: which tool a request reaches, what the
+    answer says, that the turn is checkpointed and that a raising service surfaces as a
+    failure envelope. What changed is that a scripted model chooses the tool, where the
+    deleted regex interpreter used to.
+    """
 
     @classmethod
     def setUpClass(cls):
         """Set up test fixtures."""
         cls.checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
         cls.messages = importlib.import_module("langchain_core.messages")
-        cls.report_module = importlib.import_module("agents.report_agents")
+        cls.report_module = importlib.import_module("agents.report_runtime")
+
+    def _script(self, calls, answer):
+        """One scripted turn: the listed tool calls, then a final answer."""
+        scripted = [
+            self.messages.AIMessage(
+                content="",
+                tool_calls=[_tool_call(name, args, f"call-{index}")],
+            )
+            for index, (name, args) in enumerate(calls)
+        ]
+        scripted.append(self.messages.AIMessage(content=answer))
+        return ScriptedStub(scripted)
 
     async def test_agent_initialization(self):
         """Test that agent system initializes."""
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
                 service=StubService(),
-                mode="fallback",
+                model_client=ScriptedStub([]),
                 checkpointer=saver,
             )
 
             self.assertIsNotNone(agent_system, "Agent system should be initialized")
 
     async def test_regression_agents_enabled_with_api_key(self):
-        scripted_message = "Report generated based on: покажи все игры"
+        scripted_message = "Отчёт готов: покажи все игры"
         model_client = ScriptedStub(
             [self.messages.AIMessage(content=scripted_message)]
         )
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             enabled_system = self.report_module.ReportAgentSystem(
                 service=StubService(),
-                mode="agent",
                 model_client=model_client,
                 checkpointer=saver,
             )
@@ -384,23 +451,21 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
             response = await enabled_system.process_user_request(
                 "покажи все игры", "enabled-mode"
             )
-            self.assertIsInstance(response, dict, "Enabled mode response should be dictionary")
-            self.assertTrue(response.get("success"), "Enabled mode request should succeed")
-            self.assertEqual(response["mode"], "agent")
+            self.assertIsInstance(response, dict, "Response should be a dictionary")
+            self.assertTrue(response.get("success"), "The request should succeed")
             self.assertEqual(response["message"], scripted_message)
-            self.assertNotIn("fallback mode", response["message"].lower())
 
             checkpoint_tuple = await saver.aget_tuple(
                 {"configurable": {"thread_id": "enabled-mode"}}
             )
             self.assertIsNotNone(checkpoint_tuple)
             if checkpoint_tuple is None:
-                self.fail("Enabled mode must checkpoint its conversation")
+                self.fail("A turn must checkpoint its conversation")
             history = checkpoint_tuple.checkpoint["channel_values"]["messages"]
-            self.assertIsInstance(history, list, "History should be list in enabled mode")
+            self.assertIsInstance(history, list, "History should be a list")
             self.assertGreaterEqual(
                 len(history), 2,
-                "Enabled mode should record at least user+assistant history entries",
+                "A turn should record at least user+assistant history entries",
             )
 
     async def test_regression_agent_system_uses_injected_service(self):
@@ -408,7 +473,7 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             system = self.report_module.ReportAgentSystem(
                 service=injected_service,
-                mode="fallback",
+                model_client=ScriptedStub([]),
                 checkpointer=saver,
             )
 
@@ -416,11 +481,15 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
         print("✅ Agent system reuses injected data service")
 
     async def test_process_request_all_games(self):
-        """Test processing a request for all games."""
+        """Test processing a request that reaches the all-games tool."""
+        service = StubService()
+        service.results["get_all_games_summary"] = [{"game_id": 1}]
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
-                service=StubService(),
-                mode="fallback",
+                service=service,
+                model_client=self._script(
+                    [("get_all_games_summary", {})], "Все игры перечислены."
+                ),
                 checkpointer=saver,
             )
 
@@ -429,6 +498,10 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsInstance(response, dict, "Should return dictionary")
             self.assertIn("success", response, "Response should have success field")
+            self.assertTrue(response["success"])
+            # The docstring claims the all-games tool is reached, so assert that rather than
+            # only that the turn succeeded.
+            self.assertEqual(response["query_info"][0]["tool"], "get_all_games_summary")
         print(f"✅ Request processed: {response.get('message', 'No message')}")
 
     async def test_conversation_history(self):
@@ -436,7 +509,7 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
                 service=StubService(),
-                mode="fallback",
+                model_client=ScriptedStub([self.messages.AIMessage(content="Готово.")]),
                 checkpointer=saver,
             )
             config = {"configurable": {"thread_id": "history"}}
@@ -446,24 +519,28 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
             checkpoint_tuple = await saver.aget_tuple(config)
             self.assertIsNotNone(checkpoint_tuple)
             if checkpoint_tuple is None:
-                self.fail("Fallback mode must checkpoint its conversation")
+                self.fail("A turn must checkpoint its conversation")
             history = checkpoint_tuple.checkpoint["channel_values"]["messages"]
             self.assertIsInstance(history, list, "History should be a list")
             self.assertGreaterEqual(len(history), 2)
         print(f"✅ Conversation history has {len(history)} entries")
 
     async def test_regression_team_wins_2025(self):
-        """Port the win route assertion to list-shaped ``query_info``.
-        
-        Previously failed with: 'No module named db' import error.
-        Tests that get_team_wins() method correctly routes and executes
-        for the exact historical prompt. The assertion-shape migration is
-        intentional: graph responses expose a list of tool calls.
+        """Keep the win-route assertion on list-shaped ``query_info``.
+
+        Previously failed with: 'No module named db' import error. The tool the turn
+        reaches is now chosen by the scripted model rather than by a regex router, but the
+        assertion that the trace records get_team_wins is unchanged.
         """
+        service = StubService()
+        service.results["get_team_wins"] = {"team_name": "Однажды было дважды", "wins": []}
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
-                service=StubService(),
-                mode="fallback",
+                service=service,
+                model_client=self._script(
+                    [("get_team_wins", {"team_name": "Однажды было дважды", "year": 2025})],
+                    "Победы за 2025 год перечислены.",
+                ),
                 checkpointer=saver,
             )
             user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
@@ -481,16 +558,19 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
         print("✅ Team wins 2025 prompt: correctly routed to get_team_wins")
 
     async def test_regression_generic_team_statistics(self):
-        """Port the team-statistics route assertion to list-shaped ``query_info``.
-        
-        Tests that team statistics prompts (without win keywords)
-        correctly route to get_team_statistics and execute without errors.
-        The assertion-shape migration is intentional for graph tool traces.
-        """
+        """Keep the team-statistics route assertion on list-shaped ``query_info``."""
+        service = StubService()
+        service.results["get_team_statistics"] = {
+            "team_name": "Однажды было дважды",
+            "games_played": 3,
+        }
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
-                service=StubService(),
-                mode="fallback",
+                service=service,
+                model_client=self._script(
+                    [("get_team_statistics", {"team_name": "Однажды было дважды"})],
+                    "Статистика собрана.",
+                ),
                 checkpointer=saver,
             )
             user_prompt = "статистика команды Однажды было дважды"
@@ -513,17 +593,44 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
 
     async def test_regression_team_statistics_missing_team_returns_error_response(self):
         service = StubService()
+        # The marked handle is re-executed to build the report payload, and it is that
+        # second call that fails here, so the raising service surfaces as a failure
+        # envelope rather than as an in-band tool message.
+        missing_team = patch.object(
+            service,
+            "get_team_statistics",
+            side_effect=[
+                {"team_name": "missing team", "games_played": 0},
+                ValueError("Team missing team not found"),
+            ],
+        )
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             agent_system = self.report_module.ReportAgentSystem(
                 service=service,
-                mode="fallback",
+                model_client=ScriptedStub(
+                    [
+                        self.messages.AIMessage(
+                            content="",
+                            tool_calls=[
+                                _tool_call(
+                                    "mark_report",
+                                    {
+                                        "handle": {
+                                            "tool": "get_team_statistics",
+                                            "args": {"team_name": "missing team"},
+                                        }
+                                    },
+                                    "mark-1",
+                                )
+                            ],
+                        ),
+                        self.messages.AIMessage(content="Команда не найдена."),
+                    ]
+                ),
                 checkpointer=saver,
             )
-            with patch.object(
-                service,
-                "get_team_statistics",
-                side_effect=ValueError("Team missing team not found"),
-            ):
+
+            with missing_team:
                 response = await agent_system.process_user_request(
                     "статистика команды missing team", "missing-team"
                 )
@@ -541,7 +648,16 @@ class TestAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Set up test fixtures."""
+        """Set up test fixtures.
+
+        A missing client is a failure, not a skip: this family carries the only proof that
+        the surviving routes are the ones the plan leaves behind, and eleven silent skips
+        would keep the lane green while proving nothing.
+        """
+        if testclient is None:
+            raise RuntimeError(
+                "The in-process test client failed to build; see the module-level traceback above"
+            )
         cls.client = testclient
 
     def setUp(self):
@@ -567,164 +683,111 @@ class TestAPI(unittest.TestCase):
 
     def test_health_endpoint(self):
         """Test the health check endpoint."""
-        if self.client is None:
-            self.skipTest("TestClient not available")
+        response = self.client.get("/health")
 
-        try:
-            response = self.client.get("/health")
-            self.assertEqual(response.status_code, 200, "Health check should return 200")
-            data = response.json()
-            self.assertIn("status", data, "Should have status field")
-            print(f"✅ API health check passed: {data.get('status')}")
-        except Exception as e:
-            print(f"⚠️ API test error: {e}")
-            self.skipTest("API test failed")
+        self.assertEqual(response.status_code, 200, "Health check should return 200")
+        data = response.json()
+        self.assertIn("status", data, "Should have status field")
+        print(f"✅ API health check passed: {data.get('status')}")
 
-    def test_root_endpoint(self):
-        """Test the root endpoint."""
-        if self.client is None:
-            self.skipTest("TestClient not available")
+    def test_openapi_lists_only_the_surviving_paths(self):
+        """Given the deleted endpoints, When the schema is read, Then four paths remain."""
+        main_module = importlib.import_module("main")
 
-        try:
-            response = self.client.get("/")
-            self.assertEqual(response.status_code, 200, "Root should return 200")
-            data = response.json()
-            self.assertIn("name", data, "Should have name field")
-            print(f"✅ API root endpoint: {data.get('name')}")
-        except Exception as e:
-            print(f"⚠️ API test error: {e}")
-            self.skipTest("API test failed")
+        self.assertEqual(
+            sorted(main_module.app.openapi()["paths"]),
+            [
+                "/api/chat",
+                "/api/clear/{session_id}",
+                "/api/history/{session_id}",
+                "/health",
+            ],
+        )
+        print("✅ API surface: exactly the four surviving paths")
+
+    def test_chat_refuses_with_503_when_no_model_is_reachable(self):
+        """Given no reachable model, When chat is called through real routing, Then it answers 503."""
+        main_module = importlib.import_module("main")
+
+        with (
+            patch.object(main_module, "agent_system", None),
+            patch.object(main_module, "llm_proxy_healthy", False),
+            patch.object(
+                main_module,
+                "probe_once",
+                new=AsyncMock(return_value=("transient", None, None)),
+            ),
+        ):
+            response = self.client.post("/api/chat", json={"message": "привет"})
+
+        self.assertEqual(response.status_code, 503)
+        body = response.json()
+        self.assertFalse(body["success"])
+        self.assertEqual(body["message"], "Для ответа нужна доступная языковая модель.")
+        self.assertTrue(body["error"])
+        print("✅ API chat: refuses with 503 when no model is reachable")
 
     def test_regression_api_team_wins_2025(self):
-        """Regression test for API endpoint with historical team wins 2025 prompt.
-        
-        Tests the full stack through the API: exact historical prompt that
-        previously failed with 'No module named db' import error.
-        Skips gracefully if API is unavailable.
-        """
-        if self.client is None:
-            self.skipTest("TestClient not available")
+        """Regression test for the chat API with the historical team wins 2025 prompt.
 
-        try:
-            # Send exact historical prompt through chat API
-            user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
-            payload = {"message": user_prompt}
-            
-            response = self.client.post(
-                "/api/chat",
-                json=payload
-            )
-            
-            self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
-            data = response.json()
-            
-            # Verify response structure
-            self.assertIsInstance(data, dict, "Response should be dictionary")
-            
-            # Critical: response must NOT contain the historical import error
-            response_str = str(data)
-            self.assertNotIn("No module named 'db'", response_str,
-                            "API response should not contain import error")
-            
-            print("✅ API team wins 2025 prompt: returned successfully")
-            
-        except Exception as e:
-            print(f"⚠️ API test error: {e}")
-            self.skipTest("API test failed")
+        What this proves: the route answers 200 with a JSON body and no import error, for the
+        exact prompt that once failed with 'No module named db'.
+
+        What it no longer proves: routing. The deleted regex interpreter used to answer this
+        deterministically. The turn now reaches a real ChatLiteLLM whose outbound call the
+        socket guard blocks, so it always takes the failure path and this case would pass even
+        if tool selection were broken. It deliberately does not assert `success`. The routing
+        coverage lives in TestReportAgentSystem's scripted cases, and the surviving-route
+        coverage in test_openapi_lists_only_the_surviving_paths.
+        """
+        user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
+
+        response = self.client.post("/api/chat", json={"message": user_prompt})
+
+        self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
+        data = response.json()
+        self.assertIsInstance(data, dict, "Response should be dictionary")
+        self.assertNotIn(
+            "No module named 'db'",
+            str(data),
+            "API response should not contain import error",
+        )
+        print("✅ API team wins 2025 prompt: returned successfully")
 
     def test_regression_api_generic_team_statistics(self):
-        """Regression test for API endpoint with generic team statistics prompt.
-        
-        Tests the full stack through the API: generic team statistics prompt
-        that should route to get_team_statistics.
-        Skips gracefully if API is unavailable.
+        """Regression test for the chat API with a generic team statistics prompt.
+
+        Same scope as test_regression_api_team_wins_2025 above: it proves the route answers
+        200 with a JSON body and no import error, and deliberately does not assert `success`,
+        so it no longer proves routing. See that docstring for why.
         """
-        if self.client is None:
-            self.skipTest("TestClient not available")
+        user_prompt = "статистика команды Однажды было дважды"
 
-        try:
-            # Send generic team statistics prompt through chat API
-            user_prompt = "статистика команды Однажды было дважды"
-            payload = {"message": user_prompt}
-            
-            response = self.client.post(
-                "/api/chat",
-                json=payload
-            )
-            
-            self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
-            data = response.json()
-            
-            # Verify response structure
-            self.assertIsInstance(data, dict, "Response should be dictionary")
-            
-            # Critical: response must NOT contain the historical import error
-            response_str = str(data)
-            self.assertNotIn("No module named 'db'", response_str,
-                            "API response should not contain import error")
-            
-            print("✅ API generic team statistics prompt: returned successfully")
-            
-        except Exception as e:
-            print(f"⚠️ API test error: {e}")
-            self.skipTest("API test failed")
+        response = self.client.post("/api/chat", json={"message": user_prompt})
 
-    def test_regression_api_get_game_returns_404_for_missing_game(self):
-        if self.client is None:
-            self.skipTest("TestClient not available")
+        self.assertEqual(response.status_code, 200, "Chat endpoint should return 200")
+        data = response.json()
+        self.assertIsInstance(data, dict, "Response should be dictionary")
+        self.assertNotIn(
+            "No module named 'db'",
+            str(data),
+            "API response should not contain import error",
+        )
+        print("✅ API generic team statistics prompt: returned successfully")
 
+    def test_regression_health_returns_503_without_tool_service(self):
         import main as main_module
 
-        with patch.object(main_module.data_service, "get_game_by_id", return_value=None):
-            response = self.client.get("/api/games/999999")
-
-        self.assertEqual(response.status_code, 404, "Missing game should return 404")
-        self.assertIn("not found", response.json()["detail"].lower())
-        print("✅ API get_game: missing game returns 404")
-
-    def test_regression_api_get_game_returns_500_for_unexpected_error(self):
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
-        import main as main_module
-
-        with patch.object(main_module.data_service, "get_game_by_id", side_effect=RuntimeError("db exploded")):
-            response = self.client.get("/api/games/123")
-
-        self.assertEqual(response.status_code, 500, "Unexpected game lookup failures should return 500")
-        self.assertEqual(response.json()["detail"], "Internal server error")
-        print("✅ API get_game: unexpected errors return a generic 500 response")
-
-    def test_regression_health_returns_503_without_data_service(self):
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
-        import main as main_module
-
-        with patch.object(main_module, "data_service", None):
+        with patch.object(main_module, "tool_service", None):
             response = self.client.get("/health")
 
-        self.assertEqual(response.status_code, 503, "Health should return 503 when data service is unavailable")
-        print("✅ API health: returns 503 when data service is unavailable")
-
-    def test_regression_api_team_stats_returns_404_for_missing_team(self):
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
-        import main as main_module
-
-        with patch.object(main_module.data_service, "get_team_statistics", side_effect=ValueError("Team missing team not found")):
-            response = self.client.get("/api/teams/missing team/stats")
-
-        self.assertEqual(response.status_code, 404, "Missing team stats should return 404")
-        self.assertIn("not found", response.json()["detail"].lower())
-        print("✅ API team stats: missing team returns 404")
+        self.assertEqual(
+            response.status_code, 503, "Health should return 503 when the tool service is unavailable"
+        )
+        print("✅ API health: returns 503 when the tool service is unavailable")
 
     def test_regression_chat_without_session_id_assigns_unique_id(self):
         """Chat without session_id must mint a fresh server-side id, not the literal "default"."""
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
         import main as main_module
 
         class _StubAgent:
@@ -733,7 +796,6 @@ class TestAPI(unittest.TestCase):
                     "success": True,
                     "data": None,
                     "message": "ok",
-                    "mode": "fallback",
                     "query_info": [],
                     "timestamp": "t",
                 }
@@ -759,9 +821,6 @@ class TestAPI(unittest.TestCase):
 
     def test_regression_chat_without_session_id_yields_distinct_sessions(self):
         """Two anonymous chat calls must not collide on a shared session."""
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
         import main as main_module
 
         class _StubAgent:
@@ -770,7 +829,6 @@ class TestAPI(unittest.TestCase):
                     "success": True,
                     "data": None,
                     "message": "ok",
-                    "mode": "fallback",
                     "query_info": [],
                     "timestamp": "t",
                 }
@@ -789,9 +847,6 @@ class TestAPI(unittest.TestCase):
 
     def test_regression_chat_with_explicit_session_id_is_preserved(self):
         """Client-supplied session_id must be echoed back unchanged."""
-        if self.client is None:
-            self.skipTest("TestClient not available")
-
         import main as main_module
 
         class _StubAgent:
@@ -800,7 +855,6 @@ class TestAPI(unittest.TestCase):
                     "success": True,
                     "data": None,
                     "message": "ok",
-                    "mode": "fallback",
                     "query_info": [],
                     "timestamp": "t",
                 }
@@ -860,7 +914,6 @@ class _LifecycleAgent:
             "success": True,
             "data": None,
             "message": "ok",
-            "mode": "fallback",
             "query_info": [{"tool": "stub", "args": {}}],
             "timestamp": "t",
         }
@@ -1187,7 +1240,6 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
                         "data": None,
                         "error": error,
                         "message": f"{name} failure",
-                        "mode": "agent",
                         "query_info": [],
                         "timestamp": "t",
                     }
@@ -1200,20 +1252,19 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(status, 200)
                 self.assertFalse(body["success"])
-                self.assertEqual(body["mode"], "agent")
+                self.assertNotIn("mode", body)
                 self.assertEqual(body["query_info"], [])
                 self.assertEqual(body["error"], error)
 
-    async def test_both_modes_keep_list_shaped_query_info(self):
-        for mode in ("fallback", "agent"):
-            with self.subTest(mode=mode):
-                query_info = [{"tool": f"{mode}_tool", "args": {}}]
+    async def test_failures_and_successes_keep_list_shaped_query_info(self):
+        for label, success in (("failed", False), ("succeeded", True)):
+            with self.subTest(outcome=label):
+                query_info = [{"tool": f"{label}_tool", "args": {}}]
                 self.main.agent_system = _LifecycleAgent(
                     result={
-                        "success": True,
+                        "success": success,
                         "data": None,
                         "message": "ok",
-                        "mode": mode,
                         "query_info": query_info,
                         "timestamp": "t",
                     }
@@ -1221,7 +1272,7 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
                 status, body = await self._request(
                     "POST",
                     "/api/chat",
-                    {"message": mode, "session_id": mode},
+                    {"message": label, "session_id": label},
                 )
 
                 self.assertEqual(status, 200)
@@ -1284,6 +1335,40 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await self.main.sessions.is_live("expired-history"))
 
 
+class _ScriptedEngine:
+    """An engine whose connect() follows a script, so the retry loop runs offline.
+
+    The lane has no reachable database, and the check startup now performs is a real
+    connection, so the two cases that drive the retry loop replace the engine rather than
+    the service.
+    """
+
+    def __init__(self, failures: int, *, error: Exception):
+        self._failures = failures
+        self._error = error
+        self.attempts = 0
+        self.disposals = 0
+
+    def connect(self):
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise self._error
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        return False
+
+    def execute(self, _statement):
+        return None
+
+    def dispose(self):
+        self.disposals += 1
+        return None
+
+
 class TestStartupInitialization(unittest.TestCase):
     class ProbeResponse:
         def __init__(self, healthy_endpoints, unhealthy_endpoints, status_code=200):
@@ -1325,11 +1410,30 @@ class TestStartupInitialization(unittest.TestCase):
         main_module.agent_system = None
         main_module.checkpoint_connection = None
         main_module.checkpoint_saver = None
-        main_module.data_service = None
+        main_module.tool_engine = None
+        main_module.tool_service = None
         main_module.knowledge = None
         main_module.llm_proxy_healthy = False
         main_module.sessions = SessionIndex(
             ttl=main_module.CHECKPOINT_TTL_SECONDS,
+        )
+
+    @staticmethod
+    def _tool_service_patch(main_module, service=None):
+        """Patch the startup seam with a ready triple, bypassing the connection check.
+
+        Startup now opens a real connection, and the lane runs against a stopped database,
+        so a test that only needs startup to complete replaces the whole helper. The two
+        cases that drive the retry loop patch Engine.connect instead.
+        """
+        sqlalchemy = importlib.import_module("sqlalchemy")
+        toolmodule = importlib.import_module("agent.toolmodule")
+        resolved = StubService() if service is None else service
+        engine = sqlalchemy.create_engine("sqlite://")
+        return patch.object(
+            main_module,
+            "initialize_tool_service_with_retry",
+            new=AsyncMock(return_value=(engine, resolved, toolmodule.discover(resolved))),
         )
 
     def _run_probe_startup(self, main_module, request_effects):
@@ -1342,7 +1446,7 @@ class TestStartupInitialization(unittest.TestCase):
         async def run_test():
             probe_sleep = AsyncMock()
             await self._reset_startup_state(main_module)
-            with patch.object(main_module, "GameDataService", return_value=object()), \
+            with self._tool_service_patch(main_module, object()), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
                  patch.object(main_module, "probe_sleep", probe_sleep), \
@@ -1355,7 +1459,10 @@ class TestStartupInitialization(unittest.TestCase):
                 for message in captured_logs.output
                 if "LiteLLM probe classified" in message
             ]
-            mode = created_agents[0]["mode"]
+            # The mode string is gone; what a probe verdict now decides is whether the
+            # agent was built at all and whether /health reports the proxy up.
+            agent_built = bool(created_agents)
+            proxy_healthy = main_module.llm_proxy_healthy
             request_count = request_get.call_count
             sleep_count = probe_sleep.await_count
             await main_module.shutdown_event()
@@ -1364,16 +1471,16 @@ class TestStartupInitialization(unittest.TestCase):
                 [call(main_module.PROBE_RETRY_DELAY_SECONDS)] * sleep_count,
             )
             self.assertEqual(len(probe_logs), 1)
-            return mode, request_count, sleep_count, probe_logs[0]
+            self.assertEqual(agent_built, proxy_healthy)
+            return proxy_healthy, request_count, sleep_count, probe_logs[0]
 
         return asyncio.run(run_test())
 
-    @classmethod
-    def tearDownClass(cls):
-        global testclient
-        if testclient is not None:
-            testclient.close()
-            testclient = None
+    # This class deliberately has no tearDownClass. It used to close the module-level
+    # `testclient`, a client it never uses and that TestAPI owns and already closes. Now that
+    # TestAPI.setUpClass raises rather than skipping when the client is missing, nulling that
+    # global from here would turn any run order that puts this class first into a misleading
+    # "failed to build" error.
 
     def _assert_startup_without_knowledge(self, knowledge_dir, expected_warning):
         knowledge_module = importlib.import_module("agent.knowledge")
@@ -1384,12 +1491,12 @@ class TestStartupInitialization(unittest.TestCase):
         async def run_test():
             model = ScriptedStub([message_module.AIMessage(content="ready")])
             startup_error = None
-            mode = None
+            agent_built = False
             prompt = None
             await self._reset_startup_state(main_module)
             with (
                 patch.object(main_module, "KNOWLEDGE_DIR", knowledge_dir),
-                patch.object(main_module, "GameDataService", return_value=StubService()),
+                self._tool_service_patch(main_module),
                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
                 patch.object(
                     main_module,
@@ -1420,7 +1527,7 @@ class TestStartupInitialization(unittest.TestCase):
                     system = main_module.agent_system
                     if system is None:
                         raise AssertionError("Startup completed without an agent system")
-                    mode = system.mode
+                    agent_built = True
                     prompt = graph_builder.call_args.args[3]
                 finally:
                     if main_module.checkpoint_connection is not None:
@@ -1430,18 +1537,18 @@ class TestStartupInitialization(unittest.TestCase):
                 args.args[0] % args.args[1:]
                 for args in warning_logger.call_args_list
             ]
-            return startup_error, mode, prompt, model.bound_tool_names, rendered_warnings
+            return startup_error, agent_built, prompt, model.bound_tool_names, rendered_warnings
 
-        startup_error, mode, prompt, tool_names, rendered_warnings = asyncio.run(
+        startup_error, agent_built, prompt, tool_names, rendered_warnings = asyncio.run(
             run_test()
         )
 
-        # "Exactly one" scopes to decision F2's knowledge-warning concern; startup
-        # logs unrelated concerns such as mode election under separate, already-covered
-        # contracts that this exact-message count intentionally does not constrain.
+        # "Exactly one" scopes to decision F2's knowledge-warning concern; startup logs
+        # unrelated concerns under separate, already-covered contracts that this
+        # exact-message count intentionally does not constrain.
         self.assertEqual(rendered_warnings.count(expected_warning), 1)
         self.assertIsNone(startup_error)
-        self.assertEqual(mode, "agent")
+        self.assertTrue(agent_built)
         self.assertNotIn("read_knowledge", tool_names)
         self.assertEqual(prompt, knowledge_module.compose_system_prompt(None))
         self.assertIsNone(main_module.knowledge)
@@ -1449,7 +1556,7 @@ class TestStartupInitialization(unittest.TestCase):
     def test_unset_knowledge_dir_warns_once_and_keeps_neutral_agent(self):
         self._assert_startup_without_knowledge(
             None,
-            "Knowledge folder is not configured (webreport.knowledge_dir is unset); the agent runs without dataset knowledge.",
+            "Knowledge folder is not configured (dataset.knowledge_dir is unset); the agent runs without dataset knowledge.",
         )
 
     def test_missing_knowledge_dir_warns_once_and_keeps_neutral_agent(self):
@@ -1487,7 +1594,7 @@ class TestStartupInitialization(unittest.TestCase):
         with (
             patch.object(main_module, "KNOWLEDGE_DIR", knowledge_folder),
             patch.object(main_module, "DATABASE_NAME", "bez_durakov"),
-            patch.object(main_module, "GameDataService", return_value=StubService()),
+            self._tool_service_patch(main_module),
             patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
             patch.object(
                 main_module,
@@ -1509,7 +1616,7 @@ class TestStartupInitialization(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body["success"])
-        self.assertEqual(body["mode"], "agent")
+        self.assertNotIn("mode", body)
         self.assertEqual(
             body["query_info"],
             [{"tool": "read_knowledge", "args": {"topic": "rules"}}],
@@ -1554,7 +1661,7 @@ class TestStartupInitialization(unittest.TestCase):
 
             async def run_test():
                 await self._reset_startup_state(main_module)
-                data_service_initializer = AsyncMock()
+                tool_service_initializer = AsyncMock()
                 proxy_probe = AsyncMock()
                 with (
                     patch.object(main_module, "KNOWLEDGE_DIR", folder),
@@ -1562,8 +1669,8 @@ class TestStartupInitialization(unittest.TestCase):
                     patch.object(main_module, "KNOWLEDGE_MAX_PERSONA_CHARS", 5),
                     patch.object(
                         main_module,
-                        "initialize_data_service_with_retry",
-                        new=data_service_initializer,
+                        "initialize_tool_service_with_retry",
+                        new=tool_service_initializer,
                     ),
                     patch.object(
                         main_module,
@@ -1597,8 +1704,8 @@ class TestStartupInitialization(unittest.TestCase):
                     ],
                     [("ERROR", f"Knowledge folder is invalid: {detail}")],
                 )
-                self.assertNotIn("LLM mode elected", "\n".join(rendered_logs))
-                data_service_initializer.assert_not_awaited()
+                self.assertNotIn("Tool module loaded", "\n".join(rendered_logs))
+                tool_service_initializer.assert_not_awaited()
                 proxy_probe.assert_not_awaited()
                 self.assertIsNone(main_module.checkpoint_connection)
                 self.assertIsNone(main_module.checkpoint_saver)
@@ -1606,44 +1713,44 @@ class TestStartupInitialization(unittest.TestCase):
 
             asyncio.run(run_test())
 
-    def test_invalid_knowledge_folder_missing_manifest_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_missing_manifest_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(None, ("manifest.toml",))
 
-    def test_invalid_knowledge_folder_unparseable_manifest_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_unparseable_manifest_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts("[[[\n", ("TOML",))
 
-    def test_invalid_knowledge_folder_unknown_key_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_unknown_key_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
             'dataset = "bez_durakov"\npersona = "x"\nlanguage = "ru"\n',
             ("language",),
         )
 
-    def test_invalid_knowledge_folder_bad_dataset_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_bad_dataset_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
             'dataset = "Bad_Dataset"\npersona = "x"\n',
             ("dataset",),
         )
 
-    def test_invalid_knowledge_folder_empty_persona_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_empty_persona_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
             'dataset = "bez_durakov"\npersona = ""\n',
             ("persona",),
         )
 
-    def test_invalid_knowledge_folder_overlong_persona_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_overlong_persona_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
             'dataset = "bez_durakov"\npersona = "xxxxxx"\n',
             ("persona", "max_persona_chars"),
         )
 
-    def test_invalid_knowledge_folder_dataset_mismatch_aborts_before_mode_election(self):
+    def test_invalid_knowledge_folder_dataset_mismatch_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
             'dataset = "wrong_db"\npersona = "x"\n',
             ("wrong_db", "bez_durakov"),
             expect_manifest_path=False,
         )
 
-    def test_knowledge_loads_once_before_database_and_probe_in_each_mode(self):
+    def test_knowledge_loads_once_before_the_tool_service_and_the_probe(self):
         main_module = self._get_main_module()
 
         original_knowledge_loader = main_module.load_knowledge
@@ -1659,9 +1766,10 @@ class TestStartupInitialization(unittest.TestCase):
                 loaded_knowledge = original_knowledge_loader(*args, **kwargs)
                 return loaded_knowledge
 
-            async def record_data_service_initialization():
-                call_order.append("data_service")
-                return object()
+            async def record_tool_service_initialization():
+                call_order.append("tool_service")
+                sqlalchemy = importlib.import_module("sqlalchemy")
+                return sqlalchemy.create_engine("sqlite://"), object(), ()
 
             async def record_probe(*_args, **_kwargs):
                 call_order.append("probe")
@@ -1681,8 +1789,8 @@ class TestStartupInitialization(unittest.TestCase):
                 ) as knowledge_loader,
                 patch.object(
                     main_module,
-                    "initialize_data_service_with_retry",
-                    side_effect=record_data_service_initialization,
+                    "initialize_tool_service_with_retry",
+                    side_effect=record_tool_service_initialization,
                 ),
                 patch.object(main_module, "probe_llm_proxy", side_effect=record_probe),
                 patch.object(
@@ -1693,23 +1801,25 @@ class TestStartupInitialization(unittest.TestCase):
                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
             ):
                 await main_module.startup_event()
-                await main_module.root()
-                await main_module.health_check()
+                await main_module.health_check(fastapi.Response())
                 loader_call_count = knowledge_loader.call_count
 
             await main_module.shutdown_event()
             return call_order, loader_call_count, created_agents, loaded_knowledge
 
-        for proxy_healthy, expected_mode in ((True, "agent"), (False, "fallback")):
-            with self.subTest(expected_mode=expected_mode):
+        for proxy_healthy in (True, False):
+            with self.subTest(proxy_healthy=proxy_healthy):
                 call_order, loader_call_count, created_agents, loaded_knowledge = asyncio.run(
                     run_test(proxy_healthy)
                 )
 
-                self.assertEqual(call_order, ["loader", "data_service", "probe"])
+                self.assertEqual(call_order, ["loader", "tool_service", "probe"])
                 self.assertEqual(loader_call_count, 1)
-                self.assertEqual(created_agents[0]["mode"], expected_mode)
-                self.assertIs(created_agents[0]["knowledge"], loaded_knowledge)
+                # A healthy probe builds the agent; an unhealthy one leaves it unbuilt and
+                # the backend refuses to serve until a later chat attempt re-probes.
+                self.assertEqual(bool(created_agents), proxy_healthy)
+                if proxy_healthy:
+                    self.assertIs(created_agents[0]["knowledge"], loaded_knowledge)
 
     def test_invalid_limits_abort_startup_when_knowledge_dir_is_unset(self):
         knowledge_module = importlib.import_module("agent.knowledge")
@@ -1723,20 +1833,20 @@ class TestStartupInitialization(unittest.TestCase):
                 patch.object(main_module, "load_knowledge") as knowledge_loader,
                 patch.object(
                     main_module,
-                    "initialize_data_service_with_retry",
+                    "initialize_tool_service_with_retry",
                     new=AsyncMock(),
-                ) as data_service_initializer,
+                ) as tool_service_initializer,
             ):
                 with self.assertRaises(knowledge_module.KnowledgeError) as raised:
                     await main_module.startup_event()
 
             self.assertEqual(raised.exception.key, "knowledge_max_topics")
             knowledge_loader.assert_not_called()
-            data_service_initializer.assert_not_awaited()
+            tool_service_initializer.assert_not_awaited()
 
         asyncio.run(run_test())
 
-    def test_configured_knowledge_byte_limit_is_validated_before_mode_election(self):
+    def test_configured_knowledge_byte_limit_is_validated_before_the_tool_service_loads(self):
         knowledge_module = importlib.import_module("agent.knowledge")
         main_module = self._get_main_module()
 
@@ -1745,15 +1855,15 @@ class TestStartupInitialization(unittest.TestCase):
 
         async def run_test():
             await self._reset_startup_state(main_module)
-            invalid_data_initializer = AsyncMock()
+            invalid_tool_initializer = AsyncMock()
             invalid_proxy_probe = AsyncMock()
             with (
                 patch.object(main_module, "KNOWLEDGE_DIR", None),
                 patch.object(main_module, "KNOWLEDGE_MAX_BYTES_PER_TURN", 0),
                 patch.object(
                     main_module,
-                    "initialize_data_service_with_retry",
-                    new=invalid_data_initializer,
+                    "initialize_tool_service_with_retry",
+                    new=invalid_tool_initializer,
                 ),
                 patch.object(
                     main_module,
@@ -1769,15 +1879,15 @@ class TestStartupInitialization(unittest.TestCase):
                 raised.exception.key,
                 "knowledge_max_bytes_per_turn",
             )
-            invalid_data_initializer.assert_not_awaited()
+            invalid_tool_initializer.assert_not_awaited()
             invalid_proxy_probe.assert_not_awaited()
             self.assertNotIn(
-                "LLM mode elected",
+                "Tool module loaded",
                 "\n".join(record.getMessage() for record in captured_logs.records),
             )
 
             await self._reset_startup_state(main_module)
-            valid_data_initializer = AsyncMock()
+            valid_tool_initializer = AsyncMock()
             valid_proxy_probe = AsyncMock()
             with (
                 patch.object(main_module, "KNOWLEDGE_DIR", None),
@@ -1789,8 +1899,8 @@ class TestStartupInitialization(unittest.TestCase):
                 ) as validate_limits,
                 patch.object(
                     main_module,
-                    "initialize_data_service_with_retry",
-                    new=valid_data_initializer,
+                    "initialize_tool_service_with_retry",
+                    new=valid_tool_initializer,
                 ),
                 patch.object(
                     main_module,
@@ -1803,66 +1913,232 @@ class TestStartupInitialization(unittest.TestCase):
 
             validated_limits = validate_limits.call_args.args[0]
             self.assertEqual(validated_limits.max_bytes_per_turn, 5000)
-            valid_data_initializer.assert_not_awaited()
+            valid_tool_initializer.assert_not_awaited()
             valid_proxy_probe.assert_not_awaited()
 
         asyncio.run(run_test())
 
-    def test_regression_startup_retries_database_initialization(self):
+    UNREACHABLE_URL = "postgresql+psycopg://reporter:sup3rs3cret@db.example:5432/warehouse"
+
+    def test_startup_retries_the_connection_check_before_succeeding(self):
+        """Given a database that comes up late, When startup runs, Then it retries and proceeds."""
         main_module = self._get_main_module()
-
-        created_service = object()
-        attempts = {"count": 0}
-
-        def fake_game_data_service():
-            attempts["count"] += 1
-            if attempts["count"] < 3:
-                raise RuntimeError("db not ready")
-            return created_service
-
+        engine = _ScriptedEngine(failures=2, error=RuntimeError("db not ready"))
         created_agent_system = object()
 
-        class FakeReportAgentSystem:
-            def __init__(self, api_key=None, service=None):
-                self.api_key = api_key
-                self.service = service
-
         async def run_test():
-            with patch.object(main_module, "GameDataService", side_effect=fake_game_data_service), \
+            with patch.object(main_module, "build_read_only_engine", return_value=engine), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=lambda **_kwargs: created_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
-                 patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=False)), \
-                 patch.object(main_module.asyncio, "sleep") as mock_sleep:
+                 patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=True)), \
+                 patch.object(main_module, "startup_sleep", new=AsyncMock()) as mock_sleep:
                 await self._reset_startup_state(main_module)
                 await main_module.startup_event()
 
-            self.assertEqual(attempts["count"], 3)
+            self.assertEqual(engine.attempts, 3)
             self.assertEqual(mock_sleep.await_count, 2)
-            self.assertIs(main_module.data_service, created_service)
+            self.assertIs(main_module.tool_engine, engine)
+            self.assertIsNotNone(main_module.tool_service)
             self.assertIs(main_module.agent_system, created_agent_system)
             await main_module.shutdown_event()
 
         asyncio.run(run_test())
-        print("✅ Startup retries database initialization before succeeding")
+        print("✅ Startup retries the database connection check before succeeding")
 
-    def test_regression_startup_reraises_after_retry_exhaustion(self):
+    def test_startup_builds_exactly_one_engine_and_hands_it_to_the_factory(self):
+        """Given startup, When it runs, Then one engine is built and the factory receives it."""
         main_module = self._get_main_module()
+        engine = _ScriptedEngine(failures=0, error=RuntimeError("unused"))
+        loaded = []
+
+        def fake_loader(import_path, given_engine):
+            loaded.append((import_path, given_engine))
+            return StubService(), ()
 
         async def run_test():
-            with patch.object(main_module, "GameDataService", side_effect=RuntimeError("db not ready")), \
-                 patch.object(main_module.asyncio, "sleep") as mock_sleep:
-                main_module.data_service = None
-                main_module.agent_system = None
+            with patch.object(
+                main_module, "build_read_only_engine", return_value=engine
+            ) as engine_builder, \
+                 patch.object(main_module, "load_tool_module", side_effect=fake_loader), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=lambda **_kwargs: object()), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=True)):
+                await self._reset_startup_state(main_module)
+                await main_module.startup_event()
+                await main_module.shutdown_event()
+
+            self.assertEqual(engine_builder.call_count, 1)
+            self.assertEqual(len(loaded), 1)
+            self.assertIs(loaded[0][1], engine)
+            self.assertEqual(loaded[0][0], main_module.DATASET_TOOLS_MODULE)
+
+        asyncio.run(run_test())
+        print("✅ Startup builds one engine and injects it into the factory")
+
+    def _assert_unreachable_line(self, records, *, attempts):
+        """The single AC-14 line, naming the target and carrying no credential."""
+        lines = [
+            record.getMessage()
+            for record in records
+            if record.getMessage().startswith("Database is unreachable")
+        ]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(
+            lines[0].startswith(
+                f"Database is unreachable after {attempts} attempts: "
+                "dialect=postgresql host=db.example port=5432 database=warehouse reason="
+            ),
+            lines[0],
+        )
+        for record in records:
+            self.assertNotIn("sup3rs3cret", record.getMessage())
+
+    def test_an_unreachable_database_exits_after_five_attempts_with_one_line(self):
+        """Given an unreachable database, When startup runs, Then it gives up loudly and once."""
+        main_module = self._get_main_module()
+        engine = _ScriptedEngine(
+            failures=main_module.STARTUP_RETRY_ATTEMPTS,
+            error=RuntimeError("connection refused"),
+        )
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "DATABASE_URL", self.UNREACHABLE_URL), \
+                 patch.object(main_module, "build_read_only_engine", return_value=engine), \
+                 patch.object(main_module, "startup_sleep", new=AsyncMock()) as mock_sleep, \
+                 self.assertLogs(main_module.logger, level="WARNING") as captured_logs:
                 with self.assertRaises(RuntimeError):
                     await main_module.startup_event()
 
+            self.assertEqual(engine.attempts, main_module.STARTUP_RETRY_ATTEMPTS)
             self.assertEqual(mock_sleep.await_count, main_module.STARTUP_RETRY_ATTEMPTS - 1)
+            self.assertEqual(
+                mock_sleep.await_args_list,
+                [call(main_module.STARTUP_RETRY_DELAY_SECONDS)]
+                * (main_module.STARTUP_RETRY_ATTEMPTS - 1),
+            )
+            self._assert_unreachable_line(
+                captured_logs.records, attempts=main_module.STARTUP_RETRY_ATTEMPTS
+            )
+            self.assertIsNone(main_module.agent_system)
 
         asyncio.run(run_test())
         print("✅ Startup fails fast after bounded database retries")
 
-    def test_probe_failure_elects_fallback_and_health_reports_proxy_down(self):
-        """Given an offline proxy, When startup probes it, Then fallback mode is elected."""
+    def test_an_unusable_dialect_reports_the_same_line_without_attempting(self):
+        """Given an uninstalled dialect, When the engine is built, Then one line names the target."""
+        main_module = self._get_main_module()
+        sqlalchemy_exc = importlib.import_module("sqlalchemy.exc")
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "DATABASE_URL", self.UNREACHABLE_URL), \
+                 patch.object(
+                     main_module,
+                     "build_read_only_engine",
+                     side_effect=sqlalchemy_exc.NoSuchModuleError(
+                         "Can't load plugin: sqlalchemy.dialects:nosuch"
+                     ),
+                 ), \
+                 patch.object(main_module, "startup_sleep", new=AsyncMock()) as mock_sleep, \
+                 self.assertLogs(main_module.logger, level="ERROR") as captured_logs:
+                with self.assertRaises(sqlalchemy_exc.NoSuchModuleError):
+                    await main_module.startup_event()
+
+            self.assertEqual(mock_sleep.await_count, 0)
+            self._assert_unreachable_line(captured_logs.records, attempts=0)
+
+        asyncio.run(run_test())
+        print("✅ An unusable dialect reports the unreachable line without retrying")
+
+    def test_a_malformed_url_reports_one_line_rather_than_a_traceback(self):
+        """Given a URL that will not parse, When startup runs, Then it still reports one line.
+
+        A malformed URL raises from make_url itself, before any engine is built, which is the
+        first misconfiguration an operator swapping databases hits.
+        """
+        main_module = self._get_main_module()
+        sqlalchemy_exc = importlib.import_module("sqlalchemy.exc")
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "DATABASE_URL", "definitely not a url"), \
+                 patch.object(main_module, "startup_sleep", new=AsyncMock()) as mock_sleep, \
+                 self.assertLogs(main_module.logger, level="ERROR") as captured_logs:
+                with self.assertRaises(sqlalchemy_exc.ArgumentError):
+                    await main_module.startup_event()
+
+            self.assertEqual(mock_sleep.await_count, 0)
+            lines = [
+                record.getMessage()
+                for record in captured_logs.records
+                if record.getMessage().startswith("Database is unreachable")
+            ]
+            self.assertEqual(len(lines), 1, lines)
+            self.assertIn("after 0 attempts", lines[0])
+            self.assertIn("dialect=unparsed", lines[0])
+            self.assertIsNone(main_module.agent_system)
+
+        asyncio.run(run_test())
+        print("✅ A malformed database URL reports the unreachable line, not a traceback")
+
+    def test_a_broken_tool_module_aborts_startup_with_the_preflight_message(self):
+        """Given a bad module, When startup runs, Then it raises what the preflight prints."""
+        main_module = self._get_main_module()
+        toolmodule = importlib.import_module("agent.toolmodule")
+        engine = _ScriptedEngine(failures=0, error=RuntimeError("unused"))
+        cases = {
+            "unimportable": toolmodule.ToolModuleError(
+                "could not be imported: No module named 'nope'", module="nope"
+            ),
+            "missing factory": toolmodule.ToolModuleError(
+                "has no build_service factory", module="operator.module"
+            ),
+            "undocumented method": toolmodule.ToolModuleError(
+                "has no docstring", module="operator.module", method="silent"
+            ),
+        }
+
+        for label, error in cases.items():
+            with self.subTest(case=label):
+
+                async def run_test(raised_error=error):
+                    await self._reset_startup_state(main_module)
+                    disposals_before = engine.disposals
+                    with patch.object(main_module, "build_read_only_engine", return_value=engine), \
+                         patch.object(main_module, "load_tool_module", side_effect=raised_error):
+                        with self.assertRaises(toolmodule.ToolModuleError) as caught:
+                            await main_module.startup_event()
+                    self.assertEqual(str(caught.exception), str(raised_error))
+                    self.assertIsNone(main_module.agent_system)
+                    # The connection check already checked a connection out of the pool, and
+                    # the caller never receives the engine, so nothing else could dispose it.
+                    self.assertEqual(engine.disposals, disposals_before + 1)
+                    self.assertIsNone(main_module.tool_engine)
+
+                asyncio.run(run_test())
+
+        print("✅ A broken tool module aborts startup and hands the engine back")
+
+    def test_a_dataset_config_error_aborts_startup_naming_the_key(self):
+        """Given a [dataset] misconfiguration, When startup runs, Then it aborts naming the key."""
+        main_module = self._get_main_module()
+        message = "dataset.tools_module is not configured; add a [dataset] section"
+
+        async def run_test():
+            await self._reset_startup_state(main_module)
+            with patch.object(main_module, "DATASET_CONFIG_ERROR", message):
+                with self.assertRaises(RuntimeError) as caught:
+                    await main_module.startup_event()
+
+            self.assertEqual(str(caught.exception), message)
+            self.assertIsNone(main_module.agent_system)
+
+        asyncio.run(run_test())
+        print("✅ A dataset config error aborts startup naming the key")
+
+    def test_probe_failure_keeps_process_up_and_refuses_to_serve(self):
+        """Given an offline proxy, When startup probes it, Then the process serves 503 on both."""
         main_module = self._get_main_module()
         created_agents = []
 
@@ -1873,7 +2149,7 @@ class TestStartupInitialization(unittest.TestCase):
         async def run_test():
             probe_sleep = AsyncMock()
             await self._reset_startup_state(main_module)
-            with patch.object(main_module, "GameDataService", return_value=object()), \
+            with self._tool_service_patch(main_module, object()), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
                  patch.object(main_module, "probe_sleep", probe_sleep), \
@@ -1883,19 +2159,98 @@ class TestStartupInitialization(unittest.TestCase):
                      side_effect=main_module.requests.ConnectionError("offline"),
                  ) as request_get:
                 await main_module.startup_event()
-                health = await main_module.health_check()
 
-            self.assertEqual(created_agents[0]["mode"], "fallback")
-            self.assertIs(created_agents[0]["checkpointer"], main_module.checkpoint_saver)
+                health_response = fastapi.Response()
+                health = await main_module.health_check(health_response)
+
+                chat_response = fastapi.Response()
+                chat = await main_module.chat(
+                    main_module.ChatMessage(message="привет"), chat_response
+                )
+
+            self.assertEqual(created_agents, [])
+            self.assertIsNone(main_module.agent_system)
+            self.assertEqual(health_response.status_code, 503)
             self.assertFalse(health["services"]["llm_proxy"])
-            self.assertEqual(request_get.call_count, main_module.PROBE_RETRY_ATTEMPTS)
+            self.assertEqual(chat_response.status_code, 503)
+            self.assertFalse(chat.success)
+            self.assertTrue(chat.error)
+            self.assertEqual(chat.message, "Для ответа нужна доступная языковая модель.")
+            # Five startup attempts plus one re-probe from the refused chat call.
+            self.assertEqual(request_get.call_count, main_module.PROBE_RETRY_ATTEMPTS + 1)
             self.assertEqual(probe_sleep.await_count, main_module.PROBE_RETRY_ATTEMPTS - 1)
             await main_module.shutdown_event()
 
         asyncio.run(run_test())
+        print("✅ An unreachable model keeps the process up and refuses to serve")
 
-    def test_healthy_probe_elects_agent_and_health_reports_proxy_up(self):
-        """Given a deeply healthy proxy, When startup probes it, Then agent mode is elected."""
+    def test_probe_failure_recovers_on_a_later_chat_attempt(self):
+        """Given a proxy that comes back, When chat is called again, Then the agent is built."""
+        main_module = self._get_main_module()
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+
+            class _Agent:
+                async def process_user_request(self, _message, session_id):
+                    return {
+                        "success": True,
+                        "data": None,
+                        "message": "готово",
+                        "query_info": [],
+                        "timestamp": "t",
+                    }
+
+            return _Agent()
+
+        async def run_test():
+            probe_sleep = AsyncMock()
+            healthy = self.ProbeResponse(["gpt-4o"], [])
+            offline = main_module.requests.ConnectionError("offline")
+            # Five failures for startup, one more for the first chat attempt, then healthy.
+            effects = [offline] * (main_module.PROBE_RETRY_ATTEMPTS + 1) + [healthy]
+            await self._reset_startup_state(main_module)
+            with self._tool_service_patch(main_module, object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "probe_sleep", probe_sleep), \
+                 patch.object(main_module.requests, "get", side_effect=effects) as request_get:
+                await main_module.startup_event()
+
+                first_response = fastapi.Response()
+                first = await main_module.chat(
+                    main_module.ChatMessage(message="первый"), first_response
+                )
+                attempts_after_first = request_get.call_count
+
+                second_response = fastapi.Response()
+                second = await main_module.chat(
+                    main_module.ChatMessage(message="второй"), second_response
+                )
+                attempts_after_second = request_get.call_count
+
+                health_response = fastapi.Response()
+                health = await main_module.health_check(health_response)
+
+            self.assertEqual(first_response.status_code, 503)
+            self.assertFalse(first.success)
+            self.assertEqual(second_response.status_code, 200)
+            self.assertTrue(second.success)
+            self.assertEqual(second.message, "готово")
+            self.assertEqual(len(created_agents), 1)
+            # Exactly one extra probe per chat attempt, no in-request retries.
+            self.assertEqual(attempts_after_first, main_module.PROBE_RETRY_ATTEMPTS + 1)
+            self.assertEqual(attempts_after_second, main_module.PROBE_RETRY_ATTEMPTS + 2)
+            self.assertEqual(health_response.status_code, 200)
+            self.assertTrue(health["services"]["llm_proxy"])
+            await main_module.shutdown_event()
+
+        asyncio.run(run_test())
+        print("✅ A later chat attempt re-probes and recovers")
+
+    def test_healthy_probe_builds_the_agent_and_health_reports_proxy_up(self):
+        """Given a deeply healthy proxy, When startup probes it, Then the agent is built."""
         main_module = self._get_main_module()
         created_agents = []
 
@@ -1907,15 +2262,16 @@ class TestStartupInitialization(unittest.TestCase):
             probe_sleep = AsyncMock()
             response = self.ProbeResponse(["gpt-4o"], [])
             await self._reset_startup_state(main_module)
-            with patch.object(main_module, "GameDataService", return_value=object()), \
+            with self._tool_service_patch(main_module, object()), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
                  patch.object(main_module, "probe_sleep", probe_sleep), \
                  patch.object(main_module.requests, "get", return_value=response) as request_get:
                 await main_module.startup_event()
-                health = await main_module.health_check()
+                health = await main_module.health_check(fastapi.Response())
 
-            self.assertEqual(created_agents[0]["mode"], "agent")
+            self.assertEqual(len(created_agents), 1)
+            self.assertIs(created_agents[0]["checkpointer"], main_module.checkpoint_saver)
             self.assertTrue(health["services"]["llm_proxy"])
             self.assertEqual(request_get.call_count, 1)
             self.assertEqual(probe_sleep.await_count, 0)
@@ -1936,7 +2292,7 @@ class TestStartupInitialization(unittest.TestCase):
             probe_sleep = AsyncMock()
             response = self.ProbeResponse(["selected-model"], ["unrelated-model"])
             await self._reset_startup_state(main_module)
-            with patch.object(main_module, "GameDataService", return_value=object()), \
+            with self._tool_service_patch(main_module, object()), \
                  patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
                  patch.object(main_module, "AGENT_MODEL", "selected-model", create=True), \
@@ -1946,7 +2302,7 @@ class TestStartupInitialization(unittest.TestCase):
 
             await main_module.shutdown_event()
 
-            self.assertEqual(created_agents[0]["mode"], "agent")
+            self.assertEqual(len(created_agents), 1)
             request_get.assert_called_once_with(
                 f"{main_module.LITELLM_BASE_URL}/health",
                 params={"model": "selected-model"},
@@ -2011,12 +2367,12 @@ class TestStartupInitialization(unittest.TestCase):
                     [{"exception_status": exception_status}],
                     status_code=503,
                 )
-                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
                     main_module,
                     [response] * attempts,
                 )
 
-                self.assertEqual(mode, "fallback")
+                self.assertFalse(proxy_healthy)
                 self.assertEqual(request_count, 1)
                 self.assertEqual(sleep_count, 0)
                 self.assertIn("verdict=permanent", probe_log)
@@ -2029,12 +2385,12 @@ class TestStartupInitialization(unittest.TestCase):
         for status_code in (400, 401, 403, 404):
             with self.subTest(status_code=status_code):
                 response = self.ProbeResponse([], [], status_code=status_code)
-                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
                     main_module,
                     [response] * attempts,
                 )
 
-                self.assertEqual(mode, "fallback")
+                self.assertFalse(proxy_healthy)
                 self.assertEqual(request_count, 1)
                 self.assertEqual(sleep_count, 0)
                 self.assertIn("verdict=permanent", probe_log)
@@ -2060,12 +2416,12 @@ class TestStartupInitialization(unittest.TestCase):
 
         for name, request_effects in cases:
             with self.subTest(name=name):
-                mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+                proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
                     main_module,
                     request_effects,
                 )
 
-                self.assertEqual(mode, "fallback")
+                self.assertFalse(proxy_healthy)
                 self.assertEqual(request_count, attempts)
                 self.assertEqual(sleep_count, attempts - 1)
                 self.assertIn("verdict=transient", probe_log)
@@ -2078,12 +2434,12 @@ class TestStartupInitialization(unittest.TestCase):
             status_code=200,
         )
 
-        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+        proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
             main_module,
             [response],
         )
 
-        self.assertEqual(mode, "agent")
+        self.assertTrue(proxy_healthy)
         self.assertEqual(request_count, 1)
         self.assertEqual(sleep_count, 0)
         self.assertIn("verdict=healthy", probe_log)
@@ -2095,12 +2451,12 @@ class TestStartupInitialization(unittest.TestCase):
             self.ProbeResponse(["model"], [], 200),
         ]
 
-        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+        proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
             main_module,
             responses,
         )
 
-        self.assertEqual(mode, "agent")
+        self.assertTrue(proxy_healthy)
         self.assertEqual(request_count, 2)
         self.assertEqual(sleep_count, 1)
         self.assertIn("verdict=healthy", probe_log)
@@ -2110,12 +2466,12 @@ class TestStartupInitialization(unittest.TestCase):
         attempts = main_module.PROBE_RETRY_ATTEMPTS
         response = self.RaisingJsonResponse(401)
 
-        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+        proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
             main_module,
             [response] * attempts,
         )
 
-        self.assertEqual(mode, "fallback")
+        self.assertFalse(proxy_healthy)
         self.assertEqual(request_count, 1)
         self.assertEqual(sleep_count, 0)
         self.assertIn("verdict=permanent", probe_log)
@@ -2126,12 +2482,12 @@ class TestStartupInitialization(unittest.TestCase):
         attempts = main_module.PROBE_RETRY_ATTEMPTS
         responses = [self.ProbeResponse("model", [], 200)] * attempts
 
-        mode, request_count, sleep_count, probe_log = self._run_probe_startup(
+        proxy_healthy, request_count, sleep_count, probe_log = self._run_probe_startup(
             main_module,
             responses,
         )
 
-        self.assertEqual(mode, "fallback")
+        self.assertFalse(proxy_healthy)
         self.assertEqual(request_count, attempts)
         self.assertEqual(sleep_count, attempts - 1)
         self.assertIn("verdict=transient", probe_log)
@@ -2195,14 +2551,14 @@ class TestStartupInitialization(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    def test_health_still_returns_503_without_data_service(self):
-        """Given no data service, When health is requested, Then readiness remains unavailable."""
+    def test_health_still_returns_503_without_a_tool_service(self):
+        """Given no tool service, When health is requested, Then readiness remains unavailable."""
         main_module = self._get_main_module()
 
         async def run_test():
-            with patch.object(main_module, "data_service", None):
+            with patch.object(main_module, "tool_service", None):
                 with self.assertRaises(main_module.HTTPException) as raised:
-                    await main_module.health_check()
+                    await main_module.health_check(fastapi.Response())
 
             self.assertEqual(raised.exception.status_code, 503)
 
@@ -2214,7 +2570,7 @@ class TestStartupInitialization(unittest.TestCase):
 
         async def run_test():
             await self._reset_startup_state(main_module)
-            with patch.object(main_module, "GameDataService", return_value=object()), \
+            with self._tool_service_patch(main_module, object()), \
                  patch.object(main_module, "ReportAgentSystem", return_value=object()), \
                  patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
                  patch.object(main_module, "probe_llm_proxy", new=AsyncMock(return_value=False)):

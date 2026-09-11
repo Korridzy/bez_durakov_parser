@@ -31,7 +31,7 @@ def main() -> int:
         validate_limits(knowledge_limits)
         if KNOWLEDGE_DIR is None:
             print(
-                "Knowledge folder is not configured (webreport.knowledge_dir is unset); "
+                "Knowledge folder is not configured (dataset.knowledge_dir is unset); "
                 "the agent runs without dataset knowledge."
             )
             return 0

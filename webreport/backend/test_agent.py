@@ -29,6 +29,9 @@ report_agent_cases = importlib.import_module("test_agent_report_agent")
 checkpointer_cases = importlib.import_module("test_agent_checkpointer")
 knowledge_cases = importlib.import_module("test_agent_knowledge")
 knowledge_config_cases = importlib.import_module("test_agent_config")
+engine_cases = importlib.import_module("test_agent_engine")
+toolmodule_cases = importlib.import_module("test_agent_toolmodule")
+net_guard_cases = importlib.import_module("test_agent_net_guard")
 net_guard = importlib.import_module("test_net_guard")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
@@ -157,12 +160,52 @@ class TestKnowledgeConfig(knowledge_config_cases.KnowledgeConfigTests):
     pass
 
 
+class TestDatabaseNameDerivation(knowledge_config_cases.DatabaseNameDerivationTests):
+    """DATABASE_NAME derivation for server and file-based URLs."""
+
+
+class TestDatasetConfig(knowledge_config_cases.DatasetConfigTests):
+    """The [dataset] section and its soft configuration error."""
+
+
+class TestEngineMechanism(engine_cases.ReadOnlyMechanismTests):
+    """Which read-only mechanism each dialect gets."""
+
+
+class TestEngineUrl(engine_cases.ReadOnlyUrlTests):
+    """The SQLite read-only URL rewrite."""
+
+
+class TestEngineRefusal(engine_cases.ReadOnlyEngineTests):
+    """A real SQLite engine refusing writes."""
+
+
+class TestToolModuleDiscovery(toolmodule_cases.DiscoveryTests):
+    """What discovery keeps and what it skips."""
+
+
+class TestToolModuleRefusal(toolmodule_cases.DiscoveryRefusalTests):
+    """The ways a method fails the tool contract."""
+
+
+class TestToolModuleLoader(toolmodule_cases.LoaderTests):
+    """Importing an operator module and calling its factory."""
+
+
+class TestDefaultToolModule(toolmodule_cases.DefaultModuleTests):
+    """The shipped bez_durakov module and its eight pinned descriptions."""
+
+
+class TestNetGuardDerivation(net_guard_cases.NetGuardDerivationTests):
+    """What the egress guard permits for host-less and hosted database URLs."""
+
+
 class TestKnowledge(knowledge_cases.KnowledgeTypesTests):
     pass
 
 
 class TestReportAgentSystem(report_agent_cases.ReportAgentSystemTests):
-    """Fixed-mode report adapter with frozen fallback and checkpoint continuity."""
+    """Report adapter over the discovered tools, with checkpoint continuity."""
 
 
 class TestCheckpointer(checkpointer_cases.TestCheckpointerCases):
