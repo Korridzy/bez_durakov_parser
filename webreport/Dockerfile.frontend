@@ -1,34 +1,13 @@
-FROM python:3.11-slim
+FROM node:22-alpine AS build
+WORKDIR /ui
+COPY webreport/frontend-web/package.json webreport/frontend-web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY webreport/frontend-web/index.html webreport/frontend-web/tsconfig.json webreport/frontend-web/vite.config.ts ./
+COPY webreport/frontend-web/src ./src
+COPY webreport/frontend-web/public ./public
+RUN npm run build
 
-ARG POETRY_VERSION=2.1.3
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Match the Poetry release used to generate the lock file.
-RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
-
-# Create app directory placeholder
-# Code will be mounted as volume at runtime
-RUN mkdir -p /app
-
-# Copy locked dependency metadata from the build context.
-COPY webreport/frontend/pyproject.toml webreport/frontend/poetry.lock /tmp/
-
-# Configure poetry to not create virtual env (we're in container)
-RUN poetry config virtualenvs.create false
-
-# Install dependencies
-RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
-
-# Expose port
+FROM nginx:1.28-alpine
+COPY webreport/frontend-web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /ui/dist /usr/share/nginx/html
 EXPOSE 8501
-EXPOSE 5679
-
-# Run the frontend (code will be mounted as volume)
-CMD ["python", "start.py"]

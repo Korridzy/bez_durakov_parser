@@ -43,7 +43,7 @@ services:
       dockerfile: webreport/Dockerfile.backend
     container_name: webreport-backend
     ports:
-      - "${WEBREPORT_BACKEND_PORT}:8000"
+      - "127.0.0.1:${WEBREPORT_BACKEND_PORT}:8000"
     env_file:
       - path: .env.backend
         required: false
@@ -89,12 +89,10 @@ services:
       dockerfile: webreport/Dockerfile.frontend
     container_name: webreport-frontend
     ports:
-      - "${WEBREPORT_FRONTEND_PORT}:8501"
+      - "127.0.0.1:${WEBREPORT_FRONTEND_PORT}:8501"
     env_file:
       - path: .env.frontend
         required: false
-    volumes:
-      - ./frontend:/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

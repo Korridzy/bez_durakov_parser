@@ -39,7 +39,7 @@ endif
 
 COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
 
-.PHONY: help generate-env validate-knowledge validate-tools test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env validate-knowledge validate-tools test test-workspace test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -60,6 +60,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test           - Run the offline backend suite (no running stack needed)"
+	@echo "  make test-workspace - Test project workspace and analytics connections offline"
 	@echo "  make test-postgres  - Run the acceptance lane against a throwaway PostgreSQL"
 	@echo "  make test-e2e-setup - One-time: install frontend dev deps and Chromium (needs network)"
 	@echo "  make test-e2e       - Run the offline stub-backed Playwright lane"
@@ -83,7 +84,7 @@ generate-env:
 
 start: generate-env
 	@echo "🐳 Starting services with Docker Compose..."
-	$(DOCKER_COMPOSE) up -d $(COMPOSE_SERVICES)
+	$(DOCKER_COMPOSE) up -d --build $(COMPOSE_SERVICES)
 	@echo ""
 	@echo "✅ Services started!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -147,13 +148,16 @@ test-postgres: generate-env
 	 $(COMPOSE_TEST) rm -fsv postgres_test; \
 	 exit $$status
 
+test-workspace: generate-env
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CONFIG_LOCAL_FILE= -e BD_CHECKPOINT_DB_PATH=/tmp/workspace-tests.db backend python /app/test_workspace.py
+
 test-e2e-setup:
 	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."
 	cd frontend && PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring poetry install --with dev --no-root && poetry run playwright install chromium
 	@echo "✅ e2e lane ready. Run: make test-e2e"
 
 test-e2e:
-	@echo "🎭 Running the offline stub-backed Playwright lane..."
+	@echo "🎭 Running the legacy Streamlit Playwright lane (not the React workspace)..."
 	cd frontend && poetry run pytest tests_e2e -x -q
 	@echo ""
 
