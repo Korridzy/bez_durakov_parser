@@ -25,8 +25,24 @@ config_file_path = os.path.join(config_directory, config_file_name)
 with open(config_file_path, "rb") as f:
     config = tomllib.load(f)
 
-if 'BD_CONFIG_FILE' not in os.environ:
+# The overlay merged on top of the base config. By default it is the server-local
+# bd_shared/config.local.toml, and BD_CONFIG_LOCAL_FILE points at an overlay kept outside
+# the repository, which is how a second dataset supplies its own database, tool module and
+# knowledge folder without any tracked file changing. A configured path that does not exist
+# is an error, because falling back to the default overlay would serve the wrong dataset.
+local_config_override = os.environ.get('BD_CONFIG_LOCAL_FILE')
+if local_config_override:
+    local_config_file_path = os.path.abspath(local_config_override)
+    if not os.path.isfile(local_config_file_path):
+        raise FileNotFoundError(
+            f"BD_CONFIG_LOCAL_FILE points at {local_config_file_path}, which does not exist"
+        )
+elif 'BD_CONFIG_FILE' in os.environ:
+    local_config_file_path = None
+else:
     local_config_file_path = os.path.join(config_directory, 'config.local.toml')
+
+if local_config_file_path is not None:
     if os.path.isfile(local_config_file_path):
         with open(local_config_file_path, "rb") as f:
             local_config: dict[str, LocalConfigValue | dict[str, LocalConfigValue]] = tomllib.load(f)
@@ -117,7 +133,9 @@ KNOWLEDGE_MAX_DOC_BYTES = config["webreport"].get("knowledge_max_doc_bytes", 655
 KNOWLEDGE_MAX_BYTES_PER_TURN = config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
 
 
-def _dataset_config_error(webreport_section: dict, dataset_section: dict) -> str | None:
+def _dataset_config_error(
+    webreport_section: dict[str, object], dataset_section: dict[str, object]
+) -> str | None:
     """Report a [dataset] misconfiguration as a message instead of raising.
 
     The env generator, the network guard and the alembic test all import this module, so a
