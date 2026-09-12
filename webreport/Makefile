@@ -1,4 +1,42 @@
 DOCKER_COMPOSE ?= docker compose
+
+# Dataset switch. DATASET names a dataset directory kept outside this repository, by
+# default ../range/$(DATASET); override DATASET_DIR with an absolute path when the
+# directory lives elsewhere, which is the normal case on Windows. With DATASET unset every
+# target below behaves exactly as before and serves bez_durakov from the bundled MySQL.
+DATASET ?=
+ifneq ($(strip $(DATASET)),)
+DATASET_DIR ?= $(abspath ../range/$(DATASET))
+BD_CONFIG_LOCAL_FILE ?= $(DATASET_DIR)/config/config.local.toml
+export DATASET
+export DATASET_DIR
+export BD_CONFIG_LOCAL_FILE
+# override, because a DOCKER_COMPOSE given on the command line would otherwise win and
+# silently start the base topology against the dataset config.
+override DOCKER_COMPOSE := $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dataset.yml
+# A dataset may ship its own Compose fragment, which is how it joins the backend to the
+# network its database already runs on. It stays in the dataset directory, so this
+# repository knows nothing about any particular database topology. The existence check goes
+# through the shell rather than $(wildcard), which would split a path containing spaces.
+DATASET_COMPOSE_FILE ?= $(DATASET_DIR)/webreport.compose.yml
+ifneq ($(shell test -f "$(DATASET_COMPOSE_FILE)" && echo found),)
+override DOCKER_COMPOSE := $(DOCKER_COMPOSE) -f "$(DATASET_COMPOSE_FILE)"
+endif
+COMPOSE_SERVICES := litellm backend frontend
+COMPOSE_BUILD_SERVICES := backend frontend
+define dataset_preflight
+@test -d "$(DATASET_DIR)" || { echo "❌ DATASET=$(DATASET): no dataset directory at $(DATASET_DIR)"; exit 1; }
+@test -f "$(BD_CONFIG_LOCAL_FILE)" || { echo "❌ DATASET=$(DATASET): no config overlay at $(BD_CONFIG_LOCAL_FILE)"; exit 1; }
+@echo "📦 Dataset: $(DATASET) ($(DATASET_DIR))"
+endef
+else
+COMPOSE_SERVICES :=
+COMPOSE_BUILD_SERVICES :=
+define dataset_preflight
+@:
+endef
+endif
+
 COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
 
 .PHONY: help generate-env validate-knowledge validate-tools test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
@@ -9,6 +47,8 @@ help:
 	@echo ""
 	@echo "Docker Operations:"
 	@echo "  make generate-env - Generate Compose and service env files"
+	@echo "  make start DATASET=<name> - Start against the dataset in ../range/<name>"
+	@echo "                              (add DATASET_DIR=<abs path> when it lives elsewhere)"
 	@echo "  make start       - Start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
@@ -37,12 +77,13 @@ help:
 	@echo ""
 
 generate-env:
+	$(dataset_preflight)
 	[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
 	PYTHONPATH="$(abspath ..)" poetry run python generate_env.py
 
 start: generate-env
 	@echo "🐳 Starting services with Docker Compose..."
-	$(DOCKER_COMPOSE) up -d
+	$(DOCKER_COMPOSE) up -d $(COMPOSE_SERVICES)
 	@echo ""
 	@echo "✅ Services started!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -77,14 +118,14 @@ logs:
 
 build: generate-env
 	@echo "🔨 Building Docker images..."
-	$(DOCKER_COMPOSE) build
+	$(DOCKER_COMPOSE) build $(COMPOSE_BUILD_SERVICES)
 	@echo "✅ Build complete"
 
 rebuild: generate-env validate-knowledge validate-tools
 	@echo "🔨 Rebuilding and restarting services..."
 	$(DOCKER_COMPOSE) down
-	$(DOCKER_COMPOSE) build
-	$(DOCKER_COMPOSE) up -d
+	$(DOCKER_COMPOSE) build $(COMPOSE_BUILD_SERVICES)
+	$(DOCKER_COMPOSE) up -d $(COMPOSE_SERVICES)
 	@echo "✅ Services rebuilt and started"
 
 test: generate-env
@@ -125,6 +166,10 @@ clean:
 	@echo "✅ Cleanup complete"
 
 fetch-data: generate-env
+	@if [ -n "$(strip $(DATASET))" ]; then \
+		echo "❌ fetch-data collects bez_durakov XLSM files; it does not apply to DATASET=$(DATASET)"; \
+		exit 1; \
+	fi
 	@echo "🔄 Starting manual XLSM fetch..."
 	$(DOCKER_COMPOSE) exec -T data_collector python fetch_pipeline.py
 

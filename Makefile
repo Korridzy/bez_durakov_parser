@@ -2,6 +2,17 @@ SHELL := /bin/bash
 DOCKER_COMPOSE ?= docker compose
 PYTHON_VERSION ?= 3.11
 
+# Dataset switch, forwarded to webreport/Makefile, which owns the Compose wiring. Unset,
+# every target serves bez_durakov exactly as before. The targets that belong to the
+# bez_durakov data itself refuse to run under a foreign dataset instead of touching it.
+DATASET ?=
+define bez_only
+@if [ -n "$(strip $(DATASET))" ]; then \
+	echo "❌ $@ belongs to the bez_durakov dataset; it does not apply to DATASET=$(DATASET)"; \
+	exit 1; \
+fi
+endef
+
 .PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
@@ -17,6 +28,8 @@ help:
 	@echo ""
 	@echo "WebReport stack:"
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
+	@echo "  make webreport-start DATASET=<name> - Start against the dataset in range/<name>"
+	@echo "                         (add DATASET_DIR=<abs path> when it lives elsewhere)"
 	@echo "  make webreport-stop   - Stop WebReport stack"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
 	@echo "  make validate-tools   - Validate the configured operator tool module"
@@ -86,6 +99,7 @@ test:
 	}; \
 	run poetry run python test_alembic_migration.py; \
 	run poetry run python bd_shared/test_db_engine.py; \
+	run poetry run python bd_shared/test_config_local_override.py; \
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
 	run $(MAKE) -C webreport test; \
 	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py'; \
@@ -101,6 +115,7 @@ test:
 	exit $$status
 
 upgrade-db:
+	$(bez_only)
 	@poetry run alembic upgrade head
 
 upgrade-code:
@@ -156,7 +171,11 @@ upgrade-code:
 
 # WebReport Docker management
 webreport-start:
-	@echo "🚀 Запуск WebReport (MySQL + Backend + Frontend)..."
+	@if [ -n "$(strip $(DATASET))" ]; then \
+		echo "🚀 Запуск WebReport для набора данных $(DATASET) (LiteLLM + Backend + Frontend)..."; \
+	else \
+		echo "🚀 Запуск WebReport (MySQL + Backend + Frontend)..."; \
+	fi
 	cd webreport && $(MAKE) start
 	@echo ""
 	@echo "✅ WebReport запущен!"
@@ -164,7 +183,7 @@ webreport-start:
 	@echo "🎨 Frontend:  http://localhost:$$(grep WEBREPORT_FRONTEND_PORT webreport/.env | cut -d'=' -f2)"
 	@echo "🔌 Backend:   http://localhost:$$(grep WEBREPORT_BACKEND_PORT webreport/.env | cut -d'=' -f2)"
 	@echo "📚 API Docs:  http://localhost:$$(grep WEBREPORT_BACKEND_PORT webreport/.env | cut -d'=' -f2)/docs"
-	@echo "🗄️  MySQL:    localhost:3306"
+	@if [ -z "$(strip $(DATASET))" ]; then echo "🗄️  MySQL:    localhost:3306"; fi
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 webreport-stop:
@@ -172,30 +191,34 @@ webreport-stop:
 	cd webreport && $(MAKE) stop
 
 validate-knowledge:
-	cd webreport && $(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.knowledge_cli
+	$(MAKE) -C webreport validate-knowledge
 
 validate-tools:
-	cd webreport && $(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.tools_cli
+	$(MAKE) -C webreport validate-tools
 
 restart:
 	$(MAKE) -C webreport restart
 
 # MySQL only management
 mysql-start:
+	$(bez_only)
 	@echo "🗄️  Запуск MySQL..."
 	cd webreport && PYTHONPATH="$(CURDIR)" poetry run python generate_env.py && $(DOCKER_COMPOSE) up -d mysql
 	@echo "✅ MySQL запущен на localhost:3306"
 
 mysql-stop:
+	$(bez_only)
 	@echo "🛑 Остановка MySQL..."
 	cd webreport && $(DOCKER_COMPOSE) stop mysql
 	@echo "✅ MySQL остановлен"
 
 # Data Collector targets
 fetch-data:
+	$(bez_only)
 	cd webreport && $(MAKE) fetch-data
 
 fetch-data-log:
+	$(bez_only)
 	cd webreport && $(MAKE) fetch-data-log
 
 logs:

@@ -36,6 +36,7 @@ webreport/
 | Model availability | `backend/main.py` | A startup probe decides whether the agent is built; without a model the backend refuses to serve and re-probes on each chat attempt |
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
+| Serve another dataset | `docker-compose.dataset.yml` + `Makefile` | `make start DATASET=<name>` binds `DATASET_DIR` at `/dataset`, points `BD_CONFIG_LOCAL_FILE` at its overlay, and starts only LiteLLM, backend and frontend |
 | Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir` |
 | Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives OpenAI, OpenRouter, and OpenCode keys from `.env.litellm` |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
@@ -49,6 +50,7 @@ webreport/
 - **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. The game data this deployment serves remains MySQL.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
 - **Config flow**: `bd_shared/config.toml` + optional `config.local.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
+- **Dataset switch**: `DATASET` moves the overlay out of the repository through `BD_CONFIG_LOCAL_FILE`, and the dataset directory supplies its own tool module, knowledge folder and optional `webreport.compose.yml` for database networking. Nothing dataset-specific belongs in this directory.
 - **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: with the bundled MySQL the backend connects at `mysql:3306` on the Docker network, not localhost
 - **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root

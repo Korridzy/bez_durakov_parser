@@ -41,6 +41,7 @@ parser/
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | FastAPI + Streamlit + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
+| Serve another dataset | `make webreport-start DATASET=<name>` | Reads `DATASET_DIR` (default `range/<name>`), merges its `config/config.local.toml` over the tracked config and mounts it at `/dataset` in the backend |
 | Analysis examples | `examples/four_buckets.py` | Shows ORM usage for custom analysis |
 
 ## CONVENTIONS
@@ -73,6 +74,8 @@ make setup              # Create .venv, install Poetry deps
 make upgrade-db         # Run Alembic migrations (poetry run alembic upgrade head)
 make upgrade-code       # Pull from main, preserve config.toml
 make webreport-start    # Start full stack: MySQL + FastAPI + Streamlit (Docker)
+make webreport-start DATASET=ikar               # Serve the dataset in range/ikar instead
+make webreport-start DATASET=ikar DATASET_DIR=C:/ikar  # Same, dataset directory elsewhere
 make webreport-stop     # Stop web stack
 make mysql-start        # Start MySQL container only
 make mysql-stop         # Stop MySQL container
@@ -94,6 +97,7 @@ cd webreport && make test-e2e                    # Offline Playwright reasoning-
 - Game rounds: Выбор (vybor), Числа (chisla), Преферанс (pref), Пары (pairs), Разоблачение (razobl), Аукцион (auction), Момент Истины (mot)
 - Default game date `02.03.2022` in config triggers a warning — means date was not set in the source file
 - The agent's persona now comes from the knowledge manifest, not from code.
+- `DATASET` selects a dataset directory that lives outside the repository. It supplies its own config overlay (`config/config.local.toml`, exported as `BD_CONFIG_LOCAL_FILE`), tool module, knowledge folder and an optional `webreport.compose.yml` that connects the backend to the network its database runs on. With `DATASET` set only LiteLLM, backend and frontend start, checkpoints move to `checkpoints-<name>.db`, and `upgrade-db`, `mysql-start`, `mysql-stop`, `fetch-data` and `fetch-data-log` refuse to run. With `DATASET` unset nothing changes. One dataset is served at a time: the Compose project is the same one, so `make webreport-stop` takes the whole stack down whichever dataset it was serving.
 - At backend startup, a deep LiteLLM probe decides whether the agent can be built. When no model is reachable the process stays up and refuses to serve: `/health` and `/api/chat` answer 503. Each later chat attempt re-probes once, and the first healthy verdict builds the agent and answers that same request.
 - LiteLLM is internal-only at `litellm:4000`. The checkpoint-backed backend is limited to one replica.
 - ChatLiteLLM (`langchain-litellm >=0.7,<0.8`) is the backend model client. Its LiteLLM SDK is deliberately installed in the backend image, reversing the prior SDK-out-of-image rule. The manifest keeps that version range with a dependency-level Python `<3.15` marker because the literal range was not lockable under the project Python bound; the shipped image uses Python 3.11.
