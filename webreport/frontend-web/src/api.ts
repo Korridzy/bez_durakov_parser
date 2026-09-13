@@ -40,6 +40,8 @@ export async function api<T>(
     throw new ApiError(
       typeof body.detail === "string"
         ? body.detail
+        : Array.isArray(body.detail) && body.detail[0]?.msg
+          ? String(body.detail[0].msg).replace(/^Value error, /, "")
         : "Проверьте заполненные поля.",
       response.status,
     );

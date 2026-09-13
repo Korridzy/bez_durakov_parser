@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { BrandMark } from "./BrandMark";
 import {
   ArrowUpRight,
   Database,
@@ -12,16 +13,7 @@ import {
 export function Logo({ small = false }: { small?: boolean }) {
   return (
     <span className={"logo " + (small ? "small" : "")}>
-      <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-        <path
-          d="M11 10h13M11 10v16h9a6 6 0 0 0 0-12h-4"
-          stroke="currentColor"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="25.5" cy="9.5" r="3" className="logo-dot" />
-      </svg>
+      <BrandMark />
     </span>
   );
 }

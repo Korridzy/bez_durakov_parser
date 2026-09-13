@@ -49,6 +49,8 @@ class WorkspaceStore:
             }
         for job in self.state["jobs"]:
             if job["status"] == "running":
+                from workspace.project_info import with_update_notice
+
                 job.update(
                     status="interrupted",
                     error="Сервер перезапустился. Можно повторить запрос.",
@@ -59,7 +61,7 @@ class WorkspaceStore:
                             {
                                 "id": identifier(),
                                 "role": "error",
-                                "content": job["error"],
+                                "content": with_update_notice(job["error"], job),
                                 "created_at": now(),
                                 "request_id": job["id"],
                             }

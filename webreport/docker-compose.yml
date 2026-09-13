@@ -47,6 +47,8 @@ services:
     env_file:
       - path: .env.backend
         required: false
+    environment:
+      ANALYSIS_RUNNER_URL: http://analysis:8080
     volumes:
       - ./backend:/app
       - ../bd_shared:/bd_shared:ro
@@ -55,11 +57,35 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - webreport-network
+      - analysis-network
     depends_on:
       mysql:
         condition: service_started
       litellm:
         condition: service_healthy
+      analysis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  analysis:
+    build:
+      context: ..
+      dockerfile: webreport/Dockerfile.analysis
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=96m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, KILL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 48
+    mem_limit: 1280m
+    cpus: 1.0
+    networks: [analysis-network]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   data_collector:
@@ -102,5 +128,7 @@ services:
     restart: unless-stopped
 
 networks:
+  analysis-network:
+    internal: true
   webreport-network:
     driver: bridge

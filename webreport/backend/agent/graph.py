@@ -228,6 +228,7 @@ async def arun(
     user_message: str,
     thread_id: str,
     prior_messages: Sequence[MessageView] = (),
+    max_steps: int | None = None,
 ) -> GraphRunResult:
     try:
         return await graph.ainvoke(
@@ -239,7 +240,7 @@ async def arun(
             },
             {
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 2 * _config.AGENT_RECURSION_LIMIT + 1,
+                "recursion_limit": 2 * (max_steps or _config.AGENT_RECURSION_LIMIT) + 1,
             },
         )
     except GraphRecursionError:

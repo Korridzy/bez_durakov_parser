@@ -5,6 +5,7 @@ RUN npm ci --no-audit --no-fund
 COPY webreport/frontend-web/index.html webreport/frontend-web/tsconfig.json webreport/frontend-web/vite.config.ts ./
 COPY webreport/frontend-web/src ./src
 COPY webreport/frontend-web/public ./public
+COPY webreport/frontend-web/scripts ./scripts
 RUN npm run build
 
 FROM nginx:1.28-alpine

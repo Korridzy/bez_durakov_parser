@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowDown,
   Database,
@@ -15,7 +15,14 @@ import { JobView, MessageView } from "./Conversation";
 import { SourcePreview, SourcesDialog } from "./SourceDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { Alert, Logo, Modal, Spinner } from "./ui";
-import { useAccent } from "./theme";
+import { useAccent, useMotion } from "./theme";
+import { Atmosphere } from "./Atmosphere";
+import type { Activity } from "./mascot/Expedition";
+import { CompanionStage, useCompanion, type CompanionSpeech } from "./mascot/Companion";
+import { Trapezoid } from "./Trapezoid";
+import { ProjectInfoPanel, MIN_PROJECT_INFO_WIDTH } from "./ProjectInfoPanel";
+import { AnalysisPanel } from "./AnalysisPanel";
+import { PanelResizeHandle, usePanelResize } from "./PanelResizeHandle";
 
 type Edit = {
   type: "projects" | "chats";
@@ -31,6 +38,11 @@ type Pending = {
 };
 export default function App() {
   const [accent, setAccent] = useAccent();
+  const [motion, setMotion] = useMotion();
+  const [companion, setCompanion] = useCompanion();
+  const [addressing, setAddressing] = useState(false);
+  const heroAnchor = useRef<HTMLDivElement>(null), dockAnchor = useRef<HTMLDivElement>(null);
+  const [reaction, setReaction] = useState<Activity>("rest");
   const [workspace, setWorkspace] = useState<Workspace>();
   const [projectId, setProjectId] = useState("");
   const [chatId, setChatId] = useState("");
@@ -41,6 +53,23 @@ export default function App() {
   const [sidebar, setSidebar] = useState(() => window.innerWidth > 850);
   const [dialog, setDialog] = useState("");
   const [preview, setPreview] = useState<Source>();
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [analysisId, setAnalysisId] = useState("");
+  useEffect(() => { setAnalysisId(""); }, [chatId, projectId]);
+  useEffect(() => { if (infoOpen) setAnalysisId(""); }, [infoOpen]);
+  const [infoHighlight, setInfoHighlight] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const narrowInfo = viewportWidth <= 760;
+  const reservedPanelWidth = infoOpen ? MIN_PROJECT_INFO_WIDTH
+    : analysisId ? Math.min(860, Math.max(450, viewportWidth * 0.48)) : 0;
+  const sidebarResize = usePanelResize({
+    storageKey: "wr-sidebar-width",
+    minWidth: 264,
+    maxWidth: Math.max(264, Math.min(480, viewportWidth - 400 - reservedPanelWidth)),
+    defaultWidth: () => 264,
+    edge: "right",
+    disabled: !sidebar || viewportWidth <= 850 || (infoOpen && viewportWidth <= 1150),
+  });
   const [editingSource, setEditingSource] = useState<Source>();
   const [edit, setEdit] = useState<Edit>();
   const [name, setName] = useState("");
@@ -120,6 +149,9 @@ export default function App() {
     };
   }, [refresh]);
   const selectProject = useCallback((id: string) => {
+    setInfoOpen(false);
+    setInfoHighlight(0);
+    setReaction("rest");
     setProjectId(id);
     setChatId("");
     setChat(undefined);
@@ -131,6 +163,9 @@ export default function App() {
     localStorage.setItem("wr-selection", JSON.stringify(selection.current));
   }, []);
   const loadChat = useCallback(async (id: string) => {
+    setInfoOpen(false);
+    setInfoHighlight(0);
+    setReaction("rest");
     selection.current.chatId = id;
     setChatId(id);
     setLoadingChat(true);
@@ -211,6 +246,54 @@ export default function App() {
     } catch {}
   };
   useEffect(() => {
+    if (!infoHighlight) return;
+    const timer = setTimeout(() => setInfoHighlight(0), 3200);
+    return () => clearTimeout(timer);
+  }, [infoHighlight]);
+  useEffect(() => {
+    const update = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  const startProjectInterview = async () => {
+    if (!projectId || sending || jobId || loadingChat) return;
+    const origin = { ...selection.current };
+    let id = chatId;
+    setSending(true);
+    setError("");
+    setDialog("");
+    setInfoOpen(false);
+    try {
+      if (!id) {
+        const created = await post<Chat>("/chats", { project_id: origin.projectId });
+        id = created.id;
+        if (selection.current.projectId !== origin.projectId || selection.current.chatId !== origin.chatId) return;
+        localStorage.setItem("wr-draft:" + id, draft);
+        selection.current = { chatId: id, projectId: origin.projectId };
+        localStorage.setItem("wr-selection", JSON.stringify(selection.current));
+        setChatId(id);
+        setChat(created);
+      }
+      const updated = await post<Chat>("/chats/" + id + "/project-interview");
+      if (selection.current.chatId === id && selection.current.projectId === origin.projectId) {
+        setChat(updated);
+        setAtBottom(true);
+        setInfoHighlight(Date.now());
+        setTimeout(() => inputRef.current?.focus(), 0);
+      }
+      await refresh();
+    } catch (e) {
+      if (selection.current.projectId === origin.projectId) setError((e as Error).message);
+    } finally { setSending(false); }
+  };
+  const endProjectInterview = async () => {
+    const id = chatId;
+    try {
+      const updated = await api<Chat>("/chats/" + id + "/project-interview", { method: "DELETE" });
+      if (selection.current.chatId === id) { setChat(updated); inputRef.current?.focus(); }
+    } catch (e) { setError((e as Error).message); }
+  };
+  useEffect(() => {
     if (atBottom)
       bottomRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
   }, [chat?.messages?.length, job?.events, atBottom]);
@@ -230,6 +313,13 @@ export default function App() {
           const latest = await api<Chat>("/chats/" + selection.current.chatId);
           if (stopped) return;
           setChat(latest);
+          setReaction(
+            next.status === "completed"
+              ? "success"
+              : next.status === "failed"
+                ? "error"
+                : "rest",
+          );
           setJobId("");
           setJob(null);
           await refresh();
@@ -273,6 +363,7 @@ export default function App() {
     if (!content.trim() || sending || jobId || loadingChat || !projectId)
       return;
     setSending(true);
+    setReaction("rest");
     setError("");
     setConnection("");
     let id = chatId;
@@ -421,15 +512,44 @@ export default function App() {
   const sources = workspace.sources.filter((s) => s.project_id === project?.id);
   const empty = !chat?.messages?.length && !jobId;
   const hasDataset = !!project?.dataset_module && !sources.length;
-  const hasData = sources.length > 0 || hasDataset;
+  const hasProjectInfo = !!project?.info?.content.trim();
+  const hasData = sources.length > 0 || hasDataset || hasProjectInfo;
+  const activity: Activity =
+    error || connection
+      ? "error"
+      : loadingChat
+        ? "thinking"
+        : sending || jobId
+          ? "working"
+          : empty
+            ? "welcome"
+            : reaction;
+  const speech: CompanionSpeech | undefined = activity === "working"
+    ? { title: "Копаю…", text: "Сейчас найду самое интересное." }
+    : chat?.project_interview
+    ? { title: "Расскажи о проекте", text: "Чем вы занимаетесь и что хотите узнать? Я запомню главное.", action: { label: "Перейти к вопросам", onClick: () => void endProjectInterview(), disabled: sending || !!jobId } }
+    : empty
+      ? hasData
+        ? { title: "Хей!", text: "Какие вопросы по проекту?" }
+        : { title: "Давай знакомиться!", text: "Расскажи о проекте или подключи данные — и начнём.", action: { label: "Подключить данные", onClick: () => setDialog("source-add") } }
+      : activity === "thinking"
+          ? { title: "Так-так…", text: "Сейчас разберусь." }
+          : undefined;
   return (
-    <div className={"app " + (sidebar ? "sidebar-visible" : "sidebar-hidden")}>
+    <div
+      className={"app " + (sidebar ? "sidebar-visible" : "sidebar-hidden") + (infoOpen ? " info-visible" : "") + (analysisId ? " analysis-visible" : "")}
+      data-motion={motion}
+    >
       <div
         className="mobile-scrim"
         onClick={() => setSidebar(false)}
         aria-hidden="true"
       />
-      <div className="sidebar-shell">
+      <div
+        className={"sidebar-shell" + (sidebarResize.resizing ? " is-resizing" : "")}
+        style={{ "--sidebar-width": `${sidebarResize.width}px` } as CSSProperties}
+        inert={(infoOpen || !!analysisId) && narrowInfo}
+      >
         <Sidebar
           visible={sidebar}
           projects={workspace.projects}
@@ -450,17 +570,29 @@ export default function App() {
           onDelete={(type, id, name) => editObject(type, id, name, true)}
           activeChatIds={workspace.active_jobs.map((j) => j.chat_id)}
         />
+        <PanelResizeHandle resize={sidebarResize} label="Ширина панели проектов и чатов" controls="project-sidebar" />
       </div>
-      <main className="main-panel">
+      <main
+        onFocusCapture={(event) => { if (event.target instanceof HTMLTextAreaElement) setAddressing(true); }}
+        onBlurCapture={(event) => { if (event.target instanceof HTMLTextAreaElement) setAddressing(false); }}
+        inert={(infoOpen || !!analysisId) && narrowInfo}
+        className={
+          "main-panel " + (empty ? "new-expedition" : "reading-expedition")
+        }
+      >
+        <Atmosphere />
         <header className="workspace-header">
           <div className="sidebar-control">
             {!sidebar && (
               <button
-                className="icon-button"
+                className="icon-button sidebar-toggle-button"
                 aria-label="Показать боковую панель"
+                title="Показать боковую панель"
+                aria-expanded={false}
+                aria-controls="project-sidebar"
                 onClick={() => setSidebar(true)}
               >
-                <PanelLeftOpen size={19} />
+                <PanelLeftOpen size={19} strokeWidth={1.8} />
               </button>
             )}
           </div>
@@ -500,17 +632,19 @@ export default function App() {
               </div>
             ) : empty ? (
               <section className="welcome">
-                <h1>{hasData ? "Хей" : "Yo, чел"}</h1>
+                {companion !== "none" && <div className="companion-anchor hero" ref={heroAnchor} aria-hidden="true" />}
+                {companion === "none" && <><h1>{hasData ? "Хей!" : "Давай знакомиться!"}</h1>
                 <p>
                   {hasData
                     ? "Какие вопросы по проекту?"
                     : "Мне нужна инфа, чтобы дать тебе толковые советы"}
-                </p>
-                {!hasData && (
+                </p></>}
+                {!hasData && companion === "none" && (
                   <button
-                    className="welcome-connect primary-button"
+                    className="welcome-connect primary-button shaped-control"
                     onClick={() => setDialog("source-add")}
                   >
+                    <Trapezoid radius={13} />
                     <Plus size={20} />
                     Добавить источник
                   </button>
@@ -519,10 +653,12 @@ export default function App() {
             ) : (
               <>
                 {chat?.messages?.map((message) => (
-                  <MessageView
+                <MessageView
                     key={message.id}
                     message={message}
-                    onRetry={retry}
+                  onRetry={retry}
+                  onProjectInfo={() => setInfoOpen(true)}
+                  onAnalysis={id => { setInfoOpen(false); setAnalysisId(id); }}
                   />
                 ))}
                 {jobId && <JobView job={job} connection={connection} />}
@@ -532,6 +668,11 @@ export default function App() {
           </div>
         </div>
         <div className="composer-dock">
+          {!empty && companion !== "none" && (
+            <div className="companion-slot">
+              <div className="companion-anchor compact" ref={dockAnchor} aria-hidden="true" />
+            </div>
+          )}
           {!atBottom && !empty && (
             <button
               className="scroll-bottom"
@@ -566,10 +707,14 @@ export default function App() {
           <Composer
             sources={sources}
             hasDataset={hasDataset}
+            hasProjectInfo={hasProjectInfo}
+            onProjectInfo={() => hasProjectInfo ? setInfoOpen(true) : void startProjectInterview()}
+            interview={!!chat?.project_interview}
+            companionPresent={companion !== "none"}
+            onEndInterview={() => void endProjectInterview()}
+            highlight={infoHighlight}
             onSource={(source) => void openSource(source)}
-            onManageSources={() =>
-              setDialog(sources.length ? "sources" : "source-add")
-            }
+            onManageSources={() => setDialog("sources")}
             value={draft}
             onChange={changeDraft}
             onSend={() => void send()}
@@ -586,11 +731,28 @@ export default function App() {
             inputRef={inputRef}
           />
         </div>
+        <CompanionStage kind={companion} compact={!empty} active={!loadingChat} heroAnchor={heroAnchor} dockAnchor={dockAnchor} activity={activity} motion={motion} accent={accent} engaged={addressing} speech={speech} />
       </main>
+      {analysisId && chatId && <AnalysisPanel key={chatId + analysisId} chatId={chatId} resultId={analysisId} onClose={() => setAnalysisId("")} modal={narrowInfo} />}
+      {infoOpen && project && (
+        <ProjectInfoPanel
+          key={project.id}
+          project={project}
+          onClose={() => setInfoOpen(false)}
+          onRefresh={refresh}
+          onInterview={() => void startProjectInterview()}
+          busy={sending || !!jobId || loadingChat}
+          modal={narrowInfo}
+        />
+      )}
       {(dialog === "settings" || dialog === "model-add") && (
         <SettingsDialog
           accent={accent}
           onAccent={setAccent}
+          motion={motion}
+          onMotion={setMotion}
+          companion={companion}
+          onCompanion={setCompanion}
           workspace={workspace}
           onRefresh={refresh}
           onClose={() => setDialog("")}
@@ -610,6 +772,9 @@ export default function App() {
             onClose={() => setDialog("")}
             initialAdd={dialog === "source-add"}
             initialSource={dialog === "source-edit" ? editingSource : undefined}
+            onProjectInfo={() => { setDialog(""); setInfoOpen(true); }}
+            onDescribeProject={() => void startProjectInterview()}
+            busy={sending || !!jobId || loadingChat}
             onPreview={(s) => {
               setDialog("");
               void openSource(s);

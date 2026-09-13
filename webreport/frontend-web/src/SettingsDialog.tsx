@@ -4,6 +4,10 @@ import type { Workspace } from "./types";
 import { api, post } from "./api";
 import { Alert, Modal, Spinner } from "./ui";
 import { accentPresets, defaultAccent } from "./theme";
+import { ModelPicker, type DiscoveredModel } from "./ModelPicker";
+import { Select } from "./Select";
+import { modelKeyError } from "./model-key";
+import type { CompanionKind } from "./mascot/Companion";
 
 export function SettingsDialog({
   workspace,
@@ -13,7 +17,15 @@ export function SettingsDialog({
   onSelect,
   accent,
   onAccent,
+  motion,
+  onMotion,
+  companion,
+  onCompanion,
 }: {
+  companion: CompanionKind;
+  onCompanion: (value: CompanionKind) => void;
+  motion: boolean;
+  onMotion: (value: boolean) => void;
   accent: string;
   onAccent: (color: string) => void;
   workspace: Workspace;
@@ -26,21 +38,27 @@ export function SettingsDialog({
     [provider, setProvider] = useState("openai"),
     [token, setToken] = useState(""),
     [base, setBase] = useState(""),
-    [name, setName] = useState(""),
     [modelId, setModelId] = useState(""),
-    [remember, setRemember] = useState(false),
+    [remember, setRemember] = useState(true),
     [visible, setVisible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  const [models, setModels] = useState<{ id: string; name: string }[]>([]);
+  const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [removeId, setRemoveId] = useState("");
+  const keyError = token ? modelKeyError(token) : "";
+  const changeToken = (value: string) => {
+    setToken(value);
+    setModels([]);
+    setModelId("");
+    setError("");
+  };
   const discover = async () => {
     setBusy(true);
     setError("");
     try {
       const data = await post<{ models: typeof models }>(
         "/model-connections/discover",
-        { provider, token, base_url: base },
+        { provider, token: token.trim(), base_url: base },
       );
       setModels(data.models);
       setModelId(data.models[0]?.id || "");
@@ -54,6 +72,7 @@ export function SettingsDialog({
   };
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (modelKeyError(token)) return;
     if (!modelId) {
       await discover();
       return;
@@ -63,10 +82,9 @@ export function SettingsDialog({
     try {
       const model = await post<{ id: string }>("/model-connections", {
         provider,
-        token,
+        token: token.trim(),
         base_url: base,
         model_id: modelId,
-        name,
         remember,
       });
       setToken("");
@@ -85,27 +103,23 @@ export function SettingsDialog({
       onClose={onClose}
     >
       {adding ? (
-        <form className="connection-form" onSubmit={save}>
+        <form className="connection-form model-connection-form" onSubmit={save}>
           <div className="field">
             <label htmlFor="model-provider">Поставщик</label>
-            <select
+            <Select
               id="model-provider"
+              label="Поставщик"
               value={provider}
               disabled={busy}
-              onChange={(e) => {
-                setProvider(e.target.value);
-                setModels([]);
-                setModelId("");
-                setToken("");
-                setError("");
+              options={workspace.model_providers.map((p) => ({
+                value: p.id,
+                label: p.name,
+              }))}
+              onChange={(value) => {
+                setProvider(value);
+                changeToken("");
               }}
-            >
-              {workspace.model_providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           {provider === "custom" && (
             <div className="field">
@@ -116,6 +130,7 @@ export function SettingsDialog({
                 placeholder="https://api.example.com/v1"
                 required
                 value={base}
+                disabled={busy}
                 onChange={(e) => {
                   setBase(e.target.value);
                   setModelId("");
@@ -136,11 +151,14 @@ export function SettingsDialog({
                 autoComplete="off"
                 type={visible ? "text" : "password"}
                 value={token}
-                onChange={(e) => {
-                  setToken(e.target.value);
-                  setModels([]);
-                  setModelId("");
+                onChange={(e) => changeToken(e.target.value)}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  changeToken(e.clipboardData.getData("text").trim());
                 }}
+                onBlur={() => setToken(token.trim())}
+                aria-invalid={!!keyError}
+                aria-describedby={keyError ? "model-key-error" : undefined}
                 spellCheck={false}
                 required
                 disabled={busy}
@@ -155,42 +173,25 @@ export function SettingsDialog({
                 {visible ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {keyError && (
+              <small id="model-key-error" className="field-error" role="alert">
+                {keyError}
+              </small>
+            )}
           </div>
           {models.length > 0 && (
-            <>
-              <div className="field">
-                <label htmlFor="custom-model">Модель</label>
-                <select
-                  id="custom-model"
-                  value={modelId}
-                  onChange={(e) => setModelId(e.target.value)}
-                  disabled={busy}
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="model-label">
-                  Название <span>необязательно</span>
-                </label>
-                <input
-                  id="model-label"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={modelId}
-                  maxLength={100}
-                />
-              </div>
-            </>
+            <ModelPicker
+              models={models}
+              value={modelId}
+              onChange={setModelId}
+              disabled={busy}
+            />
           )}
           <label className="check-field">
             <input
               type="checkbox"
               checked={remember}
+              disabled={busy}
               onChange={(e) => setRemember(e.target.checked)}
             />
             <span>
@@ -209,9 +210,12 @@ export function SettingsDialog({
               className="text-button"
               onClick={() => setAdding(false)}
             >
-              Все модели
+              Подключённые модели
             </button>
-            <button className="primary-button" disabled={busy || !token.trim()}>
+            <button
+              className="primary-button"
+              disabled={busy || !token.trim() || !!keyError}
+            >
               {busy ? (
                 <Spinner label="Проверяю…" />
               ) : models.length ? (
@@ -277,6 +281,24 @@ export function SettingsDialog({
               <small>Цвет сохраняется в этом браузере</small>
             </div>
           </section>
+          <div className="companion-setting">
+            <span><strong>Помощник</strong><small>Кто составит вам компанию</small></span>
+            <Select id="companion-choice" label="Персонаж помощника" value={companion}
+              options={[{ value: "shovel", label: "Лопата · 3D" }, { value: "explorer", label: "Исследователь" }, { value: "none", label: "Без персонажа" }]}
+              onChange={(value) => onCompanion(value as CompanionKind)} />
+          </div>
+          <label className="motion-setting">
+            <span>
+              <strong>Живая анимация</strong>
+              <small>Движения персонажа, флага и травы</small>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={motion}
+              onChange={(event) => onMotion(event.target.checked)}
+            />
+          </label>
           <div className="settings-section-title">
             <h3>Модели</h3>
             <span>Для всех проектов</span>

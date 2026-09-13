@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
 export const accentPresets = [
+  { name: "Коралл", color: "#ed786b" },
   { name: "Василёк", color: "#4667d5" },
   { name: "Ирис", color: "#8056b5" },
-  { name: "Хвоя", color: "#267b6d" },
-  { name: "Терракота", color: "#b85e45" },
+  { name: "Лаванда", color: "#a18bc8" },
   { name: "Роза", color: "#ac4970" },
-  { name: "Охра", color: "#ad7728" },
+  { name: "Шалфей", color: "#6d8e7e" },
 ];
 export const defaultAccent = accentPresets[0].color;
 const validColor = (value: string) => /^#[\da-f]{6}$/i.test(value);
@@ -32,6 +32,44 @@ export function applyAccent(color: string) {
   style.setProperty("--accent", hex(original));
   style.setProperty("--accent-strong", hex(accessible));
   style.setProperty("--accent-ink", hex(accessible.map((v) => v * 0.55)));
+  let dark = [45, 31, 49];
+  const lightContrast = 1.05 / (luminance(original) + 0.05);
+  // Mid-tone custom colors may need darker ink than the usual plum.
+  while (
+    lightContrast < 4.5 &&
+    (luminance(original) + 0.05) / (luminance(dark) + 0.05) < 4.55
+  )
+    dark = dark.map((v) => v * 0.9);
+  style.setProperty(
+    "--accent-contrast",
+    (luminance(original) + 0.05) / (luminance(dark) + 0.05) >= 4.5
+      ? hex(dark)
+      : "#ffffff",
+  );
+}
+
+export function useMotion() {
+  const read = () => {
+    try {
+      return localStorage.getItem("wr-motion") !== "off";
+    } catch {
+      return true;
+    }
+  };
+  const [motion, setMotion] = useState(read);
+  useEffect(() => {
+    try {
+      localStorage.setItem("wr-motion", motion ? "on" : "off");
+    } catch {}
+  }, [motion]);
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === "wr-motion") setMotion(read());
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+  return [motion, setMotion] as const;
 }
 
 export function readAccent() {

@@ -65,6 +65,11 @@ class Metrika:
         limit=100,
         filters="",
         offset=1,
+        *,
+        accuracy="medium",
+        sort="",
+        include_undefined=False,
+        timezone="",
     ):
         period(start, end)
         names = metrics.split(",")
@@ -75,7 +80,7 @@ class Metrika:
             or any(not re.fullmatch(r"ym:[su]:[A-Za-z0-9<>]+", n) for n in names + dims)
         ):
             raise ConnectorError("Некорректный набор метрик или группировок.")
-        if not 1 <= limit <= 500 or len(filters) > 1500 or not 1 <= offset <= 10000:
+        if not 1 <= limit <= 500 or len(filters) > 4000 or not 1 <= offset <= 10000:
             raise ConnectorError("Запрос превышает допустимый размер.")
         params = dict(
             ids=self.counter_id,
@@ -84,13 +89,21 @@ class Metrika:
             metrics=metrics,
             limit=limit,
             offset=offset,
-            accuracy="medium",
+            accuracy=accuracy,
             lang="ru",
         )
         if dimensions:
-            params.update(dimensions=dimensions, sort="-" + names[0])
+            if sort and sort.lstrip("-") not in names + dims:
+                raise ConnectorError("Сортировка должна быть по столбцу отчёта.")
+            params.update(dimensions=dimensions, sort=sort or "-" + names[0], include_undefined=str(include_undefined).lower())
+        if accuracy not in {"medium", "full"}:
+            raise ConnectorError("Неизвестный режим точности.")
         if filters:
             params["filters"] = filters
+        if timezone:
+            if not re.fullmatch(r"[+-](?:[01]\d|2[0-3]):[0-5]\d", timezone):
+                raise ConnectorError("Часовой пояс задаётся как +03:00 или -05:00.")
+            params["timezone"] = timezone
         body = self._get("/stat/v1/data", **params)
         rows = []
         for row in body.get("data", []):
@@ -110,9 +123,45 @@ class Metrika:
             "sampled": body.get("sampled", False),
             "sample_share": body.get("sample_share", 1),
             "total_rows": body.get("total_rows", len(rows)),
+            "row_dimensions": [row.get("dimensions", []) for row in body.get("data", [])],
+            "contains_sensitive_data": body.get("contains_sensitive_data", False),
+            "data_lag": body.get("data_lag", 0),
             "date1": start,
             "date2": end,
+            "timezone": timezone or "counter",
+            "offset": offset,
+            "has_more": offset - 1 + len(rows) < body.get("total_rows", len(rows)),
         }
+
+    def time_series(self, start, end, metrics, group="day", filters="", accuracy="medium"):
+        from .metrika_explorer import GROUPS
+
+        first, last = period(start, end)
+        names = metrics.split(",")
+        if (group not in GROUPS or not 1 <= len(names) <= 10
+                or any(not re.fullmatch(r"ym:s:[A-Za-z0-9]+", n) for n in names)
+                or accuracy not in {"medium", "full"} or len(filters) > 4000):
+            raise ConnectorError("Некорректные параметры временного ряда.")
+        body = self._get("/stat/v1/data/bytime", ids=self.counter_id,
+                         date1=first, date2=last, metrics=metrics, group=group,
+                         filters=filters, accuracy=accuracy, lang="ru")
+        values = (body.get("data") or [{}])[0].get("metrics", [])
+        return {
+            "series": [{
+                "date": interval[0], "end": interval[-1],
+                **{key: values[j][i] if j < len(values) and i < len(values[j]) else None
+                   for j, key in enumerate(names)},
+            } for i, interval in enumerate(body.get("time_intervals", []))],
+            "sampled": body.get("sampled", False),
+            "sample_share": body.get("sample_share", 1),
+            "contains_sensitive_data": body.get("contains_sensitive_data", False),
+            "data_lag": body.get("data_lag", 0),
+        }
+
+    def goals(self):
+        return [{"id": str(goal["id"]), "name": goal.get("name", str(goal["id"])),
+                 "type": goal.get("type", "")}
+                for goal in self._get(f"/management/v1/counter/{self.counter_id}/goals").get("goals", [])]
 
     def overview(self, start, end):
         period(start, end)

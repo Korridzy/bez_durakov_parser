@@ -1,4 +1,16 @@
-export type Project = { id: string; name: string; dataset_module?: string };
+export type ProjectInfo = {
+  content: string;
+  revision: number;
+  updated_at?: string | null;
+  updated_by?: "user" | "agent" | null;
+  template?: string;
+};
+export type Project = {
+  id: string;
+  name: string;
+  dataset_module?: string;
+  info?: ProjectInfo;
+};
 export type Message = {
   id: string;
   role: "user" | "assistant" | "error";
@@ -18,6 +30,7 @@ export type Chat = {
   active_job?: string;
   model_id?: string;
   effort?: string;
+  project_interview?: boolean;
 };
 export type Source = {
   id: string;

@@ -1,28 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowRight,
+  Activity,
+  ChartNoAxesCombined,
   Check,
   Database,
+  CircleAlert,
+  FileText,
   Eye,
   EyeOff,
+  Globe2,
+  LayoutDashboard,
   Plus,
-  RefreshCw,
+  Radio,
   Settings2,
+  Smartphone,
+  Target,
   Trash2,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import type { Project, Provider, Report, Source, Workspace } from "./types";
 import { api, ApiError, dayLabel, number, post } from "./api";
 import { Alert, ExternalLink, Modal, ProviderIcon, Spinner } from "./ui";
 import { Select } from "./Select";
+import { ReportPeriod } from "./ReportPeriod";
+import { MetrikaExplorer } from "./MetrikaExplorer";
+import { AnalyticsChart, chartColors } from "./AnalyticsChart";
+import "./source-report.css";
 
 const reportNames: Record<string, string> = {
   overview: "Обзор",
@@ -33,7 +35,16 @@ const reportNames: Record<string, string> = {
   goals: "Цели",
   events: "События",
 };
-const colors = ["var(--accent-strong)", "#82aaa3", "#b597cb", "#d7a76c"];
+const colors = chartColors;
+const reportIcons: Record<string, typeof LayoutDashboard> = {
+  overview: LayoutDashboard,
+  channels: Radio,
+  devices: Smartphone,
+  pages: FileText,
+  geography: Globe2,
+  goals: Target,
+  events: Activity,
+};
 
 export function SourceForm({
   providers,
@@ -254,6 +265,9 @@ export function SourcesDialog({
   onPreview,
   initialAdd = false,
   initialSource,
+  onProjectInfo,
+  onDescribeProject,
+  busy,
 }: {
   workspace: Workspace;
   project: Project;
@@ -262,10 +276,13 @@ export function SourcesDialog({
   onPreview: (s: Source) => void;
   initialAdd?: boolean;
   initialSource?: Source;
+  onProjectInfo: () => void;
+  onDescribeProject: () => void;
+  busy: boolean;
 }) {
   const sources = workspace.sources.filter((s) => s.project_id === project.id);
   const [form, setForm] = useState(
-    !!initialSource || initialAdd || !sources.length,
+    !!initialSource || initialAdd,
   );
   const [editing, setEditing] = useState<Source | undefined>(initialSource);
   const [error, setError] = useState("");
@@ -295,11 +312,8 @@ export function SourcesDialog({
             onPreview(source);
           }}
           onBack={() => {
-            if (!sources.length) onClose();
-            else {
-              setForm(false);
-              setEditing(undefined);
-            }
+            setForm(false);
+            setEditing(undefined);
           }}
         />
       ) : (
@@ -307,6 +321,15 @@ export function SourcesDialog({
           <div className="modal-context">
             {project.name}
             <span>Доступны во всех чатах проекта</span>
+          </div>
+          <div className={"connection-row project-info-manager " + (!project.info?.content ? "missing-info" : "")}>
+            {project.info?.content ? <FileText size={24} /> : <CircleAlert size={24} />}
+            <button className="connection-info" disabled={!project.info?.content && busy}
+              onClick={project.info?.content ? onProjectInfo : onDescribeProject}>
+              <strong>{project.info?.content ? "Информация о проекте" : "Нет информации о проекте"}</strong>
+              <span>{project.info?.content ? "Сводка, которую учитывает агент" : "Опишите проект в чате"}</span>
+            </button>
+            <button className="icon-button" aria-label="Открыть сводку о проекте" onClick={onProjectInfo}><FileText size={16} /></button>
           </div>
           {sources.map((source) => (
             <div className="connection-row" key={source.id}>
@@ -385,35 +408,11 @@ export function SourcesDialog({
   );
 }
 
-function ChartTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: readonly {
-    value?: number | string;
-    name?: string;
-    color?: string;
-  }[];
-  label?: string | number;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="chart-tooltip">
-      <strong>{dayLabel(String(label))}</strong>
-      {payload.map((p, i) => (
-        <div key={i}>
-          <span style={{ background: p.color }} />
-          <span>{p.name}</span>
-          <b>{number(p.value)}</b>
-        </div>
-      ))}
-    </div>
-  );
+export function SourcePreview(props: React.ComponentProps<typeof StandardSourcePreview>) {
+  return props.source.provider === "metrika" ? <MetrikaExplorer {...props} /> : <StandardSourcePreview {...props} />;
 }
 
-export function SourcePreview({
+function StandardSourcePreview({
   source,
   provider,
   defaultPeriod,
@@ -430,7 +429,6 @@ export function SourcePreview({
 }) {
   const [report, setReport] = useState("overview");
   const [dates, setDates] = useState(defaultPeriod);
-  const [range, setRange] = useState("30");
   const [data, setData] = useState<Report>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -490,16 +488,6 @@ export function SourcePreview({
       reportVersion.current++;
     };
   }, [source.id, report, dates, refresh]);
-  const pickRange = (days: string) => {
-    setRange(days);
-    if (days === "custom") return;
-    const end = new Date(defaultPeriod.date2 + "T12:00:00");
-    const start = new Date(end);
-    start.setDate(start.getDate() - Number(days) + 1);
-    const local = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    setDates({ date1: local(start), date2: local(end) });
-  };
   const selected = data?.metrics?.find((m) => m.key === metric);
   const loadMore = async () => {
     const version = reportVersion.current;
@@ -550,357 +538,264 @@ export function SourcePreview({
       }
     >
       <div className="source-overview">
-        <div className="source-meta">
-          <div className="inline">
-            <ProviderIcon id={provider.id} />
-            <span>{provider.name}</span>
-            <span className="meta-separator">/</span>
-            <span>
-              {source.metadata.site ||
-                source.metadata.counter_id ||
-                source.metadata.property_id ||
-                source.metadata.timezone}
-            </span>
+        <aside className="report-sidebar">
+          <div className="report-source">
+            <ProviderIcon id={provider.id} large />
+            <div>
+              <strong>{provider.name}</strong>
+              <span
+                title={
+                  source.metadata.site ||
+                  source.metadata.counter_id ||
+                  source.metadata.property_id
+                }
+              >
+                {source.metadata.site ||
+                  source.metadata.counter_id ||
+                  source.metadata.property_id ||
+                  source.metadata.timezone}
+              </span>
+            </div>
           </div>
-          <ExternalLink href={provider.docs}>API</ExternalLink>
-        </div>
-        <div className="report-controls">
           <nav className="report-tabs" aria-label="Разделы источника">
-            {provider.reports.map((key) => (
-              <button
-                key={key}
-                className={report === key ? "active" : ""}
-                onClick={() => {
-                  setReport(key);
-                  setRefresh(0);
-                }}
-              >
-                {reportNames[key]}
-              </button>
-            ))}
+            {provider.reports.map((key) => {
+              const Icon = reportIcons[key] || ChartNoAxesCombined;
+              return (
+                <button
+                  key={key}
+                  className={report === key ? "active" : ""}
+                  aria-current={report === key ? "page" : undefined}
+                  aria-controls="source-report-content"
+                  onClick={() => {
+                    setReport(key);
+                    setRefresh(0);
+                  }}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{reportNames[key] || key}</span>
+                </button>
+              );
+            })}
           </nav>
-          <div className="date-controls">
-            <Select
-              id="report-period"
-              label="Период отчёта"
-              value={range}
-              onChange={pickRange}
-              options={[
-                { value: "7", label: "7 дней" },
-                { value: "30", label: "30 дней" },
-                { value: "90", label: "90 дней" },
-                { value: "custom", label: "Свой период" },
-              ]}
-            />
-            <button
-              className="icon-button"
-              aria-label="Обновить данные"
-              disabled={loading}
-              onClick={() => setRefresh((v) => v + 1)}
-            >
-              <RefreshCw size={16} className={loading ? "spin" : ""} />
-            </button>
-          </div>
-        </div>
-        {range === "custom" && (
-          <div className="custom-dates">
-            <label>
-              С
-              <input
-                type="date"
-                aria-label="Начало периода"
-                value={dates.date1}
-                max={dates.date2}
-                onChange={(e) =>
-                  e.target.value &&
-                  setDates({ ...dates, date1: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              По
-              <input
-                type="date"
-                aria-label="Конец периода"
-                value={dates.date2}
-                min={dates.date1}
-                onChange={(e) =>
-                  e.target.value &&
-                  setDates({ ...dates, date2: e.target.value })
-                }
-              />
-            </label>
-          </div>
-        )}
-        {loading ? (
-          <div className="report-loading">
-            <div className="metric-skeletons">
-              {[1, 2, 3, 4].map((n) => (
-                <div className="skeleton" key={n} />
-              ))}
-            </div>
-            <div className="skeleton chart-skeleton" />
-            <Spinner label="Загружаю данные…" />
-          </div>
-        ) : error ? (
-          <div className="report-error">
-            <Database size={30} />
-            <h3>Не удалось загрузить данные</h3>
-            <p>{error}</p>
-            <div className="inline">
-              <button className="secondary-button" onClick={onManage}>
-                Проверить подключение
-              </button>
-              <button
-                className="primary-button"
-                onClick={() => setRefresh((v) => v + 1)}
-              >
-                Повторить
-              </button>
-            </div>
-          </div>
-        ) : (
-          data && (
-            <>
-              {report === "overview" ? (
+        </aside>
+        <div className="report-main">
+          <ReportPeriod
+            dates={dates}
+            loading={loading}
+            onChange={(next) => {
+              setDates((current) =>
+                current.date1 === next.date1 && current.date2 === next.date2
+                  ? current
+                  : next,
+              );
+              setRefresh(0);
+            }}
+            onRefresh={() => setRefresh((value) => value + 1)}
+          />
+          <section
+            id="source-report-content"
+            aria-label={reportNames[report] || report}
+            aria-busy={loading}
+          >
+            {loading ? (
+              <div className="report-loading">
+                <div className="metric-skeletons">
+                  {[1, 2, 3, 4].map((n) => (
+                    <div className="skeleton" key={n} />
+                  ))}
+                </div>
+                <div className="skeleton chart-skeleton" />
+                <Spinner label="Загружаю данные…" />
+              </div>
+            ) : error ? (
+              <div className="report-error">
+                <Database size={30} />
+                <h3>Не удалось загрузить данные</h3>
+                <p>{error}</p>
+                <div className="inline">
+                  <button className="secondary-button" onClick={onManage}>
+                    Проверить подключение
+                  </button>
+                  <button
+                    className="primary-button"
+                    onClick={() => setRefresh((v) => v + 1)}
+                  >
+                    Повторить
+                  </button>
+                </div>
+              </div>
+            ) : (
+              data && (
                 <>
-                  <div className="metrics">
-                    {data.metrics?.map((m, i) => (
-                      <button
-                        key={m.key}
-                        className={
-                          "metric-card " + (metric === m.key ? "selected" : "")
-                        }
-                        disabled={nonChart.includes(m.key)}
-                        onClick={() => setMetric(m.key)}
-                        style={
-                          {
-                            "--metric-color": colors[i % colors.length],
-                          } as React.CSSProperties
-                        }
-                      >
-                        <span>{m.label}</span>
-                        <strong>
-                          {number(m.value)}
-                          {m.format === "percent" && <small>%</small>}
-                        </strong>
-                        {metric === m.key && (
-                          <span className="metric-indicator" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="chart-heading">
-                    <h3>{selected?.label || "Динамика"}</h3>
-                    <span>
-                      {dayLabel(dates.date1)} — {dayLabel(dates.date2)}
-                    </span>
-                  </div>
-                  <div className="trend-chart">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart
-                        data={data.series || []}
-                        margin={{ top: 12, right: 8, bottom: 0, left: -16 }}
-                      >
-                        <defs>
-                          <linearGradient
-                            id="trendFill"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
+                  {report === "overview" ? (
+                    <>
+                      <div className="metrics">
+                        {data.metrics?.map((m, i) => (
+                          <button
+                            key={m.key}
+                            className={
+                              "metric-card " +
+                              (metric === m.key ? "selected" : "")
+                            }
+                            disabled={nonChart.includes(m.key)}
+                            onClick={() => setMetric(m.key)}
+                            style={
+                              {
+                                "--metric-color": colors[i % colors.length],
+                              } as React.CSSProperties
+                            }
                           >
-                            <stop
-                              offset="0%"
-                              stopColor={colors[0]}
-                              stopOpacity={0.22}
-                            />
-                            <stop
-                              offset="100%"
-                              stopColor={colors[0]}
-                              stopOpacity={0.01}
-                            />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid
-                          vertical={false}
-                          stroke="#eef0f2"
-                          strokeDasharray="3 5"
-                        />
-                        <XAxis
-                          dataKey="date"
-                          axisLine={false}
-                          tickLine={false}
-                          tickFormatter={dayLabel}
-                          minTickGap={50}
-                          tick={{ fill: "#8a8d92", fontSize: 12 }}
-                          dy={12}
-                        />
-                        <YAxis
-                          axisLine={false}
-                          tickLine={false}
-                          tickFormatter={(v) => number(v)}
-                          tick={{ fill: "#8a8d92", fontSize: 12 }}
-                        />
-                        <Tooltip content={<ChartTooltip />} />
-                        <Area
-                          type="monotone"
-                          dataKey={metric}
-                          name={selected?.label || metric}
-                          stroke={colors[0]}
-                          strokeWidth={2.5}
-                          fill="url(#trendFill)"
-                          activeDot={{ r: 5, stroke: "white", strokeWidth: 3 }}
-                          dot={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+                            <span>{m.label}</span>
+                            <strong>
+                              {number(m.value)}
+                              {m.format === "percent" && <small>%</small>}
+                            </strong>
+                            {metric === m.key && (
+                              <span className="metric-indicator" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="chart-heading">
+                        <h3>{selected?.label || "Динамика"}</h3>
+                        <span>
+                          {dayLabel(dates.date1)} — {dayLabel(dates.date2)}
+                        </span>
+                      </div>
+                      <AnalyticsChart series={data.series || []} metric={metric} label={selected?.label || metric}
+                    format={selected?.format} color={colors[(data.metrics || []).findIndex(m => m.key === metric)] || colors[0]} />
                   {!data.series?.length && (
-                    <p className="empty-report">За этот период данных нет.</p>
+                        <p className="empty-report">
+                          За этот период данных нет.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="chart-heading">
+                        <h3>{reportNames[report]}</h3>
+                        <span>
+                          {data.total_rows !== undefined
+                            ? `${number(data.total_rows)} записей`
+                            : ""}
+                        </span>
+                      </div>
+                      {topRows.length > 0 && firstColumn && numericColumn && (
+                        <div className="horizontal-bars">
+                          {topRows.map((r, i) => {
+                            const maximum = Math.max(
+                              ...topRows.map(
+                                (row) => Number(row[numericColumn]) || 0,
+                              ),
+                              1,
+                            );
+                            return (
+                              <div className="bar-row" key={i}>
+                                <span
+                                  className="bar-name"
+                                  title={String(r[firstColumn])}
+                                >
+                                  {String(r[firstColumn])}
+                                </span>
+                                <div className="bar-track">
+                                  <div
+                                    style={{
+                                      width:
+                                        Math.max(
+                                          0,
+                                          ((Number(r[numericColumn]) || 0) /
+                                            maximum) *
+                                            100,
+                                        ) + "%",
+                                      background: colors[i % colors.length],
+                                    }}
+                                  />
+                                </div>
+                                <strong>{number(r[numericColumn])}</strong>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="table-scroll report-table">
+                        <table>
+                          <thead>
+                            <tr>
+                              {data.columns?.map((k) => (
+                                <th key={k}>{k}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.rows?.map((row, i) => (
+                              <tr key={i}>
+                                {data.columns?.map((k) => (
+                                  <td
+                                    key={k}
+                                    title={
+                                      typeof row[k] === "string"
+                                        ? String(row[k])
+                                        : undefined
+                                    }
+                                  >
+                                    {typeof row[k] === "object"
+                                      ? JSON.stringify(row[k])
+                                      : number(row[k])}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {!data.rows?.length && (
+                          <div className="empty-report">
+                            За этот период данных нет.
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
-                  <div className="explore-links">
-                    {provider.reports
-                      .filter((r) => r !== "overview")
-                      .map((r, i) => (
-                        <button
-                          key={r}
-                          onClick={() => {
-                            setReport(r);
-                            setRefresh(0);
-                          }}
-                        >
-                          <span
-                            className="explore-mark"
-                            style={{ background: colors[i % colors.length] }}
-                          />
-                          <span>{reportNames[r]}</span>
-                          <ArrowRight size={15} />
-                        </button>
-                      ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="chart-heading">
-                    <h3>{reportNames[report]}</h3>
+                  {data.has_more && (
+                    <button
+                      className="add-connection"
+                      onClick={() => void loadMore()}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? (
+                        <Spinner label="Загружаю…" />
+                      ) : (
+                        `Показать ещё · ${number(data.rows?.length || 0)} из ${number(data.total_rows)}`
+                      )}
+                    </button>
+                  )}
+                  {pageError && <Alert>{pageError}</Alert>}
+                  <div className="report-footnote">
                     <span>
-                      {data.total_rows !== undefined
-                        ? `${number(data.total_rows)} записей`
+                      {data.sampled
+                        ? `Выборка ${number((data.sample_share || 0) * 100)}%`
+                        : "Данные API"}
+                      {data.limited ? " · Показаны первые 50 записей" : ""}
+                      {data.note ? " · " + data.note : ""}
+                    </span>
+                    <span>
+                      {data.cached ? "Из кеша · " : ""}
+                      {data.fetched_at
+                        ? "Обновлено " +
+                          new Date(data.fetched_at).toLocaleTimeString(
+                            "ru-RU",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )
                         : ""}
                     </span>
                   </div>
-                  {topRows.length > 0 && firstColumn && numericColumn && (
-                    <div className="horizontal-bars">
-                      {topRows.map((r, i) => {
-                        const maximum = Math.max(
-                          ...topRows.map(
-                            (row) => Number(row[numericColumn]) || 0,
-                          ),
-                          1,
-                        );
-                        return (
-                          <div className="bar-row" key={i}>
-                            <span
-                              className="bar-name"
-                              title={String(r[firstColumn])}
-                            >
-                              {String(r[firstColumn])}
-                            </span>
-                            <div className="bar-track">
-                              <div
-                                style={{
-                                  width:
-                                    Math.max(
-                                      0,
-                                      ((Number(r[numericColumn]) || 0) /
-                                        maximum) *
-                                        100,
-                                    ) + "%",
-                                  background: colors[i % colors.length],
-                                }}
-                              />
-                            </div>
-                            <strong>{number(r[numericColumn])}</strong>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="table-scroll report-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          {data.columns?.map((k) => (
-                            <th key={k}>{k}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.rows?.map((row, i) => (
-                          <tr key={i}>
-                            {data.columns?.map((k) => (
-                              <td
-                                key={k}
-                                title={
-                                  typeof row[k] === "string"
-                                    ? String(row[k])
-                                    : undefined
-                                }
-                              >
-                                {typeof row[k] === "object"
-                                  ? JSON.stringify(row[k])
-                                  : number(row[k])}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {!data.rows?.length && (
-                      <div className="empty-report">
-                        За этот период данных нет.
-                      </div>
-                    )}
-                  </div>
                 </>
-              )}
-              {data.has_more && (
-                <button
-                  className="add-connection"
-                  onClick={() => void loadMore()}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? (
-                    <Spinner label="Загружаю…" />
-                  ) : (
-                    `Показать ещё · ${number(data.rows?.length || 0)} из ${number(data.total_rows)}`
-                  )}
-                </button>
-              )}
-              {pageError && <Alert>{pageError}</Alert>}
-              <div className="report-footnote">
-                <span>
-                  {data.sampled
-                    ? `Выборка ${number((data.sample_share || 0) * 100)}%`
-                    : "Данные API"}
-                  {data.limited ? " · Показаны первые 50 записей" : ""}
-                  {data.note ? " · " + data.note : ""}
-                </span>
-                <span>
-                  {data.cached ? "Из кеша · " : ""}
-                  {data.fetched_at
-                    ? "Обновлено " +
-                      new Date(data.fetched_at).toLocaleTimeString("ru-RU", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : ""}
-                </span>
-              </div>
-            </>
-          )
-        )}
+              )
+            )}
+          </section>
+        </div>
       </div>
     </Modal>
   );

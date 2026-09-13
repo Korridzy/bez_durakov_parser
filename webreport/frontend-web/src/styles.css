@@ -105,7 +105,9 @@ svg {
   vertical-align: middle;
 }
 ::selection {
-  background: var(--accent-soft);
+  background: var(--selection-bg, var(--accent-strong));
+  color: #fff;
+  text-shadow: none;
 }
 ::-webkit-scrollbar {
   width: 5px;
@@ -294,9 +296,6 @@ svg {
   border-radius: 8px;
   gap: 2px;
 }
-.project-row.selected {
-  background: var(--accent-soft);
-}
 .project-toggle {
   display: flex;
   align-items: center;
@@ -307,9 +306,6 @@ svg {
   padding: 3px 4px;
   text-align: left;
   color: var(--subtle);
-}
-.project-row.selected .project-toggle {
-  color: var(--accent-ink);
 }
 .folder-chevron {
   opacity: 0;
@@ -524,6 +520,7 @@ svg {
 .conversation-scroll {
   flex: 1;
   min-height: 0;
+  margin-inline: 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -665,7 +662,7 @@ svg {
   resize: none;
   border: 0;
   padding: 0 23px 0 1px;
-  min-height: 44px;
+  min-height: 24px;
   max-height: 240px;
   line-height: 24px;
   font-size: 15px;
@@ -831,8 +828,9 @@ svg {
 }
 .model-option {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  flex: 1;
+  gap: 16px;
   min-width: 0;
   overflow: hidden;
 }
@@ -845,6 +843,12 @@ svg {
 .model-option small {
   font-size: 11px;
   color: #9b9fa5;
+  margin-left: auto;
+  text-align: right;
+  white-space: normal;
+}
+.model-menu .menu-item > svg {
+  flex-shrink: 0;
 }
 .message {
   margin-bottom: 36px;
@@ -1073,8 +1077,8 @@ svg {
 .inline-data {
   margin-top: 18px;
   border-radius: 12px;
-  background: #f7f8f9;
-  padding: 12px 15px;
+  background: var(--panel);
+  padding: 12px 0 0;
 }
 .inline-data summary {
   list-style: none;
@@ -1082,14 +1086,14 @@ svg {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #87929e;
+  color: var(--subtle);
   font-size: 12px;
+  padding: 0 15px 12px;
 }
 .inline-data summary span {
   margin-left: auto;
 }
 .inline-data table {
-  margin-top: 12px;
   font-size: 12px;
 }
 .table-scroll {
@@ -1122,6 +1126,78 @@ td {
 }
 tr:nth-child(even) td {
   background: #fafbfc;
+}
+/* Shared by Markdown tables and the structured data attached to a reply. */
+.answer-table {
+  --table-line: color-mix(in srgb, var(--lilac-ink, var(--subtle)) 32%, white);
+  width: 100%;
+  border: 1px solid var(--table-line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--ink) 4%, transparent);
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--table-line) transparent;
+}
+.markdown .answer-table {
+  margin: 18px 0 22px;
+}
+.markdown > .answer-table:last-child {
+  margin-bottom: 0;
+}
+.answer-table:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+.answer-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  font-variant-numeric: tabular-nums;
+}
+.answer-table th,
+.answer-table td {
+  min-width: 100px;
+  max-width: 420px;
+  padding: 13px 16px;
+  vertical-align: top;
+  color: var(--ink);
+}
+.answer-table th {
+  background: color-mix(in srgb, var(--lilac, var(--panel)) 65%, white);
+  font-size: 12px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--table-line);
+}
+.answer-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.answer-table :is(th, td) + :is(th, td) {
+  border-left: 1px solid var(--table-line);
+}
+.answer-table tbody tr + tr td {
+  border-top: 1px solid var(--table-line);
+}
+.answer-table tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--panel) 65%, white);
+}
+.answer-table tbody tr:hover td {
+  background: var(--accent-faint);
+}
+.answer-table td:first-child {
+  font-weight: 600;
+}
+.answer-table td > :last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 600px) {
+  .answer-table th,
+  .answer-table td {
+    padding: 11px 12px;
+  }
 }
 .modal {
   border: 0;
@@ -1172,6 +1248,16 @@ tr:nth-child(even) td {
 .connection-form {
   padding: 10px 30px 28px;
 }
+.model-connection-form .field,
+.model-connection-form .model-picker {
+  margin-bottom: 18px;
+}
+.model-connection-form .check-field {
+  margin-bottom: 0;
+}
+.model-connection-form .form-bottom {
+  margin-top: 22px;
+}
 .field {
   display: flex;
   flex-direction: column;
@@ -1190,8 +1276,7 @@ tr:nth-child(even) td {
   margin-left: 5px;
 }
 .field input,
-.field textarea,
-.field select {
+.field textarea {
   background: #f6f7f8;
   border: 0;
   border-radius: 9px;
@@ -1201,15 +1286,133 @@ tr:nth-child(even) td {
   width: 100%;
   min-width: 0;
 }
-.field select {
-  cursor: pointer;
-  appearance: auto;
-}
 .field-help {
   color: #a0a6af;
   font-size: 11px;
   line-height: 1.65;
   display: block;
+}
+.model-picker {
+  border: 0;
+  padding: 0;
+  margin: 0 0 23px;
+  min-width: 0;
+}
+.model-picker legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #686f78;
+}
+.model-recommendations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+.model-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  min-width: 0;
+  border: 1px solid #e8e9ed;
+  border-radius: 10px;
+  background: #fff;
+}
+.model-choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.model-choice:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.model-choice input {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.model-choice > span {
+  min-width: 0;
+}
+.model-choice strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.model-choice small {
+  display: block;
+  margin-top: 4px;
+  color: #737b88;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.model-card {
+  padding: 12px;
+}
+.model-catalog-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.model-catalog-toggle .rotated {
+  transform: rotate(180deg);
+}
+.model-catalog {
+  margin-top: 10px;
+  border: 1px solid #e8e9ed;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.model-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  background: #f6f7f8;
+  color: #7b8491;
+}
+.model-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.model-catalog-list {
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+}
+.model-catalog-row {
+  padding: 9px;
+  border-color: transparent;
+  border-radius: 6px;
+}
+.model-catalog-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #737b88;
+}
+.model-selected {
+  margin: 10px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.model-picker:disabled .model-choice {
+  cursor: wait;
+  opacity: 0.65;
+}
+@media (max-width: 480px) {
+  .model-recommendations {
+    grid-template-columns: 1fr;
+  }
 }
 .custom-select {
   position: relative;
@@ -1262,22 +1465,30 @@ tr:nth-child(even) td {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
-  padding: 10px 8px;
+  min-height: 40px;
+  padding: 10px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
+  color: #5b626b;
 }
 .select-option[aria-selected="true"] {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
+  color: var(--ink);
 }
 .select-option.focused {
-  box-shadow: inset 0 0 0 1px var(--accent-border);
-  background: var(--accent-faint);
+  background: #f1f3f5;
 }
 .select-option > svg {
-  color: var(--accent-strong);
+  flex-shrink: 0;
+  color: currentColor;
+}
+.field-error {
+  color: #b42338;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.field input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1px #eea5b0;
 }
 .field label > .credential-present {
   display: inline-flex;
@@ -1290,14 +1501,6 @@ tr:nth-child(even) td {
   line-height: 1.7;
   color: var(--subtle);
   margin: 0 0 24px;
-}
-.date-controls .custom-select {
-  width: 150px;
-}
-.date-controls .select-trigger {
-  min-height: 36px;
-  padding: 7px 12px;
-  font-size: 12px;
 }
 .secret-input {
   position: relative;
@@ -1591,93 +1794,6 @@ tr:nth-child(even) td {
   justify-content: center;
   color: #9aa8b7;
 }
-.source-overview {
-  padding: 0 32px 23px;
-}
-.source-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #a2a9b2;
-  font-size: 11px;
-  gap: 12px;
-  margin: 2px 0 30px;
-}
-.source-meta .inline {
-  min-width: 0;
-  gap: 8px;
-}
-.source-meta .inline > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.meta-separator {
-  color: #d2d7dd;
-}
-.report-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 27px;
-}
-.report-tabs {
-  display: flex;
-  gap: 3px;
-  min-width: 0;
-  overflow: auto;
-}
-.report-tabs button {
-  padding: 8px 13px;
-  border-radius: 7px;
-  color: #727f8d;
-  font-size: 13px;
-  white-space: nowrap;
-}
-.report-tabs button.active {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-.report-tabs button:hover {
-  background: #f4f6f8;
-  color: #70899e;
-}
-.date-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.date-controls select {
-  border: 0;
-  padding: 8px 12px;
-  background: #f6f7f9;
-  border-radius: 7px;
-  color: #8b97a4;
-  font-size: 11px;
-}
-.custom-dates {
-  display: flex;
-  gap: 16px;
-  justify-content: flex-end;
-  margin: -10px 0 26px;
-}
-.custom-dates label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #9ba4ae;
-  font-size: 11px;
-}
-.custom-dates input {
-  background: #f5f7f9;
-  border: 0;
-  border-radius: 7px;
-  padding: 8px;
-  color: #7c8998;
-  font-size: 12px;
-}
 .metrics {
   display: flex;
   gap: 12px;
@@ -1786,37 +1902,6 @@ tr:nth-child(even) td {
   margin-left: auto;
   font-weight: 600;
   color: #60758b;
-}
-.explore-links {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 22px 0 26px;
-}
-.explore-links button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  background: #f7f9fb;
-  padding: 13px 14px;
-  border-radius: 9px;
-  font-size: 11px;
-  color: #8b99a9;
-  min-width: 125px;
-}
-.explore-links button > svg {
-  margin-left: auto;
-  color: #a4afbc;
-}
-.explore-links button:hover {
-  background: #eef3f7;
-}
-.explore-mark {
-  width: 6px;
-  height: 6px;
-  opacity: 0.75;
-  border-radius: 2px;
 }
 .report-footnote {
   display: flex;
@@ -2022,15 +2107,6 @@ tr:nth-child(even) td {
   .sources-button span {
     display: none;
   }
-  .report-controls {
-    flex-wrap: wrap;
-  }
-  .report-tabs {
-    flex: 1;
-  }
-  .date-controls {
-    margin-left: auto;
-  }
   .metrics {
     gap: 9px;
   }
@@ -2093,12 +2169,6 @@ tr:nth-child(even) td {
   }
   .modal-header {
     padding: 20px 23px 17px;
-  }
-  .source-overview {
-    padding: 0 24px 23px;
-  }
-  .source-meta {
-    margin-bottom: 23px;
   }
   .metric-card > span:first-child {
     white-space: normal;
@@ -2163,7 +2233,7 @@ tr:nth-child(even) td {
   }
   .composer textarea {
     font-size: 16px;
-    min-height: 39px;
+    min-height: 24px;
   }
   .composer-toolbar {
     gap: 4px;
@@ -2236,37 +2306,6 @@ tr:nth-child(even) td {
   .settings-profile p {
     font-size: 10px;
   }
-  .source-overview {
-    padding: 0 17px 20px;
-  }
-  .source-meta {
-    font-size: 10px;
-    margin-bottom: 20px;
-  }
-  .source-meta > .text-link {
-    display: none;
-  }
-  .source-meta .inline {
-    gap: 6px;
-  }
-  .report-tabs button {
-    padding: 8px 10px;
-    font-size: 11px;
-  }
-  .report-controls {
-    margin-bottom: 18px;
-    gap: 11px;
-  }
-  .report-tabs {
-    flex-basis: 100%;
-    padding-bottom: 2px;
-  }
-  .date-controls {
-    gap: 3px;
-  }
-  .date-controls select {
-    font-size: 10px;
-  }
   .metrics {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2293,15 +2332,6 @@ tr:nth-child(even) td {
     height: 230px;
     margin-bottom: 26px;
   }
-  .explore-links {
-    gap: 7px;
-    margin-top: 10px;
-  }
-  .explore-links button {
-    min-width: 105px;
-    font-size: 10px;
-    padding: 11px;
-  }
   .report-footnote {
     font-size: 9px;
   }
@@ -2324,17 +2354,6 @@ tr:nth-child(even) td {
   .report-table td {
     font-size: 10px;
     padding: 10px 12px;
-  }
-  .custom-dates {
-    gap: 8px;
-    justify-content: space-between;
-  }
-  .custom-dates input {
-    width: 128px;
-    font-size: 10px;
-  }
-  .custom-dates label {
-    gap: 4px;
   }
   .delete-copy {
     font-size: 13px;

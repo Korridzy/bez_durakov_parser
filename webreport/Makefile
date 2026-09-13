@@ -23,7 +23,7 @@ ifneq ($(shell test -f "$(DATASET_COMPOSE_FILE)" && echo found),)
 override DOCKER_COMPOSE := $(DOCKER_COMPOSE) -f "$(DATASET_COMPOSE_FILE)"
 endif
 COMPOSE_SERVICES := litellm backend frontend
-COMPOSE_BUILD_SERVICES := backend frontend
+COMPOSE_BUILD_SERVICES := backend frontend analysis
 define dataset_preflight
 @test -d "$(DATASET_DIR)" || { echo "❌ DATASET=$(DATASET): no dataset directory at $(DATASET_DIR)"; exit 1; }
 @test -f "$(BD_CONFIG_LOCAL_FILE)" || { echo "❌ DATASET=$(DATASET): no config overlay at $(BD_CONFIG_LOCAL_FILE)"; exit 1; }
@@ -149,7 +149,10 @@ test-postgres: generate-env
 	 exit $$status
 
 test-workspace: generate-env
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CONFIG_LOCAL_FILE= -e BD_CHECKPOINT_DB_PATH=/tmp/workspace-tests.db backend python /app/test_analysis.py
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CONFIG_LOCAL_FILE= -e BD_CHECKPOINT_DB_PATH=/tmp/workspace-tests.db backend python /app/test_metrika_explorer.py
 	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CONFIG_LOCAL_FILE= -e BD_CHECKPOINT_DB_PATH=/tmp/workspace-tests.db backend python /app/test_workspace.py
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CONFIG_LOCAL_FILE= -e BD_CHECKPOINT_DB_PATH=/tmp/workspace-tests.db backend python /app/test_project_info.py
 
 test-e2e-setup:
 	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."

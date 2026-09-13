@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir numpy==2.2.6 pandas==2.2.3
+WORKDIR /runner
+COPY webreport/analysis_runner/server.py webreport/analysis_runner/worker.py /runner/
+ENV PYTHONDONTWRITEBYTECODE=1
+CMD ["python", "-I", "/runner/server.py"]

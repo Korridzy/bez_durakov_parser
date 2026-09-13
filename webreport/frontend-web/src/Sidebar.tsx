@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Chat, Project } from "./types";
 import { Logo, Menu, MenuItem } from "./ui";
+import { Trapezoid } from "./Trapezoid";
 
 type Props = {
   visible: boolean;
@@ -48,25 +49,30 @@ export function Sidebar(p: Props) {
     localStorage.setItem("wr-collapsed", JSON.stringify(ids));
   };
   return (
-    <aside className="sidebar" inert={!p.visible} aria-label="Проекты и чаты">
+    <aside id="project-sidebar" className="sidebar" inert={!p.visible} aria-label="Проекты и чаты">
       <div className="sidebar-brand">
         <button className="brand" onClick={() => p.onNewChat()}>
           <Logo small />
-          <span>
-            Без дураков
-            <span className="brand-caption">Аналитика в диалоге</span>
-          </span>
+          <span className="brand-name">Dig AI</span>
+          <span className="brand-caption">Аналитика в диалоге</span>
         </button>
         <button
-          className="icon-button subtle"
+          className="icon-button sidebar-toggle-button"
           aria-label="Свернуть боковую панель"
+          title="Свернуть боковую панель"
+          aria-expanded={true}
+          aria-controls="project-sidebar"
           onClick={p.onClose}
         >
-          <PanelLeftClose size={18} />
+          <PanelLeftClose size={19} strokeWidth={1.8} />
         </button>
       </div>
       <div className="sidebar-top">
-        <button className="new-chat" onClick={() => p.onNewChat()}>
+        <button
+          className="new-chat shaped-control"
+          onClick={() => p.onNewChat()}
+        >
+          <Trapezoid radius={10} bottomWide />
           <SquarePen size={18} />
           Новый чат
         </button>
@@ -96,7 +102,7 @@ export function Sidebar(p: Props) {
             aria-label="Создать проект"
             onClick={p.onNewProject}
           >
-            <Plus size={17} />
+            <Plus size={17} strokeWidth={2} />
           </button>
         </div>
         {p.projects.map((project) => {
@@ -108,12 +114,7 @@ export function Sidebar(p: Props) {
           const expanded = !collapsed.includes(project.id) || !!search;
           return (
             <div className="project-group" key={project.id}>
-              <div
-                className={
-                  "project-row " +
-                  (p.projectId === project.id ? "selected" : "")
-                }
-              >
+              <div className="project-row">
                 <button
                   className="project-toggle"
                   aria-label={
@@ -179,8 +180,12 @@ export function Sidebar(p: Props) {
                       }
                       key={chat.id}
                     >
+                      {p.chatId === chat.id && (
+                        <Trapezoid radius={9} bottomWide />
+                      )}
                       <button
                         className="chat-name"
+                        aria-current={p.chatId === chat.id ? "page" : undefined}
                         onClick={() => p.onChat(chat.id)}
                         title={chat.name}
                       >

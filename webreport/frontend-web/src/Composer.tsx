@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import {
   ArrowUp,
   CircleAlert,
   ChevronDown,
   Database,
+  FileText,
   Maximize2,
   Minimize2,
   Plus,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Model, Source } from "./types";
 import { Menu, MenuItem, ProviderIcon } from "./ui";
+import { Trapezoid } from "./Trapezoid";
 
 export const efforts: Record<string, string> = {
   auto: "Авто",
@@ -18,9 +20,22 @@ export const efforts: Record<string, string> = {
   medium: "Среднее",
   high: "Высокое",
 };
+const modelProviders: Record<string, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  deepseek: "DeepSeek",
+  google: "Google Gemini",
+  custom: "Совместимый API",
+};
 type Props = {
   sources: Source[];
   hasDataset: boolean;
+  hasProjectInfo: boolean;
+  onProjectInfo: () => void;
+  interview: boolean;
+  companionPresent?: boolean;
+  onEndInterview: () => void;
+  highlight: number;
   onSource: (source: Source) => void;
   onManageSources: () => void;
   value: string;
@@ -43,7 +58,9 @@ export function Composer(p: Props) {
     [menu, setMenu] = useState("");
   const model = p.models.find((m) => m.id === p.modelId) || p.models[0];
   const connectedCount =
-    p.sources.filter((s) => s.connected).length + Number(p.hasDataset);
+    p.sources.filter((s) => s.connected).length +
+    Number(p.hasDataset) +
+    Number(p.hasProjectInfo);
   const connectionError = p.sources.some(
     (s) => s.connection_status === "error",
   );
@@ -53,18 +70,62 @@ export function Composer(p: Props) {
     : connectedCount === 0
       ? "Нет подключённых источников"
       : `${connectedCount} ${sourceNoun === "one" ? "источник подключён" : sourceNoun === "few" ? "источника подключено" : "источников подключено"}`;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = p.inputRef.current;
-    if (el) {
+    if (!el) return;
+    const resize = () => {
       el.style.height = "auto";
       el.style.height =
         Math.min(el.scrollHeight, expanded ? window.innerHeight * 0.52 : 240) +
         "px";
-    }
+    };
+    resize();
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        resize();
+      }
+    });
+    observer.observe(el);
+    window.addEventListener("resize", resize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
   }, [p.value, expanded, p.inputRef]);
   return (
     <div className={"composer " + (expanded ? "expanded" : "")}>
+      <Trapezoid radius={22} slope={1.25} />
+      {p.highlight > 0 && (
+        <span key={p.highlight} className="composer-glow" aria-hidden="true" />
+      )}
       <div className="composer-sources" aria-label="Источники проекта">
+        <button
+          className={
+            "attached-source project-info-chip " +
+            (!p.hasProjectInfo ? "missing-info" : "")
+          }
+          onClick={p.onProjectInfo}
+          disabled={!p.hasProjectInfo && (p.running || p.disabled)}
+          title={
+            p.hasProjectInfo
+              ? "Открыть информацию о проекте"
+              : "Расскажите о проекте в чате"
+          }
+        >
+          {p.hasProjectInfo ? (
+            <FileText size={16} />
+          ) : (
+            <CircleAlert size={16} />
+          )}
+          <span>
+            {p.hasProjectInfo
+              ? "Информация о проекте"
+              : "Нет информации о проекте"}
+          </span>
+          {p.hasProjectInfo && <span className="source-status-dot" />}
+        </button>
         {p.hasDataset && (
           <span className="attached-source dataset-source">
             <Database size={16} />
@@ -112,6 +173,14 @@ export function Composer(p: Props) {
           {sourceStatus}
         </button>
       </div>
+      {p.interview && !p.companionPresent && (
+        <div className="project-interview-hint">
+          <span>Расскажите о проекте — я запомню главное</span>
+          <button onClick={p.onEndInterview} disabled={p.running}>
+            Перейти к вопросам
+          </button>
+        </div>
+      )}
       <button
         className="expand-input icon-button"
         aria-label={expanded ? "Уменьшить поле ввода" : "Развернуть поле ввода"}
@@ -123,7 +192,11 @@ export function Composer(p: Props) {
         ref={p.inputRef}
         value={p.value}
         onChange={(e) => p.onChange(e.target.value)}
-        placeholder="Спросите о ваших данных"
+        placeholder={
+          p.interview
+            ? "Опишите проект своими словами…"
+            : "Спросите о ваших данных"
+        }
         rows={1}
         aria-label="Сообщение"
         onKeyDown={(e) => {
@@ -169,7 +242,9 @@ export function Composer(p: Props) {
                 <span className="model-option">
                   <strong>{m.name}</strong>
                   <small>
-                    {m.system ? "Системная" : m.provider}
+                    {m.system
+                      ? "Системная"
+                      : modelProviders[m.provider] || m.provider}
                     {!m.connected ? " · Подключите ключ" : ""}
                     {m.system && m.available === false ? " · Недоступна" : ""}
                   </small>
@@ -218,19 +293,21 @@ export function Composer(p: Props) {
         </div>
         {p.running ? (
           <button
-            className="send stop"
+            className="send stop shaped-control"
             aria-label="Остановить ответ"
             onClick={p.onCancel}
           >
+            <Trapezoid radius={10} bottomWide />
             <Square size={14} fill="currentColor" />
           </button>
         ) : (
           <button
-            className="send"
+            className="send shaped-control"
             aria-label="Отправить сообщение"
             disabled={!p.value.trim() || p.disabled}
             onClick={p.onSend}
           >
+            <Trapezoid radius={10} bottomWide />
             <ArrowUp size={21} />
           </button>
         )}
