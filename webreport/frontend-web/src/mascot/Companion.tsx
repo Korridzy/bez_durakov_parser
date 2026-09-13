@@ -137,8 +137,8 @@ export function Shovel({
       {status !== "ready" && (
         <img
           className="shovel-fallback"
-          src="/mascot/shovel-concept.png"
-          alt="Улыбающаяся лопата с глазами на летающем островке"
+          src="/mascot/shovel-hill.png"
+          alt="Улыбающаяся лопата на зелёном холмике"
         />
       )}
       <canvas
@@ -162,7 +162,10 @@ export function Shovel({
   );
 }
 
-// One mounted scene travels between two layout anchors, preserving its camera and animation.
+// Keep the scene's drawing buffer fixed; only compositor transforms travel between anchors.
+const SCENE_WIDTH = 410;
+const SCENE_HEIGHT = 330;
+
 export function CompanionStage({
   kind,
   compact,
@@ -183,6 +186,7 @@ export function CompanionStage({
   speech?: CompanionSpeech;
 } & Omit<SceneState, "visible" | "speech">) {
   const root = useRef<HTMLDivElement>(null);
+  const visual = useRef<HTMLDivElement>(null);
   const lastMode = useRef(compact);
   const [travel, setTravel] = useState(false);
   const [box, setBox] = useState<{
@@ -197,15 +201,17 @@ export function CompanionStage({
       anchor = compact ? dockAnchor.current : heroAnchor.current;
     const parent = stage?.parentElement;
     if (!stage || !anchor || !parent || !active) {
+      setTravel(false);
       setBox((previous) =>
         previous ? { ...previous, visible: false } : undefined,
       );
       return;
     }
     if (lastMode.current !== compact) {
-      setTravel(true);
+      setTravel(motion && !matchMedia("(prefers-reduced-motion: reduce)").matches);
       lastMode.current = compact;
     }
+    if (!motion) setTravel(false);
     let frame = 0;
     const measure = () => {
       frame = 0;
@@ -216,7 +222,7 @@ export function CompanionStage({
         y: a.top - p.top,
         width: a.width,
         height: a.height,
-        visible: a.bottom > p.top + 65 && a.top < p.bottom && a.width > 0,
+        visible: a.bottom > p.top && a.top < p.bottom && a.width > 0,
       };
       setBox((before) =>
         before &&
@@ -243,44 +249,71 @@ export function CompanionStage({
     document.addEventListener("scroll", schedule, true);
     parent.addEventListener("animationend", schedule);
     measure();
-    const timer = setTimeout(() => {
-      setTravel(false);
-      schedule();
-    }, 750);
     return () => {
-      clearTimeout(timer);
       cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", schedule);
       document.removeEventListener("scroll", schedule, true);
       parent.removeEventListener("animationend", schedule);
     };
-  }, [kind, compact, active, heroAnchor, dockAnchor]);
+  }, [kind, compact, active, motion, heroAnchor, dockAnchor]);
+  useEffect(() => {
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+    const stop = () => {
+      if (reduced.matches) setTravel(false);
+    };
+    reduced.addEventListener("change", stop);
+    return () => reduced.removeEventListener("change", stop);
+  }, []);
   if (kind === "none") return null;
+  const scale = (box?.width || SCENE_WIDTH) / SCENE_WIDTH;
   return (
     <div
       ref={root}
       className={"companion-stage " + (compact ? "is-compact" : "is-hero")}
       data-travel={travel && motion}
+      onTransitionEnd={(event) => {
+        if (
+          event.propertyName === "transform" &&
+          (event.target === root.current || event.target === visual.current) &&
+          ![root.current, visual.current].some((element) =>
+            element?.getAnimations().some(
+              (animation) => animation.playState === "running",
+            ),
+          )
+        ) {
+          setTravel(false);
+        }
+      }}
       style={{
-        transform: `translate(${box?.x || 0}px, ${box?.y || 0}px)`,
+        transform: `translate3d(${box?.x || 0}px, ${box?.y || 0}px, 0)`,
         width: box?.width || 1,
         height: box?.height || 1,
         visibility: box?.visible ? "visible" : "hidden",
       }}
     >
-      {kind === "shovel" ? (
-        <Shovel
-          activity={activity}
-          motion={motion}
-          accent={accent}
-          engaged={engaged}
-          speech={speech ? speech.title + " " + speech.text : undefined}
-          enabled={!!box?.visible && active}
-        />
-      ) : (
-        <Expedition activity={activity} motion={motion} compact={compact} />
-      )}
+      <div
+        className="companion-visual"
+        ref={visual}
+        style={{
+          width: SCENE_WIDTH,
+          height: SCENE_HEIGHT,
+          transform: `translate3d(0, ${((box?.height || SCENE_HEIGHT) - SCENE_HEIGHT * scale) / 2}px, 0) scale(${scale})`,
+        }}
+      >
+        {kind === "shovel" ? (
+          <Shovel
+            activity={activity}
+            motion={motion}
+            accent={accent}
+            engaged={engaged}
+            speech={speech ? speech.title + " " + speech.text : undefined}
+            enabled={!!box?.visible && active}
+          />
+        ) : (
+          <Expedition activity={activity} motion={motion} compact={compact} />
+        )}
+      </div>
       {speech && (
         <SpeechBubble>
           <strong>{speech.title}</strong>

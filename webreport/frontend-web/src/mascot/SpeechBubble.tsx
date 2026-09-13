@@ -58,13 +58,13 @@ export function SpeechBubble({ children }: { children: ReactNode }) {
         <defs>
           <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
             <stop offset="5%" stopColor="#ffffff" />
-            <stop offset="75%" stopColor="#fcf5ff" />
-            <stop offset="100%" stopColor="#f1ddfc" />
+            <stop offset="75%" stopColor="#f7faff" />
+            <stop offset="100%" stopColor="#eef4fd" />
           </linearGradient>
         </defs>
         <g
           fill={`url(#${gradient})`}
-          stroke="#c6a3dc"
+          stroke="#d8e3f0"
           strokeWidth="1"
           strokeLinejoin="round"
         >

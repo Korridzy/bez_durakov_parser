@@ -633,13 +633,13 @@ export default function App() {
             ) : empty ? (
               <section className="welcome">
                 {companion !== "none" && <div className="companion-anchor hero" ref={heroAnchor} aria-hidden="true" />}
-                {companion === "none" && <><h1>{hasData ? "Хей!" : "Давай знакомиться!"}</h1>
+                <h1>{hasData ? "Хей!" : "Давай знакомиться!"}</h1>
                 <p>
                   {hasData
                     ? "Какие вопросы по проекту?"
                     : "Мне нужна инфа, чтобы дать тебе толковые советы"}
-                </p></>}
-                {!hasData && companion === "none" && (
+                </p>
+                {!hasData && (
                   <button
                     className="welcome-connect primary-button shaped-control"
                     onClick={() => setDialog("source-add")}

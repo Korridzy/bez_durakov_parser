@@ -20,9 +20,29 @@ function Find-TaskExecutable([string]$Name, [string[]]$Candidates) {
 }
 
 function Test-TaskDocker {
-    $ErrorActionPreference = 'SilentlyContinue'
-    & $taskDocker info --format '{{.OSType}}' *> $null
-    return ($LASTEXITCODE -eq 0)
+    # A crashed Desktop can leave its API pipe open without answering. Bound the
+    # CLI call too, otherwise the surrounding three-minute deadline never runs.
+    $taskProbe = New-Object System.Diagnostics.Process
+    $taskProbe.StartInfo.FileName = $taskDocker
+    $taskProbe.StartInfo.Arguments = 'info --format "{{.OSType}}"'
+    $taskProbe.StartInfo.UseShellExecute = $false
+    $taskProbe.StartInfo.CreateNoWindow = $true
+    $taskProbe.StartInfo.RedirectStandardOutput = $true
+    $taskProbe.StartInfo.RedirectStandardError = $true
+    try {
+        [void]$taskProbe.Start()
+        # Drain both pipes while waiting so CLI output cannot block the process.
+        $taskOutput = $taskProbe.StandardOutput.ReadToEndAsync()
+        $taskError = $taskProbe.StandardError.ReadToEndAsync()
+        if (-not $taskProbe.WaitForExit(10000)) {
+            $taskProbe.Kill()
+            $taskProbe.WaitForExit()
+            return $false
+        }
+        return ($taskProbe.ExitCode -eq 0)
+    } finally {
+        $taskProbe.Dispose()
+    }
 }
 
 function Invoke-TaskMake([string]$Target, [switch]$InDataset) {

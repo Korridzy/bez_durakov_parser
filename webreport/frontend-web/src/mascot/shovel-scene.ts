@@ -30,7 +30,7 @@ export async function loadShovelAssets(): Promise<ShovelAssets> {
   const loader = new T.TextureLoader();
   const result = await Promise.allSettled([
     loader.loadAsync("/mascot/mouths.png"),
-    loader.loadAsync("/mascot/island.png"),
+    loader.loadAsync("/mascot/hill.png"),
   ]);
   if (result.some((item) => item.status === "rejected")) {
     result.forEach((item) => {
@@ -452,7 +452,10 @@ export function createShovelScene(
     }
   }
   function resize() {
-    const { width, height } = canvas.getBoundingClientRect();
+    // CSS transforms move/scale the canvas without changing its drawing buffer.
+    // Measure layout size so mounting in the dock still renders at full resolution.
+    const width = canvas.clientWidth,
+      height = canvas.clientHeight;
     if (!width || !height) return;
     renderer.setSize(width, height, false);
     // Leave headroom for the T-handle at the top of a celebratory hop.

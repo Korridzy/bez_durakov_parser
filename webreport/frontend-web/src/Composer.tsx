@@ -173,8 +173,8 @@ export function Composer(p: Props) {
           {sourceStatus}
         </button>
       </div>
-      {p.interview && !p.companionPresent && (
-        <div className="project-interview-hint">
+      {p.interview && (
+        <div className={"project-interview-hint" + (p.companionPresent ? " has-companion" : "")}>
           <span>Расскажите о проекте — я запомню главное</span>
           <button onClick={p.onEndInterview} disabled={p.running}>
             Перейти к вопросам

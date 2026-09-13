@@ -4,13 +4,31 @@
   margin: 0 auto 8px;
   transform: translateX(75px);
 }
+/* The travelling scene handles its own entrance; keep its target stationary. */
+.welcome:has(.companion-anchor) {
+  animation: none;
+}
 .companion-anchor.compact {
-  width: 230px;
-  height: 192px;
+  width: 100%;
+  aspect-ratio: 254 / 220;
   flex-shrink: 0;
 }
-.companion-slot:has(.companion-anchor) {
-  height: 192px;
+/* Move and size the conversation and input as one column.
+   The canvas has 28px of transparent space beside the painted island. */
+@container (width >= 760px) {
+  .main-panel:has(.companion-slot) :is(.conversation, .composer-dock) {
+    --companion-size: clamp(178px, calc(100cqw - var(--chat-column-width) - 4px), 254px);
+    --companion-reserve: calc(var(--companion-size) - 28px + 16px);
+    --workspace-column-width: min(var(--chat-column-width), calc(100cqw - var(--companion-reserve) - 16px));
+    --workspace-column-left: max(16px, min(
+      calc((100cqw - var(--workspace-column-width)) / 2),
+      calc(100cqw - var(--workspace-column-width) - var(--companion-reserve))
+    ));
+  }
+}
+.welcome:has(.companion-anchor) > :not(.companion-anchor),
+.project-interview-hint.has-companion {
+  display: none;
 }
 .companion-stage {
   position: absolute;
@@ -19,11 +37,16 @@
   z-index: 4;
   pointer-events: none;
 }
-.companion-stage[data-travel="true"] {
-  transition:
-    transform 700ms cubic-bezier(0.22, 0.68, 0.19, 1),
-    width 700ms ease,
-    height 700ms ease;
+.companion-visual {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.companion-stage[data-travel="true"],
+.companion-stage[data-travel="true"] .companion-visual {
+  transition: transform 700ms cubic-bezier(0.22, 0.68, 0.19, 1);
+  will-change: transform;
 }
 .companion-stage > * {
   pointer-events: auto;
@@ -73,7 +96,7 @@
   font-size: 11px;
   color: var(--muted);
   background: #fff9;
-  border: 1px solid #dacee5;
+  border: 1px solid var(--line);
   border-radius: 9px;
   padding: 5px 9px;
   white-space: nowrap;
@@ -97,30 +120,7 @@
   width: 195px;
   flex-shrink: 0;
 }
-@container (min-width: 1360px) {
-  .companion-slot:has(.companion-anchor) {
-    height: auto;
-    right: -226px;
-    bottom: 18px;
-  }
-  .companion-anchor.compact {
-    width: 254px;
-    height: 220px;
-  }
-}
 @media (max-width: 700px) {
-  .companion-anchor.hero {
-    width: 290px;
-    max-width: 92%;
-    height: 230px;
-  }
-  .companion-anchor.compact {
-    width: 160px;
-    height: 137px;
-  }
-  .companion-slot:has(.companion-anchor) {
-    height: 137px;
-  }
   .companion-setting {
     align-items: flex-start;
     flex-direction: column;
@@ -132,6 +132,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .companion-stage[data-travel="true"],
+  .companion-stage[data-travel="true"] .companion-visual,
   .shovel-companion canvas {
     transition: none;
   }
@@ -143,7 +144,7 @@
   top: 68px;
   width: 252px;
   padding: 21px 23px;
-  color: #432258;
+  color: var(--ink);
   transform: rotate(-2deg) skewX(-3deg);
   text-align: left;
 }
@@ -154,7 +155,7 @@
   height: 100%;
   overflow: visible;
   pointer-events: none;
-  filter: drop-shadow(0 7px 0 #b895d325) drop-shadow(0 10px 17px #67448218);
+  filter: drop-shadow(0 7px 0 #6985a410) drop-shadow(0 10px 17px #6985a414);
 }
 .speech-tail-bottom {
   display: none;
@@ -175,25 +176,26 @@
   margin: 9px 0 0;
   font-size: 14px;
   line-height: 1.65;
-  color: #745083;
+  color: var(--muted);
 }
 .companion-speech-action {
   margin-top: 13px;
   padding: 0;
   font-size: 12px;
   font-weight: 700;
-  color: #9b4078;
+  color: var(--accent-ink);
   text-align: left;
 }
 .companion-speech-action:hover {
-  color: #c15072;
+  color: var(--accent-strong);
 }
 .companion-speech-action:disabled {
   opacity: 0.45;
 }
 .is-compact .companion-speech {
-  top: 10px;
-  right: 88%;
+  top: auto;
+  bottom: calc(100% - 14px);
+  right: 10%;
   width: 232px;
   padding: 16px 19px;
 }
@@ -204,16 +206,27 @@
   font-size: 12px;
   margin-top: 6px;
 }
-@container (min-width: 1360px) {
+.is-compact .speech-tail-right {
+  display: none;
+}
+.is-compact .speech-tail-bottom {
+  display: block;
+}
+@container (width < 1240px) {
   .is-compact .companion-speech {
-    top: auto;
-    bottom: calc(100% - 14px);
-    right: 10%;
-  }
-  .is-compact .speech-tail-right {
     display: none;
   }
-  .is-compact .speech-tail-bottom {
+  .project-interview-hint.has-companion {
+    display: flex;
+  }
+}
+@container (width < 760px) {
+  .companion-stage,
+  .companion-slot,
+  .companion-anchor.hero {
+    display: none;
+  }
+  .welcome:has(.companion-anchor) > :not(.companion-anchor) {
     display: block;
   }
 }
@@ -224,42 +237,5 @@
   .is-hero .companion-speech {
     right: 70%;
     width: 226px;
-  }
-}
-@media (max-width: 700px) {
-  .companion-anchor.hero {
-    transform: none;
-    margin-top: 130px;
-  }
-  .is-hero .companion-speech {
-    top: auto;
-    bottom: calc(100% - 10px);
-    right: auto;
-    left: 50%;
-    width: min(280px, calc(100vw - 58px));
-    transform: translateX(-50%) rotate(-2deg) skewX(-3deg);
-    padding: 16px 20px;
-  }
-  .is-hero .speech-tail-right {
-    display: none;
-  }
-  .is-hero .speech-tail-bottom {
-    display: block;
-  }
-  .is-hero .companion-speech strong {
-    font-size: 23px;
-  }
-  .is-compact .companion-speech {
-    width: min(210px, calc(100vw - 160px));
-    right: 86%;
-    padding: 12px 15px;
-    top: -12px;
-  }
-  .is-compact .companion-speech strong {
-    font-size: 15px;
-  }
-  .is-compact .companion-speech p {
-    font-size: 11px;
-    line-height: 1.45;
   }
 }

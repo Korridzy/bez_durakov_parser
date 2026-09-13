@@ -2,7 +2,7 @@ import * as T from "three";
 
 export type ShovelAssets = { mouths: T.Texture; island: T.Texture };
 
-// The painted island sits behind real geometry and a transparent shadow receiver.
+// The painted grassy mound sits behind the character and its shadow receiver.
 export function createShovelModel(assets?: ShovelAssets) {
   const root = new T.Group();
   const material = (color: string, roughness = 0.65, metalness = 0) =>
@@ -59,7 +59,7 @@ export function createShovelModel(assets?: ShovelAssets) {
     }),
   );
   island.name = "painted-island";
-  island.position.y = -0.38;
+  island.position.y = 0.05;
   island.renderOrder = -10;
   island.castShadow = island.receiveShadow = false;
   const ground = mesh(
@@ -468,27 +468,23 @@ export function rotateShovel(
   );
 }
 
-// The inset turf outline in island.png, normalised from its top-left corner.
-// Project it onto the horizontal receiver so shadows stop before the rock edge.
+// The open clearing in hill.png, normalised from its top-left corner.
+// Shadows and digging stay on the grass rather than crossing the sandy apron.
 export const islandTurfOutline = [
-  [0.15, 0.23],
-  [0.2, 0.185],
-  [0.29, 0.151],
-  [0.41, 0.125],
-  [0.54, 0.129],
-  [0.66, 0.149],
-  [0.76, 0.185],
-  [0.84, 0.226],
-  [0.869, 0.281],
-  [0.831, 0.329],
-  [0.755, 0.379],
-  [0.64, 0.433],
-  [0.52, 0.461],
-  [0.41, 0.447],
-  [0.32, 0.407],
-  [0.25, 0.358],
-  [0.174, 0.324],
-  [0.136, 0.279],
+  [0.23, 0.47],
+  [0.28, 0.4],
+  [0.38, 0.365],
+  [0.5, 0.355],
+  [0.62, 0.37],
+  [0.71, 0.415],
+  [0.76, 0.48],
+  [0.75, 0.55],
+  [0.69, 0.62],
+  [0.59, 0.685],
+  [0.48, 0.71],
+  [0.38, 0.685],
+  [0.29, 0.62],
+  [0.24, 0.55],
 ] as const;
 
 export function fitShadowGround(
