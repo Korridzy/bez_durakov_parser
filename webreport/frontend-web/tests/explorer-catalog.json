@@ -1,0 +1,281 @@
+{
+  "metrics": [
+    {
+      "key": "users",
+      "label": "Посетители",
+      "format": "number",
+      "goal": false
+    },
+    {
+      "key": "visits",
+      "label": "Визиты",
+      "format": "number",
+      "goal": false
+    },
+    {
+      "key": "views",
+      "label": "Просмотры",
+      "format": "number",
+      "goal": false
+    },
+    {
+      "key": "bounce",
+      "label": "Отказы",
+      "format": "percent",
+      "goal": false
+    },
+    {
+      "key": "depth",
+      "label": "Глубина просмотра",
+      "format": "number",
+      "goal": false
+    },
+    {
+      "key": "duration",
+      "label": "Время на сайте",
+      "format": "duration",
+      "goal": false
+    },
+    {
+      "key": "new_users",
+      "label": "Новые посетители",
+      "format": "number",
+      "goal": false
+    },
+    {
+      "key": "new_share",
+      "label": "Доля новых посетителей",
+      "format": "percent",
+      "goal": false
+    },
+    {
+      "key": "goal_reaches",
+      "label": "Достижения цели",
+      "format": "number",
+      "goal": true
+    },
+    {
+      "key": "goal_visits",
+      "label": "Целевые визиты",
+      "format": "number",
+      "goal": true
+    },
+    {
+      "key": "goal_users",
+      "label": "Целевые посетители",
+      "format": "number",
+      "goal": true
+    },
+    {
+      "key": "conversion",
+      "label": "Конверсия",
+      "format": "percent",
+      "goal": true
+    }
+  ],
+  "dimensions": [
+    {
+      "key": "channel",
+      "label": "Канал привлечения",
+      "category": "Источники",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "search_engine",
+      "label": "Поисковая система",
+      "category": "Источники",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "search_phrase",
+      "label": "Поисковая фраза",
+      "category": "Источники",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "referrer",
+      "label": "Ссылающаяся страница",
+      "category": "Источники",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "utm_source",
+      "label": "UTM source",
+      "category": "UTM-метки",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "utm_medium",
+      "label": "UTM medium",
+      "category": "UTM-метки",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "utm_campaign",
+      "label": "UTM campaign",
+      "category": "UTM-метки",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "utm_content",
+      "label": "UTM content",
+      "category": "UTM-метки",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "utm_term",
+      "label": "UTM term",
+      "category": "UTM-метки",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "device",
+      "label": "Тип устройства",
+      "category": "Технологии",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "browser",
+      "label": "Браузер",
+      "category": "Технологии",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "os",
+      "label": "Операционная система",
+      "category": "Технологии",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "screen",
+      "label": "Разрешение экрана",
+      "category": "Технологии",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "country",
+      "label": "Страна",
+      "category": "География",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "region",
+      "label": "Регион",
+      "category": "География",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "city",
+      "label": "Город",
+      "category": "География",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "landing",
+      "label": "Страница входа",
+      "category": "Страницы",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "exit",
+      "label": "Страница выхода",
+      "category": "Страницы",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "new_visitor",
+      "label": "Новый посетитель",
+      "category": "Аудитория",
+      "operators": ["eq", "neq"]
+    },
+    {
+      "key": "gender",
+      "label": "Пол",
+      "category": "Аудитория",
+      "operators": ["eq", "neq"]
+    },
+    {
+      "key": "age",
+      "label": "Возраст",
+      "category": "Аудитория",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "robot",
+      "label": "Робот",
+      "category": "Аудитория",
+      "operators": ["eq", "neq"]
+    },
+    {
+      "key": "visit_param",
+      "label": "Параметр визита · уровень 1",
+      "category": "Параметры",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "visit_param2",
+      "label": "Параметр визита · уровень 2",
+      "category": "Параметры",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    },
+    {
+      "key": "visit_param3",
+      "label": "Параметр визита · уровень 3",
+      "category": "Параметры",
+      "operators": ["eq", "neq", "contains", "not_contains"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "overview",
+      "label": "Обзор",
+      "dimensions": []
+    },
+    {
+      "id": "channels",
+      "label": "Каналы",
+      "dimensions": ["channel"]
+    },
+    {
+      "id": "campaigns",
+      "label": "UTM-метки",
+      "dimensions": ["utm_source", "utm_campaign"]
+    },
+    {
+      "id": "audience",
+      "label": "Аудитория",
+      "dimensions": ["new_visitor"]
+    },
+    {
+      "id": "devices",
+      "label": "Устройства",
+      "dimensions": ["device"]
+    },
+    {
+      "id": "pages",
+      "label": "Страницы",
+      "dimensions": ["landing"]
+    },
+    {
+      "id": "geography",
+      "label": "География",
+      "dimensions": ["country"]
+    },
+    {
+      "id": "goals",
+      "label": "Цели",
+      "dimensions": []
+    },
+    {
+      "id": "parameters",
+      "label": "Параметры",
+      "dimensions": ["visit_param", "visit_param2"]
+    },
+    {
+      "id": "custom",
+      "label": "Свой отчёт",
+      "dimensions": []
+    }
+  ],
+  "max_points": 1600
+}

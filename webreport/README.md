@@ -1,6 +1,6 @@
 # Web-based Game Data Reporting System
 
-Веб-система для генерации отчётов по игровым данным с использованием AI-агентов.
+Веб-система для анализа данных с использованием AI-агентов. Основной интерфейс — React: проекты, чаты, API-источники и настройки моделей. См. [инструкцию рабочего пространства](frontend-web/README.md), включая подключение аналитики, хранение ключей и проверенные сценарии. Каталог `frontend/` и описания старого report view ниже относятся к legacy Streamlit, который больше не запускается основным Compose.
 
 ## 🏗️ Архитектура
 
@@ -13,10 +13,10 @@
    - Маршрутизация запросов к агентам
    - Доступ к данным через сервисный слой
 
-2. **Frontend (Streamlit)** - пользовательский интерфейс
-   - Чат с AI-агентом
-   - Отображение отчётов
-   - Переключение между представлениями
+2. **Frontend (React + TypeScript)** - пользовательский интерфейс
+   - Проекты, чаты и общие источники проекта
+   - Markdown-ответы, рассуждения и статусы запросов
+   - Сводки источников в модальном окне с загрузкой подробностей по требованию
 
 3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
    - обращается к модели через `ChatLiteLLM` и внутренний LiteLLM proxy `litellm:4000`
@@ -44,7 +44,8 @@ webreport/
 │   ├── start.py                    # Container launcher for Uvicorn/debugger
 │   ├── test_system.py              # Docker-based backend tests
 │   └── pyproject.toml              # Backend Poetry dependencies
-├── frontend/
+├── frontend-web/                  # Основной React UI, Vite build и nginx
+├── frontend/                      # Legacy, в основном Compose не запускается
 │   ├── main.py                     # Streamlit application
 │   ├── start.py                    # Container launcher for Streamlit/debugger
 │   └── pyproject.toml              # Frontend Poetry dependencies
@@ -77,7 +78,7 @@ webreport/
 Зависимости разделены по сервисам и описаны в Poetry-манифестах:
 
 - `backend/pyproject.toml`
-- `frontend/pyproject.toml`
+- `frontend-web/package.json` и `package-lock.json` (npm)
 - `data_collector/pyproject.toml`
 
 При обычном Docker-запуске вручную устанавливать их не нужно: Docker-образы устанавливают зависимости во время сборки.
@@ -264,7 +265,7 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 
 - **Python 3.11+**
 - **FastAPI** - REST API framework
-- **Streamlit** - UI framework
+- **React + Vite** - основной UI; Streamlit сохранён только как legacy
 - **LangGraph** - ReAct agent and checkpointed threads
 - **ChatLiteLLM** (`langchain-litellm`) - model client for the internal LiteLLM proxy
 - **LiteLLM** - internal model proxy at `litellm:4000`
@@ -361,7 +362,8 @@ make test-postgres  # Только приёмочная полоса проти�
 make validate-knowledge # Проверить папку знаний
 make validate-tools # Проверить модуль инструментов оператора
 make test-e2e-setup # Один раз: установить e2e-зависимости и Chromium
-make test-e2e       # Offline Playwright e2e против stub backend
+make test-e2e       # Legacy Streamlit e2e против stub backend
+make test-workspace # Новый API проектов и коннекторы, без реальных ключей
 make fetch-data     # Ручной запуск XLSM fetch
 make fetch-data-log # Логи data_collector с последнего fetch
 

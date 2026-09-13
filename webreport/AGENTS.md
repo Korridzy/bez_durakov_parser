@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-SOA web system: Streamlit chat UI → FastAPI REST API → LangGraph ReAct agent → the operator tool module named by `dataset.tools_module` → the configured database. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints at `../vm/backend/checkpoints`.
+SOA web system: React workspace UI → FastAPI REST API → LangGraph ReAct agent → project-scoped analytics API connectors or the operator tool module named by `dataset.tools_module`. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints and local workspace state at `../vm/backend/checkpoints`. See `frontend-web/README.md` for the current UI and connector contract. `frontend/` is legacy Streamlit and is no longer deployed by the primary Compose.
 
 ## STRUCTURE
 
@@ -34,7 +34,9 @@ webreport/
 | Modify AI behavior | `backend/agent/knowledge.py` + `backend/main.py` | `compose_system_prompt()` composes the system prompt when startup constructs the agent |
 | Read a knowledge topic | `backend/agent/tools.py` | `read_knowledge(topic)` returns loaded Markdown text |
 | Model availability | `backend/main.py` | A startup probe decides whether the agent is built; without a model the backend refuses to serve and re-probes on each chat attempt |
-| UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
+| UI changes | `frontend-web/src/` | React/TypeScript, Vite build, nginx same-origin API proxy |
+| Projects, chats, source/model connections | `backend/workspace/` | Local single-profile API, encrypted optional credentials, persistent jobs/transcripts |
+| Analytics API tools and reports | `backend/connectors/` | Project-scoped tools discovered through the existing registry; no dataset SQL in agent code |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
 | Serve another dataset | `docker-compose.dataset.yml` + `Makefile` | `make start DATASET=<name>` binds `DATASET_DIR` at `/dataset`, points `BD_CONFIG_LOCAL_FILE` at its overlay, and starts only LiteLLM, backend and frontend |
 | Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir` |
@@ -53,8 +55,8 @@ webreport/
 - **Dataset switch**: `DATASET` moves the overlay out of the repository through `BD_CONFIG_LOCAL_FILE`, and the dataset directory supplies its own tool module, knowledge folder and optional `webreport.compose.yml` for database networking. Nothing dataset-specific belongs in this directory.
 - **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: with the bundled MySQL the backend connects at `mysql:3306` on the Docker network, not localhost
-- **Separate Poetry envs**: `backend/pyproject.toml` and `frontend/pyproject.toml` — independent from root
-- **Dev container pattern**: backend, frontend, and data_collector install dependencies in the image and mount service code at runtime; code-only changes should not require image rebuilds
+- **Dependencies**: backend uses Poetry; the primary frontend uses npm with a tracked lockfile. Host Node.js is only needed for Vite development, not Docker builds.
+- **Dev container pattern**: backend and data_collector mount code. Frontend is a compiled nginx image: `make start` rebuilds it; use Vite for hot reload.
 
 ## ANTI-PATTERNS
 

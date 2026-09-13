@@ -3,6 +3,7 @@
 .ignore
 
 # AI/agent tooling
+/LOCAL_WORKFLOW.md
 .agents/
 .claude/
 .codex/
@@ -24,6 +25,12 @@ bd_shared/config.local.toml
 
 # VM directory
 vm/
+
+# WebReport browser build and test artifacts
+webreport/frontend-web/node_modules/
+webreport/frontend-web/*.tsbuildinfo
+webreport/frontend-web/playwright-report/
+webreport/frontend-web/test-results/
 
 # Local debugging catalog
 data_to_parse/

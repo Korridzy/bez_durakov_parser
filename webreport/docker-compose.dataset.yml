@@ -16,3 +16,5 @@ services:
     depends_on: !override
       litellm:
         condition: service_healthy
+      analysis:
+        condition: service_healthy

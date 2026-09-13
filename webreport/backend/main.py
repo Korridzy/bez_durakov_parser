@@ -9,6 +9,7 @@ import asyncio
 import importlib
 import logging
 import uuid
+import sys
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -429,6 +430,10 @@ async def startup_event():
 async def shutdown_event() -> None:
     global checkpoint_connection, checkpoint_saver, tool_engine
 
+    stop_jobs = getattr(app.state, "stop_workspace_jobs", None)
+    if stop_jobs is not None:
+        await stop_jobs()
+
     if checkpoint_connection is not None:
         await checkpoint_connection.close()
     checkpoint_connection = None
@@ -682,3 +687,8 @@ async def clear_history(session_id: str):
         "success": True,
         "message": f"History cleared for session {session_id}"
     }
+
+
+# The browser workspace is additive: legacy clients retain their chat/history contracts.
+from workspace.api import install_workspace
+install_workspace(app, lambda: sys.modules[__name__])

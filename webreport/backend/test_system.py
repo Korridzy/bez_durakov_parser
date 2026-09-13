@@ -690,20 +690,40 @@ class TestAPI(unittest.TestCase):
         self.assertIn("status", data, "Should have status field")
         print(f"✅ API health check passed: {data.get('status')}")
 
-    def test_openapi_lists_only_the_surviving_paths(self):
-        """Given the deleted endpoints, When the schema is read, Then four paths remain."""
+    def test_openapi_lists_legacy_and_workspace_paths(self):
+        """Workspace routes extend the four legacy paths without restoring retired APIs."""
         main_module = importlib.import_module("main")
 
         self.assertEqual(
             sorted(main_module.app.openapi()["paths"]),
-            [
+            sorted([
                 "/api/chat",
                 "/api/clear/{session_id}",
                 "/api/history/{session_id}",
                 "/health",
-            ],
+                "/api/workspace",
+                "/api/projects",
+                "/api/projects/{project_id}",
+                "/api/projects/{project_id}/info",
+                "/api/projects/{project_id}/sources",
+                "/api/chats",
+                "/api/chats/{chat_id}",
+                "/api/chats/{chat_id}/analysis/{result_id}",
+                "/api/chats/{chat_id}/project-interview",
+                "/api/chats/{chat_id}/messages",
+                "/api/sources/{source_id}",
+                "/api/sources/{source_id}/reports/{report}",
+                "/api/sources/{source_id}/explorer/catalog",
+                "/api/sources/{source_id}/explorer/goals",
+                "/api/sources/{source_id}/explorer",
+                "/api/model-connections/discover",
+                "/api/model-connections",
+                "/api/model-connections/{model_id}",
+                "/api/jobs/{job_id}",
+                "/api/jobs/{job_id}/cancel",
+            ]),
         )
-        print("✅ API surface: exactly the four surviving paths")
+        print("✅ API surface: legacy and workspace paths, no retired endpoints")
 
     def test_chat_refuses_with_503_when_no_model_is_reachable(self):
         """Given no reachable model, When chat is called through real routing, Then it answers 503."""
@@ -738,7 +758,7 @@ class TestAPI(unittest.TestCase):
         socket guard blocks, so it always takes the failure path and this case would pass even
         if tool selection were broken. It deliberately does not assert `success`. The routing
         coverage lives in TestReportAgentSystem's scripted cases, and the surviving-route
-        coverage in test_openapi_lists_only_the_surviving_paths.
+        coverage in test_openapi_lists_legacy_and_workspace_paths.
         """
         user_prompt = "Сделай отчёт о том, в каких играх за 2025 год побеждала команда Однажды было дважды"
 

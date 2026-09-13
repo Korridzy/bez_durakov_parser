@@ -1,6 +1,10 @@
 **/.env
 **/.env.*
 .git/
+**/node_modules/
+webreport/frontend-web/dist/
+webreport/frontend-web/test-results/
+webreport/frontend-web/playwright-report/
 .idea/
 .agents/
 .claude/

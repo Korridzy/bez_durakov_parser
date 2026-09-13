@@ -1,0 +1,45 @@
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  z-index: 21;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.panel-resize-handle.edge-left {
+  left: -7px;
+}
+.panel-resize-handle.edge-right {
+  right: -7px;
+}
+.panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 14px auto 14px 5px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    box-shadow 140ms ease;
+}
+.panel-resize-handle:hover::after,
+.panel-resize-handle:focus-visible::after,
+.panel-resize-handle.is-resizing::after {
+  opacity: 1;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.sidebar-shell.is-resizing {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-resize-handle::after {
+    transition: none;
+  }
+}
+.app[data-motion="false"] .panel-resize-handle::after {
+  transition: none;
+}

@@ -1,0 +1,29 @@
+{
+  "canvas": 1000,
+  "layers": [
+    {
+      "id": "shovel",
+      "label": "Лопата",
+      "asset": "shovel.png",
+      "x": 0,
+      "y": 0,
+      "size": 1000
+    },
+    {
+      "id": "sparkle-large",
+      "label": "Большая звёздочка",
+      "asset": "sparkle.png",
+      "x": 110,
+      "y": 110,
+      "size": 400
+    },
+    {
+      "id": "sparkle-small",
+      "label": "Маленькая звёздочка",
+      "asset": "sparkle.png",
+      "x": 425,
+      "y": 55,
+      "size": 220
+    }
+  ]
+}

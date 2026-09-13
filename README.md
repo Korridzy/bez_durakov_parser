@@ -6,6 +6,8 @@
 
 Проект также содержит ORM на базе SQLAlchemy для упрощения анализа накопленных данных.
 
+WebReport в Windows после первоначальной настройки можно запускать двойным кликом по `Start-WebReport.cmd` в корне проекта и останавливать через `Stop-WebReport.cmd`. Подробнее: [запуск в Windows](doc/windows-launcher.md).
+
 ### Как пользоваться парсером.
 
 Все инструкции даны на примере linux. Если для других ОС обнаружатся существенные отличия, пишите о них в [трекер](https://github.com/Korridzy/bez_durakov_parser/issues). Или даже вносите изменения непосредственно в [этот документ](https://github.com/Korridzy/bez_durakov_parser/blob/main/README.md), если умеете.
@@ -130,7 +132,7 @@ $ python four_buckets.py
 
 ### Web Report System
 
-Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и Streamlit. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
+Проект включает веб-систему для анализа данных с LangGraph ReAct агентом, FastAPI и React. В интерфейсе доступны проекты, чаты, подключения аналитики и собственные модели по API. Подробнее: [рабочее пространство WebReport](webreport/frontend-web/README.md). Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` для системной модели и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
 
 При запуске backend выполняет глубокую проверку LiteLLM. Если модель недоступна, процесс остаётся запущенным, но отказывается отвечать, и `/health` вместе с `/api/chat` возвращают 503. Каждая следующая попытка чата повторяет проверку один раз, и первый успешный результат собирает агента и отвечает на этот же запрос. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
 
@@ -143,7 +145,7 @@ $ make webreport-start
 ```
 
 После запуска по умолчанию доступны:
-- **Frontend** (Streamlit UI): http://localhost:28501
+- **Frontend** (React workspace): http://localhost:28501
 - **Backend API**: http://localhost:28000
 - **API документация**: http://localhost:28000/docs
 

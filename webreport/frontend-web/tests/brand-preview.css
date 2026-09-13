@@ -1,0 +1,90 @@
+body {
+  background: #fcf8ff;
+}
+.brand-workbench {
+  max-width: 940px;
+  margin: 50px auto;
+  padding: 24px;
+}
+.brand-workbench h1 {
+  margin: 0;
+  font-size: 28px;
+}
+.brand-workbench p {
+  color: #796187;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.brand-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 55px;
+  margin-top: 32px;
+}
+.brand-workbench-canvas {
+  aspect-ratio: 1;
+  border-radius: 24px;
+  background: linear-gradient(130deg, #fff, #ead9f7);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.brand-workbench-canvas:active {
+  cursor: grabbing;
+}
+.brand-workbench-sample {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 24px;
+}
+.brand-workbench-sample strong {
+  font-size: 28px;
+  letter-spacing: -1.2px;
+}
+.brand-workbench-sample > span:last-child {
+  margin-left: auto;
+  font-size: 12px;
+  color: #796187;
+}
+.brand-workbench-controls {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+.brand-workbench-controls fieldset {
+  border: 1px solid #d9c4e7;
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.brand-workbench-controls fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-workbench-controls input {
+  accent-color: #8e50c8;
+}
+.brand-workbench-number {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand-workbench-number input {
+  width: 88px;
+  background: white;
+  border: 1px solid #d9c4e7;
+  border-radius: 9px;
+  padding: 7px;
+}
+@media (max-width: 700px) {
+  .brand-workbench {
+    margin: 0 auto;
+  }
+  .brand-workbench-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
