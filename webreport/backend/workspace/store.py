@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from connectors.catalog import public_config
 
 
 def identifier():
@@ -118,12 +119,22 @@ class WorkspaceStore:
 
     def save_secret(self, collection, item_id, secret, remember):
         with self.lock:
+            changes = {}
+            if collection == "sources":
+                changes = {
+                    "config": public_config(
+                        self.get(collection, item_id).get("provider"), secret
+                    ),
+                    "connection_error": None,
+                    "connection_error_status": None,
+                }
             self.temporary_secrets[item_id] = secret
             self.update(
                 collection,
                 item_id,
                 encrypted=self.secret_payload(secret, remember),
                 remembered=remember,
+                **changes,
             )
 
     def secret(self, item):
@@ -135,12 +146,37 @@ class WorkspaceStore:
         return None
 
     def public(self, item):
-        # All connection configuration (including token-bearing JSON) is stored encrypted.
-        return {
+        secret = self.secret(item)
+        result = {
             k: v
             for k, v in item.items()
-            if k not in {"encrypted", "messages", "result", "events"}
-        } | {"connected": self.secret(item) is not None}
+            if k not in {"encrypted", "messages", "result", "events", "config"}
+        } | {"connected": secret is not None}
+        if item.get("provider") and "project_id" in item:
+            needs_key = secret is None or item.get("connection_error_status") in (
+                401,
+                403,
+            )
+            result.update(
+                config=public_config(
+                    item["provider"],
+                    {
+                        **item.get("metadata", {}),
+                        **(secret or {}),
+                        **item.get("config", {}),
+                    },
+                ),
+                has_credentials=secret is not None,
+                connected=not needs_key,
+                connection_status=(
+                    "reconnect"
+                    if needs_key
+                    else "error"
+                    if item.get("connection_error")
+                    else "ready"
+                ),
+            )
+        return result
 
     def append_message(self, chat_id, message):
         with self.lock:

@@ -2,12 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
-  ChevronDown,
   Database,
   Eye,
   EyeOff,
-  Maximize2,
-  Minimize2,
   Plus,
   RefreshCw,
   Settings2,
@@ -23,8 +20,9 @@ import {
   YAxis,
 } from "recharts";
 import type { Project, Provider, Report, Source, Workspace } from "./types";
-import { api, dayLabel, number, post } from "./api";
+import { api, ApiError, dayLabel, number, post } from "./api";
 import { Alert, ExternalLink, Modal, ProviderIcon, Spinner } from "./ui";
+import { Select } from "./Select";
 
 const reportNames: Record<string, string> = {
   overview: "Обзор",
@@ -53,13 +51,27 @@ export function SourceForm({
   const [providerId, setProviderId] = useState(existing?.provider || "metrika");
   const [values, setValues] = useState<Record<string, string>>({
     region: "US",
+    ...Object.fromEntries(
+      (providers.find((p) => p.id === existing?.provider)?.fields || [])
+        .filter((field) => !field.secret)
+        .map((field) => [
+          field.key,
+          existing?.config?.[field.key] ||
+            existing?.metadata[field.key] ||
+            (field.kind === "select" ? "US" : ""),
+        ]),
+    ),
   });
   const [name, setName] = useState(existing?.name || "");
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(existing?.remembered || false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(false);
   const provider = providers.find((p) => p.id === providerId)!;
+  const reuseKey =
+    !!existing &&
+    (existing.has_credentials ?? existing.connected) &&
+    existing.connection_status !== "reconnect";
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -82,29 +94,30 @@ export function SourceForm({
   };
   return (
     <form className="connection-form" onSubmit={submit}>
+      {existing && !reuseKey && (
+        <p className="reconnect-prompt" role="status">
+          Введите ключ ещё раз, чтобы восстановить доступ к данным.
+        </p>
+      )}
       <div className="field">
         <label htmlFor="source-provider">Система аналитики</label>
-        <div className="select-with-icon">
-          <ProviderIcon id={providerId} />
-          <select
-            id="source-provider"
-            disabled={!!existing || busy}
-            value={providerId}
-            onChange={(e) => {
-              setProviderId(e.target.value);
-              setValues({ region: "US" });
-              setError("");
-              setVisible(false);
-            }}
-          >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={16} />
-        </div>
+        <Select
+          id="source-provider"
+          label="Система аналитики"
+          disabled={!!existing || busy}
+          value={providerId}
+          onChange={(value) => {
+            setProviderId(value);
+            setValues({ region: "US" });
+            setError("");
+            setVisible(false);
+          }}
+          options={providers.map((p) => ({
+            value: p.id,
+            label: p.name,
+            icon: <ProviderIcon id={p.id} />,
+          }))}
+        />
       </div>
       <div className="field">
         <label htmlFor="source-name">
@@ -121,32 +134,43 @@ export function SourceForm({
       </div>
       {provider.fields.map((field) => (
         <div className="field" key={providerId + field.key}>
-          <label htmlFor={"source-" + field.key}>{field.label}</label>
+          <label htmlFor={"source-" + field.key}>
+            {field.label}
+            {field.secret && reuseKey && (
+              <span className="credential-present">
+                <Check size={12} />
+                Ключ уже подключён
+              </span>
+            )}
+          </label>
           {field.kind === "select" ? (
-            <select
+            <Select
               id={"source-" + field.key}
+              label={field.label}
               value={values[field.key] || "US"}
-              onChange={(e) =>
-                setValues({ ...values, [field.key]: e.target.value })
-              }
+              onChange={(value) => setValues({ ...values, [field.key]: value })}
               disabled={busy}
-            >
-              {field.options?.map((o) => (
-                <option key={o}>{o}</option>
-              ))}
-            </select>
+              options={(field.options || []).map((o) => ({
+                value: o,
+                label: o,
+              }))}
+            />
           ) : field.kind === "json" ? (
             <textarea
               id={"source-" + field.key}
               className="credential-json"
               aria-label={field.label}
-              required
+              required={!reuseKey}
               rows={4}
               value={values[field.key] || ""}
               onChange={(e) =>
                 setValues({ ...values, [field.key]: e.target.value })
               }
-              placeholder="Вставьте содержимое JSON-файла"
+              placeholder={
+                reuseKey
+                  ? "Вставьте новый JSON, чтобы заменить ключ"
+                  : "Вставьте содержимое JSON-файла"
+              }
               spellCheck={false}
               autoComplete="off"
               disabled={busy}
@@ -155,14 +179,18 @@ export function SourceForm({
             <div className="secret-input">
               <input
                 id={"source-" + field.key}
-                required
+                required={!field.secret || !reuseKey}
                 type={field.secret && !visible ? "password" : "text"}
                 autoComplete="off"
                 value={values[field.key] || ""}
                 onChange={(e) =>
                   setValues({ ...values, [field.key]: e.target.value })
                 }
-                placeholder={field.placeholder}
+                placeholder={
+                  field.secret && reuseKey
+                    ? "Введите новый ключ, чтобы заменить текущий"
+                    : field.placeholder
+                }
                 spellCheck={false}
                 disabled={busy}
               />
@@ -185,16 +213,10 @@ export function SourceForm({
         <input
           type="checkbox"
           checked={remember}
+          disabled={busy}
           onChange={(e) => setRemember(e.target.checked)}
         />
-        <span>
-          Запомнить подключение на этом компьютере
-          <small>
-            {remember
-              ? "Ключ хранится на сервере в зашифрованном виде."
-              : "Без сохранения ключ действует до перезапуска сервера."}
-          </small>
-        </span>
+        <span>Сохранять ключ после перезапуска сервера</span>
       </label>
       {error && <Alert>{error}</Alert>}
       <div className="form-bottom">
@@ -214,7 +236,7 @@ export function SourceForm({
             ) : (
               <>
                 <Check size={16} />
-                Подключить
+                {reuseKey ? "Сохранить" : "Подключить"}
               </>
             )}
           </button>
@@ -231,6 +253,7 @@ export function SourcesDialog({
   onRefresh,
   onPreview,
   initialAdd = false,
+  initialSource,
 }: {
   workspace: Workspace;
   project: Project;
@@ -238,10 +261,13 @@ export function SourcesDialog({
   onRefresh: () => Promise<Workspace>;
   onPreview: (s: Source) => void;
   initialAdd?: boolean;
+  initialSource?: Source;
 }) {
   const sources = workspace.sources.filter((s) => s.project_id === project.id);
-  const [form, setForm] = useState(initialAdd || !sources.length);
-  const [editing, setEditing] = useState<Source>();
+  const [form, setForm] = useState(
+    !!initialSource || initialAdd || !sources.length,
+  );
+  const [editing, setEditing] = useState<Source | undefined>(initialSource);
   const [error, setError] = useState("");
   const [removeId, setRemoveId] = useState("");
   return (
@@ -249,7 +275,9 @@ export function SourcesDialog({
       title={
         form
           ? editing
-            ? "Переподключить источник"
+            ? editing.connected
+              ? "Настройки источника"
+              : "Переподключить источник"
             : "Добавить источник"
           : "Источники проекта"
       }
@@ -257,6 +285,7 @@ export function SourcesDialog({
     >
       {form ? (
         <SourceForm
+          key={editing?.id || "new"}
           providers={workspace.providers}
           projectId={project.id}
           existing={editing}
@@ -292,7 +321,11 @@ export function SourcesDialog({
                     workspace.providers.find((p) => p.id === source.provider)
                       ?.name
                   }
-                  {source.connected ? "" : " · Нужен ключ"}
+                  {!source.connected
+                    ? " · Нужен ключ"
+                    : source.connection_status === "error"
+                      ? " · Нет связи"
+                      : ""}
                 </span>
               </button>
               <button
@@ -386,12 +419,14 @@ export function SourcePreview({
   defaultPeriod,
   onClose,
   onManage,
+  onConnectionChange,
 }: {
   source: Source;
   provider: Provider;
   defaultPeriod: { date1: string; date2: string };
   onClose: () => void;
   onManage: () => void;
+  onConnectionChange: (source: Source, needsKey?: boolean) => void;
 }) {
   const [report, setReport] = useState("overview");
   const [dates, setDates] = useState(defaultPeriod);
@@ -399,12 +434,30 @@ export function SourcePreview({
   const [data, setData] = useState<Report>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [metric, setMetric] = useState("users");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pageError, setPageError] = useState("");
   const reportVersion = useRef(0);
+  const notify = useRef(onConnectionChange);
+  notify.current = onConnectionChange;
+  const connectionResult = (error?: ApiError) => {
+    // Invalid report parameters do not mean the connection itself is broken.
+    if (error && ![0, 401, 403, 429, 502, 503, 504].includes(error.status))
+      return;
+    const needsKey = !!error && [401, 403].includes(error.status);
+    notify.current(
+      {
+        ...source,
+        connected: !needsKey,
+        connection_status: needsKey ? "reconnect" : error ? "error" : "ready",
+        connection_error: error?.message,
+      },
+      needsKey,
+    );
+  };
+  const resultHandler = useRef(connectionResult);
+  resultHandler.current = connectionResult;
   useEffect(() => {
     reportVersion.current++;
     const controller = new AbortController();
@@ -418,11 +471,16 @@ export function SourcePreview({
       { signal: controller.signal },
     )
       .then((result) => {
+        if (controller.signal.aborted) return;
         setData(result);
         setMetric(result.metrics?.[0]?.key || "users");
+        resultHandler.current();
       })
       .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
+        if (!controller.signal.aborted && e.name !== "AbortError") {
+          setError(e.message);
+          resultHandler.current(e);
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -452,14 +510,17 @@ export function SourcePreview({
         `/sources/${source.id}/reports/${report}?date1=${dates.date1}&date2=${dates.date2}&page=${(data?.page || 1) + 1}`,
       );
       if (version !== reportVersion.current) return;
+      resultHandler.current();
       setData((previous) =>
         previous
           ? { ...next, rows: [...(previous.rows || []), ...(next.rows || [])] }
           : next,
       );
     } catch (error) {
-      if (version === reportVersion.current)
+      if (version === reportVersion.current) {
         setPageError((error as Error).message);
+        resultHandler.current(error as ApiError);
+      }
     } finally {
       if (version === reportVersion.current) setLoadingMore(false);
     }
@@ -475,7 +536,7 @@ export function SourcePreview({
       title={source.name}
       onClose={onClose}
       wide
-      fullscreen={fullscreen}
+      fullscreen
       actions={
         <>
           <button
@@ -484,13 +545,6 @@ export function SourcePreview({
             onClick={onManage}
           >
             <Settings2 size={17} />
-          </button>
-          <button
-            className="icon-button"
-            aria-label={fullscreen ? "Свернуть окно" : "Развернуть окно"}
-            onClick={() => setFullscreen(!fullscreen)}
-          >
-            {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
           </button>
         </>
       }
@@ -526,16 +580,18 @@ export function SourcePreview({
             ))}
           </nav>
           <div className="date-controls">
-            <select
-              aria-label="Период отчёта"
+            <Select
+              id="report-period"
+              label="Период отчёта"
               value={range}
-              onChange={(e) => pickRange(e.target.value)}
-            >
-              <option value="7">7 дней</option>
-              <option value="30">30 дней</option>
-              <option value="90">90 дней</option>
-              <option value="custom">Свой период</option>
-            </select>
+              onChange={pickRange}
+              options={[
+                { value: "7", label: "7 дней" },
+                { value: "30", label: "30 дней" },
+                { value: "90", label: "90 дней" },
+                { value: "custom", label: "Свой период" },
+              ]}
+            />
             <button
               className="icon-button"
               aria-label="Обновить данные"

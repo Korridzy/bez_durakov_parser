@@ -18,6 +18,61 @@ from workspace.store import WorkspaceStore
 
 
 class StoreTests(unittest.TestCase):
+    def test_source_settings_survive_restart_without_exposing_credentials(self):
+        from connectors.catalog import CATALOG
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "workspace.json"
+            store = WorkspaceStore(path)
+            for provider in CATALOG:
+                config = {
+                    f["key"]: "private-synthetic" if f["secret"] else "123"
+                    for f in provider["fields"]
+                }
+                config["unexpected_token"] = "private-synthetic"
+                source = store.add(
+                    "sources",
+                    {"project_id": "test", "provider": provider["id"], "metadata": {}},
+                )
+                store.save_secret("sources", source["id"], config, False)
+            self.assertNotIn("private-synthetic", path.read_text())
+            restored = WorkspaceStore(path)
+            for source in restored.snapshot()["sources"]:
+                public = restored.public(source)
+                self.assertEqual(public["connection_status"], "reconnect")
+                self.assertFalse(public["has_credentials"])
+                self.assertNotIn("private-synthetic", repr(public))
+                self.assertNotIn("unexpected_token", public["config"])
+                self.assertEqual(
+                    public["config"],
+                    {
+                        f["key"]: "123"
+                        for p in CATALOG
+                        if p["id"] == source["provider"]
+                        for f in p["fields"]
+                        if not f["secret"]
+                    },
+                )
+
+    def test_legacy_source_settings_are_recovered_from_metadata_and_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkspaceStore(Path(directory) / "workspace.json")
+            source = store.add(
+                "sources",
+                {
+                    "project_id": "test",
+                    "provider": "metrika",
+                    "metadata": {"counter_id": "123"},
+                },
+            )
+            self.assertEqual(store.public(source)["config"], {"counter_id": "123"})
+            store.temporary_secrets[source["id"]] = {
+                "counter_id": "456",
+                "token": "private-synthetic",
+            }
+            self.assertEqual(store.public(source)["config"], {"counter_id": "456"})
+            self.assertTrue(store.public(source)["has_credentials"])
+
     def test_persisted_keys_are_encrypted_and_session_keys_expire(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "workspace.json"
@@ -401,6 +456,102 @@ class WorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-synthetic-token", data)
         self.assertNotIn("encrypted", data)
         self.assertTrue(response.json()["connected"])
+
+    async def test_edit_preserves_existing_key_and_remember_choice_then_replaces_key(
+        self,
+    ):
+        fake = SimpleNamespace(
+            metadata=lambda: {"name": "Counter", "counter_id": "123"}
+        )
+        with patch("workspace.api.adapter", return_value=fake) as factory:
+            source = (
+                await self.client.post(
+                    f"/api/projects/{self.project_id}/sources",
+                    json={
+                        "provider": "metrika",
+                        "config": {"counter_id": "123", "token": "private-synthetic"},
+                    },
+                )
+            ).json()
+            updated = await self.client.put(
+                f"/api/sources/{source['id']}",
+                json={
+                    "provider": "metrika",
+                    "name": "Renamed",
+                    "config": {"counter_id": "123", "token": ""},
+                    "remember": True,
+                },
+            )
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(factory.call_args.args[1]["token"], "private-synthetic")
+            self.assertEqual(updated.json()["name"], "Renamed")
+            self.assertEqual(updated.json()["config"], {"counter_id": "123"})
+            restored = WorkspaceStore(Path(self.directory.name) / "workspace.json")
+            self.assertTrue(
+                restored.public(restored.get("sources", source["id"]))["connected"]
+            )
+            self.assertNotIn("private-synthetic", updated.text)
+            await self.client.put(
+                f"/api/sources/{source['id']}",
+                json={
+                    "provider": "metrika",
+                    "config": {"token": "replacement-synthetic"},
+                    "remember": False,
+                },
+            )
+            self.assertEqual(
+                factory.call_args.args[1],
+                {"counter_id": "123", "token": "replacement-synthetic"},
+            )
+            restored = WorkspaceStore(Path(self.directory.name) / "workspace.json")
+            self.assertFalse(
+                restored.public(restored.get("sources", source["id"]))["connected"]
+            )
+
+    async def test_report_failures_update_source_status_and_success_recovers(self):
+        fake = SimpleNamespace(
+            metadata=lambda: {"name": "Counter", "counter_id": "123"},
+            overview=Mock(return_value={"metrics": []}),
+        )
+        with patch("workspace.api.adapter", return_value=fake):
+            source = (
+                await self.client.post(
+                    f"/api/projects/{self.project_id}/sources",
+                    json={
+                        "provider": "metrika",
+                        "config": {"counter_id": "123", "token": "private-synthetic"},
+                    },
+                )
+            ).json()
+            url = f"/api/sources/{source['id']}/reports/overview"
+            self.assertEqual((await self.client.get(url)).status_code, 200)
+            for status in [401, 403, 502, 429, 504]:
+                fake.overview.side_effect = ConnectorError("Synthetic failure", status)
+                self.assertEqual(
+                    (await self.client.get(url + "?refresh=true")).status_code, status
+                )
+                public = (await self.client.get("/api/workspace")).json()["sources"][0]
+                self.assertEqual(public["connected"], status not in (401, 403))
+                self.assertEqual(
+                    public["connection_status"],
+                    "reconnect" if status in (401, 403) else "error",
+                )
+                self.assertTrue(public["has_credentials"])
+                # An old cached report must not mask a known connection failure.
+                self.assertEqual((await self.client.get(url)).status_code, status)
+                fake.overview.side_effect = None
+                self.assertEqual((await self.client.get(url)).status_code, 200)
+                self.assertEqual(
+                    (await self.client.get("/api/workspace")).json()["sources"][0][
+                        "connection_status"
+                    ],
+                    "ready",
+                )
+            self.app.state.workspace_store.temporary_secrets.clear()
+            self.assertEqual((await self.client.get(url)).status_code, 401)
+            public = (await self.client.get("/api/workspace")).json()["sources"][0]
+            self.assertFalse(public["connected"])
+            self.assertEqual(public["config"]["counter_id"], "123")
 
 
 if __name__ == "__main__":

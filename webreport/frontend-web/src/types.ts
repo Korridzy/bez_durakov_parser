@@ -26,6 +26,10 @@ export type Source = {
   name: string;
   connected: boolean;
   remembered?: boolean;
+  config?: Record<string, string>;
+  has_credentials?: boolean;
+  connection_status?: "ready" | "reconnect" | "error";
+  connection_error?: string;
   metadata: Record<string, string>;
 };
 export type Model = {

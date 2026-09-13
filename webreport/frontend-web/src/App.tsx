@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
-  ArrowUpRight,
-  BarChart3,
   Database,
   PanelLeftOpen,
   Plus,
   RefreshCw,
-  Search,
-  TrendingUp,
   X,
 } from "lucide-react";
 import type { Chat, Job, Source, Workspace } from "./types";
@@ -45,6 +41,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(() => window.innerWidth > 850);
   const [dialog, setDialog] = useState("");
   const [preview, setPreview] = useState<Source>();
+  const [editingSource, setEditingSource] = useState<Source>();
   const [edit, setEdit] = useState<Edit>();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -80,6 +77,48 @@ export default function App() {
     setWorkspace(data);
     return data;
   }, []);
+  const manageSource = (source: Source) => {
+    setPreview(undefined);
+    setEditingSource(source);
+    setDialog("source-edit");
+  };
+  const openSource = async (source: Source) => {
+    let latest = source;
+    try {
+      const data = await refresh();
+      const found = data.sources.find((s) => s.id === source.id);
+      if (!found) return;
+      latest = found;
+    } catch {
+      /* The report provides a retry if the server is unreachable. */
+    }
+    if (latest.connected) setPreview(latest);
+    else manageSource(latest);
+  };
+  const connectionChanged = (source: Source, needsKey = false) => {
+    setWorkspace(
+      (current) =>
+        current && {
+          ...current,
+          sources: current.sources.map((s) =>
+            s.id === source.id ? source : s,
+          ),
+        },
+    );
+    if (needsKey) manageSource(source);
+  };
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible")
+        void refresh().catch(() => {});
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [refresh]);
   const selectProject = useCallback((id: string) => {
     setProjectId(id);
     setChatId("");
@@ -380,10 +419,9 @@ export default function App() {
   const project =
     workspace.projects.find((p) => p.id === projectId) || workspace.projects[0];
   const sources = workspace.sources.filter((s) => s.project_id === project?.id);
-  const connectedSources = sources.filter((s) => s.connected);
   const empty = !chat?.messages?.length && !jobId;
   const hasDataset = !!project?.dataset_module && !sources.length;
-  const hasData = connectedSources.length > 0 || hasDataset;
+  const hasData = sources.length > 0 || hasDataset;
   return (
     <div className={"app " + (sidebar ? "sidebar-visible" : "sidebar-hidden")}>
       <div
@@ -462,52 +500,18 @@ export default function App() {
               </div>
             ) : empty ? (
               <section className="welcome">
-                <div className="welcome-icon">
-                  <Logo />
-                </div>
-                <h1>Что исследуем?</h1>
+                <h1>{hasData ? "Хей" : "Yo, чел"}</h1>
                 <p>
                   {hasData
-                    ? "От цифр — к ясной картине."
-                    : "Подключите данные. Найдём в них главное."}
+                    ? "Какие вопросы по проекту?"
+                    : "Мне нужна инфа, чтобы дать тебе толковые советы"}
                 </p>
-                <div className="suggestions">
-                  {[
-                    {
-                      icon: <TrendingUp size={17} />,
-                      label: "Общая картина",
-                      text: "Покажи общую картину за последние 30 дней: основные показатели и их динамику.",
-                    },
-                    {
-                      icon: <Search size={17} />,
-                      label: "Что изменилось",
-                      text: "Что изменилось за последнюю неделю по сравнению с предыдущей? Найди заметные изменения в данных.",
-                    },
-                    {
-                      icon: <BarChart3 size={17} />,
-                      label: "Источники трафика",
-                      text: "Какие каналы приводят больше всего посетителей? Сравни их качество за последние 30 дней.",
-                    },
-                  ].map((s) => (
-                    <button
-                      key={s.label}
-                      onClick={() => {
-                        changeDraft(s.text);
-                        inputRef.current?.focus();
-                      }}
-                    >
-                      {s.icon}
-                      <span>{s.label}</span>
-                      <ArrowUpRight size={14} />
-                    </button>
-                  ))}
-                </div>
                 {!hasData && (
                   <button
-                    className="welcome-connect text-button"
+                    className="welcome-connect primary-button"
                     onClick={() => setDialog("source-add")}
                   >
-                    <Plus size={15} />
+                    <Plus size={20} />
                     Добавить источник
                   </button>
                 )}
@@ -562,7 +566,7 @@ export default function App() {
           <Composer
             sources={sources}
             hasDataset={hasDataset}
-            onSource={setPreview}
+            onSource={(source) => void openSource(source)}
             onManageSources={() =>
               setDialog(sources.length ? "sources" : "source-add")
             }
@@ -594,29 +598,37 @@ export default function App() {
           onSelect={setModel}
         />
       )}
-      {(dialog === "sources" || dialog === "source-add") && project && (
-        <SourcesDialog
-          workspace={workspace}
-          project={project}
-          onRefresh={refresh}
-          onClose={() => setDialog("")}
-          initialAdd={dialog === "source-add"}
-          onPreview={(s) => {
-            setDialog("");
-            setPreview(s);
-          }}
-        />
-      )}
+      {(dialog === "sources" ||
+        dialog === "source-add" ||
+        dialog === "source-edit") &&
+        project && (
+          <SourcesDialog
+            key={dialog + (dialog === "source-edit" ? editingSource?.id : "")}
+            workspace={workspace}
+            project={project}
+            onRefresh={refresh}
+            onClose={() => setDialog("")}
+            initialAdd={dialog === "source-add"}
+            initialSource={dialog === "source-edit" ? editingSource : undefined}
+            onPreview={(s) => {
+              setDialog("");
+              void openSource(s);
+            }}
+          />
+        )}
       {preview && (
         <SourcePreview
+          key={preview.id}
           source={preview}
           provider={workspace.providers.find((p) => p.id === preview.provider)!}
           defaultPeriod={workspace.default_period}
           onClose={() => setPreview(undefined)}
-          onManage={() => {
-            setPreview(undefined);
-            setDialog("sources");
-          }}
+          onManage={() =>
+            manageSource(
+              workspace.sources.find((s) => s.id === preview.id) || preview,
+            )
+          }
+          onConnectionChange={connectionChanged}
         />
       )}
       {(dialog === "project" || edit) && (

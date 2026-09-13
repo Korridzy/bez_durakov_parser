@@ -124,15 +124,37 @@ def install_workspace(app, runtime):
             page,
         )
         saved = cache.get(key)
-        if saved and time.monotonic() - saved[0] < 300 and not refresh:
+        if (
+            saved
+            and time.monotonic() - saved[0] < 300
+            and not refresh
+            and not source.get("connection_error")
+        ):
             return {**saved[1], "cached": True}
-        client = adapter(source["provider"], credentials)
-        if report == "overview":
-            result = client.overview(start, end)
-        elif source["provider"] == "metrika":
-            result = client.report(report, start, end, page=page)
-        else:
-            result = client.report(report, start, end)
+        try:
+            client = adapter(source["provider"], credentials)
+            if report == "overview":
+                result = client.overview(start, end)
+            elif source["provider"] == "metrika":
+                result = client.report(report, start, end, page=page)
+            else:
+                result = client.report(report, start, end)
+        except ConnectorError as error:
+            if error.status in (401, 403, 429, 502, 504):
+                store.update(
+                    "sources",
+                    source_id,
+                    connection_error=str(error),
+                    connection_error_status=error.status,
+                )
+            raise
+        if source.get("connection_error"):
+            store.update(
+                "sources",
+                source_id,
+                connection_error=None,
+                connection_error_status=None,
+            )
         result = {
             **result,
             "fetched_at": now(),
@@ -284,9 +306,14 @@ def install_workspace(app, runtime):
         source = get("sources", source_id)
         if body.provider != source["provider"]:
             raise HTTPException(400, "Тип источника нельзя менять.")
-        client = await asyncio.to_thread(adapter, body.provider, body.config)
+        config = {
+            **source.get("config", {}),
+            **(store.secret(source) or {}),
+            **{key: value for key, value in body.config.items() if value.strip()},
+        }
+        client = await asyncio.to_thread(adapter, body.provider, config)
         metadata = await asyncio.to_thread(client.metadata)
-        store.save_secret("sources", source_id, body.config, body.remember)
+        store.save_secret("sources", source_id, config, body.remember)
         updated = store.update(
             "sources",
             source_id,

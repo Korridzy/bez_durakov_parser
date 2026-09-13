@@ -29,7 +29,6 @@ CATALOG = [
                 "token",
                 "OAuth-токен",
                 secret=True,
-                help="Нужен доступ к статистике счётчика.",
             ),
         ],
         reports=["overview", "channels", "devices", "pages", "geography", "goals"],
@@ -133,6 +132,17 @@ CATALOG = [
 ]
 
 PROVIDERS = {item["id"]: item for item in CATALOG}
+
+
+def public_config(provider, config):
+    """Only catalog-declared non-secret fields may leave credential storage."""
+    return {
+        field["key"]: config[field["key"]]
+        for field in PROVIDERS.get(provider, {}).get("fields", [])
+        if not field["secret"] and field["key"] in config
+    }
+
+
 REPORT_NAMES = {
     "overview": "Обзор",
     "channels": "Каналы",

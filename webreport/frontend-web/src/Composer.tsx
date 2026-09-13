@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ArrowUp,
+  CircleAlert,
   ChevronDown,
   Database,
   Maximize2,
@@ -43,9 +44,13 @@ export function Composer(p: Props) {
   const model = p.models.find((m) => m.id === p.modelId) || p.models[0];
   const connectedCount =
     p.sources.filter((s) => s.connected).length + Number(p.hasDataset);
+  const connectionError = p.sources.some(
+    (s) => s.connection_status === "error",
+  );
   const sourceNoun = new Intl.PluralRules("ru").select(connectedCount);
-  const sourceStatus =
-    connectedCount === 0
+  const sourceStatus = connectionError
+    ? "Есть ошибки подключения"
+    : connectedCount === 0
       ? "Нет подключённых источников"
       : `${connectedCount} ${sourceNoun === "one" ? "источник подключён" : sourceNoun === "few" ? "источника подключено" : "источников подключено"}`;
   useEffect(() => {
@@ -71,20 +76,32 @@ export function Composer(p: Props) {
           <button
             key={source.id}
             className={
-              "attached-source " + (!source.connected ? "disconnected" : "")
+              "attached-source " +
+              (!source.connected || source.connection_status === "error"
+                ? "disconnected"
+                : "")
             }
-            onClick={() =>
-              source.connected ? p.onSource(source) : p.onManageSources()
-            }
+            onClick={() => p.onSource(source)}
             title={
-              source.connected
-                ? "Открыть " + source.name
-                : source.name + " · Подключите заново"
+              !source.connected
+                ? source.name + " · Введите ключ ещё раз"
+                : source.connection_status === "error"
+                  ? source.name + " · Не удалось связаться с источником"
+                  : "Открыть " + source.name
             }
           >
             <ProviderIcon id={source.provider} />
             <span>{source.name}</span>
-            <span className="source-status-dot" />
+            {!source.connected || source.connection_status === "error" ? (
+              <CircleAlert
+                size={15}
+                aria-label={
+                  !source.connected ? "Нужен ключ" : "Ошибка подключения"
+                }
+              />
+            ) : (
+              <span className="source-status-dot" />
+            )}
           </button>
         ))}
         <button
