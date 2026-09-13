@@ -4,9 +4,13 @@
 **Commit:** 1d45d80
 **Branch:** issue-86-create-ai-webreport
 
+## LOCAL WORKING AGREEMENT
+
+Before working in this checkout, explicitly check for and read [LOCAL_WORKFLOW.md](LOCAL_WORKFLOW.md) if it exists, even though Git ignores it. It records the local collaborator's UX goals and working agreements; read it alongside the applicable directory instructions. Its absence is normal in other checkouts. Current user instructions take precedence over repository conventions.
+
 ## OVERVIEW
 
-Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem with FastAPI, Streamlit, a LangGraph ReAct agent, `ChatLiteLLM` and its LiteLLM SDK in the backend image, LiteLLM proxy, and SQLite checkpoints. `langchain-openai` is not a current backend dependency.
+Parser for "Без дураков. Белград." board game series results. Parses XLSM game files → MySQL via SQLAlchemy ORM. Includes a web reporting subsystem with FastAPI, a React/TypeScript project workspace, a LangGraph ReAct agent, `ChatLiteLLM` and its LiteLLM SDK in the backend image, LiteLLM proxy, and SQLite checkpoints. `langchain-openai` is not a current backend dependency. The primary frontend is now `webreport/frontend-web/`; `webreport/frontend/` is legacy Streamlit, not deployed by the main Compose. Project-scoped analytics API connectors and local workspace storage live in `webreport/backend/connectors/` and `webreport/backend/workspace/`; see `webreport/frontend-web/README.md`.
 
 ## STRUCTURE
 

@@ -17,6 +17,7 @@ from typing import (
 from agent.graph import (
     CompiledGraph,
     ModelClient,
+    MessageView,
     RECURSION_LIMIT_MARKER,
     ThreadConfig,
     arun,
@@ -25,7 +26,7 @@ from agent.graph import (
 from agent.knowledge import Knowledge, compose_system_prompt
 from agent.reasoning import OutboundReasoningFilter, current_turn_reasoning, extract_text
 from agent.registry import ToolRegistry
-from agent.tools import ToolArgs, build_tools
+from agent.tools import BuiltTool, ToolArgs, build_tools
 from .report_contracts import (
     ChatModelModule,
     ConfigModule,
@@ -147,6 +148,10 @@ class ReportAgentSystem:
         checkpointer: object | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         knowledge: Knowledge | None = None,
+        context: str = "",
+        history: Sequence[MessageView] = (),
+        extra_tools: Sequence[BuiltTool] = (),
+        max_steps: int | None = None,
     ) -> None:
         # The backend owns the only engine and injects the service built over it, so this
         # runtime never constructs one of its own.
@@ -155,10 +160,15 @@ class ReportAgentSystem:
         self._registry: ResponseRegistry = registry
         saver = checkpointer if checkpointer is not None else MEMORY.InMemorySaver()
         self._saver: object = saver
+        self._history = history
+        self._max_steps = max_steps
         client = model_client if model_client is not None else _new_model_client()
         tools = build_tools(registry, CONFIG, knowledge=knowledge)
+        if {t.name for t in tools} & {t.name for t in extra_tools}:
+            raise RuntimeDependencyError("Additional tools collide with data tools")
+        tools.extend(extra_tools)
         self._execution = AgentExecution(
-            build_graph(client, tools, saver, compose_system_prompt(knowledge)),
+            build_graph(client, tools, saver, compose_system_prompt(knowledge) + context),
             timeout_seconds,
         )
 
@@ -198,7 +208,16 @@ class ReportAgentSystem:
         timeout_seconds: float,
     ) -> ReportResponse:
         try:
-            result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+            prior_messages = ()
+            if self._history and _is_checkpoint_saver(self._saver):
+                checkpoint = await self._saver.aget_tuple({"configurable": {"thread_id": session_id}})
+                if checkpoint is None:
+                    prior_messages = self._history
+            if self._max_steps is not None:
+                run = arun(graph, user_message, session_id, prior_messages, max_steps=self._max_steps)
+            else:
+                run = arun(graph, user_message, session_id, prior_messages) if prior_messages else arun(graph, user_message, session_id)
+            result = await wait_for(run, timeout_seconds)
         except TimeoutError:
             return failure(
                 "Время ожидания ответа агента истекло.",

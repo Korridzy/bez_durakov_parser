@@ -155,6 +155,8 @@ def build_graph(
         outbound copy is already compacted. Current-turn reads remain available
         until the final answer and are compacted in that same state update.
         """
+        from workspace.progress import emit
+        emit({"type": "status", "text": "Формирую ответ…"})
         boundary = max(
             (index for index, message in enumerate(state["messages"])
              if isinstance(message, HumanMessage)),
@@ -166,6 +168,10 @@ def build_graph(
         response = await bound_model.ainvoke(
             [SystemMessage(system_prompt), *prior, *current]
         )
+        from .reasoning import extract_reasoning
+        reasoning = extract_reasoning([response])
+        if reasoning:
+            emit({"type": "reasoning", "text": reasoning})
         if not response.tool_calls:
             replacements.extend(_compact_knowledge(current))
         return {"messages": [*replacements, response]}
@@ -182,6 +188,8 @@ def build_graph(
         }
         emitted_messages: list[MessageView] = []
         for current_call in state["messages"][-1].tool_calls:
+            from workspace.progress import emit
+            emit({"type": "tool", "text": current_call["name"], "state": "running"})
             call_state: AgentState = {
                 "messages": [
                     *accumulated["messages"],
@@ -193,6 +201,7 @@ def build_graph(
             }
             prior_message_count = len(call_state["messages"])
             accumulated = await single_tool_graph.ainvoke(call_state)
+            emit({"type": "tool", "text": current_call["name"], "state": "completed"})
             emitted_messages.extend(accumulated["messages"][prior_message_count:])
         return {
             "messages": emitted_messages,
@@ -218,18 +227,20 @@ async def arun(
     graph: CompiledGraph,
     user_message: str,
     thread_id: str,
+    prior_messages: Sequence[MessageView] = (),
+    max_steps: int | None = None,
 ) -> GraphRunResult:
     try:
         return await graph.ainvoke(
             {
-                "messages": [HumanMessage(content=user_message)],
+                "messages": [*prior_messages, HumanMessage(content=user_message)],
                 "rows_consumed": 0,
                 "knowledge_bytes_consumed": 0,
                 "report_payload": None,
             },
             {
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 2 * _config.AGENT_RECURSION_LIMIT + 1,
+                "recursion_limit": 2 * (max_steps or _config.AGENT_RECURSION_LIMIT) + 1,
             },
         )
     except GraphRecursionError:

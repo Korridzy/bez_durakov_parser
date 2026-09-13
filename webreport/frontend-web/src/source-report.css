@@ -1,0 +1,345 @@
+.modal .source-overview {
+  display: grid;
+  max-width: 1600px;
+  margin-inline: auto;
+  grid-template-columns: 202px minmax(0, 1fr);
+  gap: 36px;
+  padding: 12px 32px 32px 20px;
+  align-items: start;
+}
+.report-sidebar {
+  position: sticky;
+  top: 84px;
+  min-width: 0;
+  min-height: calc(100dvh - 130px);
+  padding: 8px 16px 24px 0;
+  border-right: 1px solid #edf0f3;
+}
+.report-source {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px 26px;
+}
+.report-source > div {
+  min-width: 0;
+}
+.report-source strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  color: #667385;
+}
+.report-source > div > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #98a0ad;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-overview .report-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: visible;
+}
+.source-overview .report-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 10px;
+  color: #788392;
+  font-size: 12px;
+  text-align: left;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+.source-overview .report-tabs button:hover {
+  background: #f6f7f9;
+  color: #586777;
+}
+.source-overview .report-tabs button.active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+.report-tabs button.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 15px;
+  bottom: 15px;
+  width: 3px;
+  background: var(--accent-strong);
+  border-radius: 3px;
+}
+.report-tabs svg {
+  flex-shrink: 0;
+  stroke-width: 1.7;
+}
+.report-main {
+  width: 100%;
+  min-width: 0;
+  max-width: 1220px;
+  margin-inline: auto;
+}
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 30px;
+  padding: 6px;
+  border: 1px solid #eef0f4;
+  border-radius: 15px;
+  background: #fafbfc;
+  position: relative;
+  z-index: 3;
+}
+.period-presets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  position: relative;
+  isolation: isolate;
+  width: 402px;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 10px;
+  background: #eef1f6;
+}
+.period-presets > button {
+  padding: 9px 8px;
+  color: #778395;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 7px;
+  transition: color 140ms ease;
+}
+.period-presets > button:hover {
+  color: var(--accent-strong);
+}
+.period-presets > button[aria-pressed="true"] {
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+.period-presets > button:active {
+  transform: translateY(1px);
+}
+.period-highlight {
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 5);
+  border: 1px solid #fff;
+  border-radius: 8px;
+  background: linear-gradient(145deg, white 45%, var(--accent-faint));
+  box-shadow:
+    0 2px 7px #33435d12,
+    0 1px 2px #33435d0a;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    transform 320ms cubic-bezier(0.22, 1.25, 0.36, 1),
+    opacity 120ms ease;
+}
+.period-highlight-glint {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 15%,
+    var(--accent-soft) 45%,
+    white 55%,
+    transparent 80%
+  );
+  animation: period-glint 420ms ease-out both;
+}
+@keyframes period-glint {
+  from {
+    transform: translateX(-120%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+.period-calendar {
+  position: relative;
+  min-width: 0;
+}
+.period-range {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #768294;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.period-range:hover,
+.period-range[aria-expanded="true"],
+.period-range.custom {
+  color: var(--accent-ink);
+  background: var(--accent-faint);
+}
+.period-range svg {
+  flex-shrink: 0;
+  transition: transform 180ms ease;
+}
+.period-range svg.rotated {
+  transform: rotate(180deg);
+}
+.report-toolbar .report-refresh {
+  margin-left: auto;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+}
+.source-overview .chart-heading {
+  margin-bottom: 20px;
+}
+.source-overview .trend-chart {
+  height: clamp(270px, 38vh, 430px);
+}
+.source-overview .report-footnote {
+  line-height: 1.7;
+  flex-wrap: wrap;
+}
+@media (max-width: 1150px) {
+  .modal .source-overview {
+    grid-template-columns: 174px minmax(0, 1fr);
+    gap: 22px;
+    padding-right: 24px;
+  }
+  .report-sidebar {
+    padding-right: 12px;
+  }
+  .report-source {
+    padding-inline: 4px;
+    gap: 7px;
+  }
+  .report-source strong {
+    font-size: 10px;
+  }
+  .source-overview .metric-card {
+    padding: 18px 15px;
+  }
+}
+@media (max-width: 850px) {
+  .modal .source-overview {
+    grid-template-columns: 142px minmax(0, 1fr);
+    gap: 18px;
+    padding-inline: 14px;
+  }
+  .report-source {
+    flex-direction: column;
+    align-items: flex-start;
+    padding-left: 10px;
+  }
+  .source-overview .report-tabs button {
+    padding: 12px 10px;
+    gap: 8px;
+    font-size: 11px;
+  }
+  .period-presets {
+    width: 100%;
+  }
+  .period-calendar {
+    position: static;
+  }
+}
+@media (max-width: 600px) {
+  .modal .source-overview {
+    grid-template-columns: 66px minmax(0, 1fr);
+    gap: 12px;
+    padding: 8px;
+  }
+  .report-sidebar {
+    top: 72px;
+    padding-right: 8px;
+  }
+  .report-source {
+    align-items: center;
+    padding: 0 0 18px;
+  }
+  .report-source > div {
+    display: none;
+  }
+  .source-overview .report-tabs {
+    gap: 8px;
+  }
+  .source-overview .report-tabs button {
+    flex-direction: column;
+    gap: 6px;
+    padding: 11px 0;
+    font-size: 9px;
+    border-radius: 8px;
+  }
+  .report-toolbar {
+    gap: 3px;
+    padding: 4px;
+    margin-bottom: 20px;
+    border-radius: 12px;
+  }
+  .period-presets {
+    padding: 4px;
+  }
+  .period-presets > button {
+    font-size: 10px;
+    padding: 10px 0;
+    letter-spacing: -0.2px;
+  }
+  .period-range {
+    font-size: 10px;
+    padding: 11px 7px;
+    gap: 5px;
+  }
+  .period-range > svg:first-child {
+    display: none;
+  }
+  .report-toolbar .report-refresh {
+    width: 30px;
+    height: 32px;
+  }
+  .source-overview .metric-card {
+    padding: 15px 11px;
+  }
+  .source-overview .metric-card strong {
+    font-size: 22px;
+  }
+  .source-overview .chart-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .source-overview .trend-chart {
+    height: 270px;
+  }
+  .source-overview .bar-row {
+    gap: 7px;
+  }
+  .source-overview .bar-name {
+    width: 72px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .period-highlight,
+  .period-range svg {
+    transition: none;
+  }
+  .period-highlight-glint {
+    animation: none;
+  }
+}
