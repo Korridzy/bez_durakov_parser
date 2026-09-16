@@ -1,8 +1,0 @@
- Container webreport-backend-run-d32771da38ce Creating
- Container webreport-backend-run-d32771da38ce Created
-...........
-----------------------------------------------------------------------
-Ran 11 tests in 1.501s
-
-OK
-exit=0

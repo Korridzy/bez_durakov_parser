@@ -1,3 +1,0 @@
-cd webreport && docker compose logs backend | grep -c "Knowledge loaded"
-1
-exit=0

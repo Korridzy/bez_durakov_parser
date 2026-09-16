@@ -1,3 +1,0 @@
-git diff HEAD~1 -- webreport/backend/agent/reasoning.py
-(empty diff: webreport/backend/agent/reasoning.py was not changed; todo 57 is an explicit no-op.)
-exit=0
