@@ -3,7 +3,11 @@
 .ignore
 
 # AI/agent tooling
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/*/
+!.agents/skills/*/SKILL.md
 .claude/
 .codex/
 .omc/
