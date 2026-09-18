@@ -12,10 +12,17 @@ import inspect
 import json
 import os
 import unittest
+from pathlib import Path
 from typing import Final, get_args
 from unittest.mock import patch
 
 from pydantic import ValidationError
+
+# Sibling test module, not a package under the no-cross-import discipline: it owns
+# the deterministic model double every agent family already drives the graph with.
+_graph_cases = importlib.import_module("test_agent_graph")
+ScriptedModel = _graph_cases.ScriptedModel
+tool_call = _graph_cases.tool_call
 
 VALID_PAYLOADS: Final[tuple[tuple[str, dict[str, object]], ...]] = (
     ("in_scope", {"verdict": "in_scope", "reply": None, "note": None}),
@@ -725,6 +732,255 @@ class ScopeGateDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("action=fail_open", log_message)
         self.assertNotIn("NEW_MESSAGE_SENTINEL", log_message)
         self.assertNotIn("Traceback", log_message)
+
+
+class ScopeGateGraphTests(unittest.IsolatedAsyncioTestCase):
+    """One scripted turn per verdict, driven through the real runtime and graph.
+
+    Both clients are `ScriptedModel`s, so "the agent never ran" is proven by the
+    script itself: an agent client seeded with no responses raises the moment it
+    is invoked, which fails louder than an invocation count read afterwards.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
+        cls.knowledge_module = importlib.import_module("agent.knowledge")
+        cls.main = importlib.import_module("main")
+        cls.messages = importlib.import_module("langchain_core.messages")
+        cls.pd = importlib.import_module("pandas")
+        cls.report_module = importlib.import_module("agents.report_runtime")
+        cls.support = importlib.import_module("test_agent_support")
+
+    def load_fixture_knowledge(self):
+        return self.knowledge_module.load_knowledge(
+            Path("/bd_shared/knowledge/bez_durakov"),
+            "bez_durakov",
+            self.knowledge_module.KnowledgeLimits(
+                max_title_chars=80,
+                max_summary_chars=200,
+                max_persona_chars=2000,
+                max_topics=50,
+                max_doc_bytes=65536,
+                max_bytes_per_turn=131072,
+                max_scope_chars=2000,
+            ),
+        )
+
+    def gate_model(self, verdict, *, reply=None, note=None):
+        """A gate client answering with one ordinary schema tool call."""
+        return ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "GateDecision",
+                            {"verdict": verdict, "reply": reply, "note": note},
+                            "gate-call-1",
+                        )
+                    ],
+                )
+            ]
+        )
+
+    def make_gated_system(self, *, model, gate, saver, knowledge):
+        service = self.support.StubService()
+        system = self.report_module.ReportAgentSystem(
+            service=service,
+            model_client=model,
+            checkpointer=saver,
+            timeout_seconds=60,
+            knowledge=knowledge,
+            gate_model_client=gate,
+        )
+        return system, service
+
+    async def history_entries(self, saver, thread_id):
+        """Read the thread exactly as `/api/history` does: `aget_tuple`, the
+        checkpoint's `channel_values.messages`, then `main._history_entries`."""
+        checkpoint_tuple = await saver.aget_tuple(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        self.assertIsNotNone(checkpoint_tuple)
+        return self.main._history_entries(
+            checkpoint_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+        )
+
+    async def run_declining_turn(self, verdict, reply, thread_id, question):
+        """Drive one gate-answered turn with an agent client that has no script."""
+        agent_model = ScriptedModel([])
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_gated_system(
+                model=agent_model,
+                gate=self.gate_model(verdict, reply=reply),
+                saver=saver,
+                knowledge=self.load_fixture_knowledge(),
+            )
+            response = await system.process_user_request(question, thread_id)
+            history = await self.history_entries(saver, thread_id)
+        return response, history, agent_model, service
+
+    def assert_declined_turn(self, response, history, agent_model, service, *, verdict, reply, question):
+        self.assertTrue(response["success"])
+        self.assertEqual(response["verdict"], verdict)
+        self.assertEqual(response["message"], reply)
+        self.assertEqual(response["query_info"], [])
+        self.assertIsNone(response["data"])
+        self.assertEqual(agent_model.invocation_count, 0)
+        self.assertEqual(service.calls, [])
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": reply, "reasoning": None},
+            ],
+        )
+
+    async def test_an_unrelated_turn_is_answered_by_the_gate_alone(self):
+        """Given an unrelated turn, When the gate declines, Then the reply is the answer and no tool runs."""
+        question = "Какая завтра погода в Москве?"
+        reply = "Это вне темы набора данных. Спросите про игры и команды лиги."
+
+        response, history, agent_model, service = await self.run_declining_turn(
+            "unrelated", reply, "scope-unrelated-thread", question
+        )
+
+        self.assert_declined_turn(
+            response,
+            history,
+            agent_model,
+            service,
+            verdict="unrelated",
+            reply=reply,
+            question=question,
+        )
+
+    async def test_an_unclear_turn_asks_exactly_one_question(self):
+        """Given an unclear turn, When the gate asks back, Then the reply is one question and no tool runs."""
+        question = "А что там по результатам?"
+        reply = "Уточните, о каком сезоне или команде идёт речь?"
+
+        response, history, agent_model, service = await self.run_declining_turn(
+            "unclear", reply, "scope-unclear-thread", question
+        )
+
+        self.assert_declined_turn(
+            response,
+            history,
+            agent_model,
+            service,
+            verdict="unclear",
+            reply=reply,
+            question=question,
+        )
+        # Structural half of the reply contract: exactly one clarifying question.
+        self.assertEqual(response["message"].count("?"), 1)
+
+    async def test_a_mixed_turn_runs_the_agent_with_the_gate_note(self):
+        """Given a mixed turn, When the agent runs, Then the note rides that turn's model input."""
+        note = "Часть про погоду вне набора данных."
+        knowledge = self.load_fixture_knowledge()
+        agent_model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("get_all_teams", {}, "mixed-data-1")],
+                ),
+                self.messages.AIMessage(content="Команды перечислены."),
+            ]
+        )
+
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_gated_system(
+                model=agent_model,
+                gate=self.gate_model("mixed", note=note),
+                saver=saver,
+                knowledge=knowledge,
+            )
+            service.results["get_all_teams"] = []
+            response = await system.process_user_request(
+                "Покажи команды и заодно погоду", "scope-mixed-thread"
+            )
+
+        first_request = agent_model.requests[0]
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["verdict"], "mixed")
+        self.assertEqual(response["message"], "Команды перечислены.")
+        self.assertEqual(
+            response["query_info"], [{"tool": "get_all_teams", "args": {}}]
+        )
+        self.assertIn(note, first_request[0].content)
+        self.assertEqual(
+            first_request[0].content,
+            f"{self.knowledge_module.compose_system_prompt(knowledge)}"
+            f"\n\n## Scope gate note\n\n{note}",
+        )
+        self.assertEqual(agent_model.invocation_count, 2)
+        self.assertEqual([name for name, _ in service.calls], ["get_all_teams"])
+
+    async def test_an_in_scope_turn_runs_the_agent_unchanged(self):
+        """Given an in-scope turn, When the agent runs, Then data, report and answer complete as today."""
+        handle = {"tool": "get_all_teams", "args": {}}
+        knowledge = self.load_fixture_knowledge()
+        gate = self.gate_model("in_scope")
+        agent_model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("get_all_teams", {}, "in-scope-data-1")],
+                ),
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call("mark_report", {"handle": handle}, "in-scope-mark-1")
+                    ],
+                ),
+                self.messages.AIMessage(content="Отчёт готов."),
+            ]
+        )
+
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_gated_system(
+                model=agent_model,
+                gate=gate,
+                saver=saver,
+                knowledge=knowledge,
+            )
+            service.results["get_all_teams"] = self.pd.DataFrame(
+                [{"team_name": "Команда"}]
+            )
+            response = await system.process_user_request(
+                "Покажи команды", "scope-in-scope-thread"
+            )
+            history = await self.history_entries(saver, "scope-in-scope-thread")
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["verdict"], "in_scope")
+        self.assertEqual(response["message"], "Отчёт готов.")
+        self.assertEqual(
+            [entry["tool"] for entry in response["query_info"]],
+            ["get_all_teams", "mark_report"],
+        )
+        self.assertEqual(response["data"], [{"team_name": "Команда"}])
+        self.assertEqual(gate.invocation_count, 1)
+        self.assertEqual(agent_model.invocation_count, 3)
+        self.assertEqual(
+            agent_model.requests[0][0].content,
+            self.knowledge_module.compose_system_prompt(knowledge),
+        )
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "Покажи команды"},
+                {
+                    "role": "assistant",
+                    "content": "Отчёт готов.",
+                    "reasoning": None,
+                },
+            ],
+        )
 
 
 if __name__ == "__main__":

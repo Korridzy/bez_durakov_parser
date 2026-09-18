@@ -224,5 +224,9 @@ class TestPrompt(checkpointer_cases.TestPromptCases):
 class TestScopeGateDecision(scope_gate_cases.ScopeGateDecisionTests):
     """The gate verdict schema and the strict parser over a model response."""
 
+
+class TestScopeGateGraph(scope_gate_cases.ScopeGateGraphTests):
+    """Every scope verdict driven through the real graph with scripted clients."""
+
 if __name__ == "__main__":
     unittest.main()
