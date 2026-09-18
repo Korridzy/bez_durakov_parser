@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-SOA web system: Streamlit chat UI → FastAPI REST API → LangGraph ReAct agent → the operator tool module named by `dataset.tools_module` → the configured database. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints at `../vm/backend/checkpoints`.
+SOA web system: Streamlit chat UI → FastAPI REST API → a dataset scope gate before the LangGraph ReAct agent when knowledge is loaded → the operator tool module named by `dataset.tools_module` → the configured database. LiteLLM is internal-only at `litellm:4000`; the backend owns SQLite checkpoints at `../vm/backend/checkpoints`.
 
 ## STRUCTURE
 
@@ -37,7 +37,7 @@ webreport/
 | UI changes | `frontend/main.py` | Streamlit. Custom CSS at top. Two views: chat + report |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
 | Serve another dataset | `docker-compose.dataset.yml` + `Makefile` | `make start DATASET=<name>` binds `DATASET_DIR` at `/dataset`, points `BD_CONFIG_LOCAL_FILE` at its overlay, and starts only LiteLLM, backend and frontend |
-| Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir` |
+| Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir`. `[webreport]` sets `agent_scope_gate_model`, which falls back to `agent_model` when empty, and `agent_scope_gate_history_turns`, the number of prior turns the gate may read |
 | Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives OpenAI, OpenRouter, and OpenCode keys from `.env.litellm` |
 | Tests | `backend/test_system.py` | Run via `make test` (Docker) or directly |
 
@@ -45,7 +45,7 @@ webreport/
 
 - **Data access**: this repository's `backend/agent/` and `backend/agents/` never reach the dataset themselves. They discover their tool surface from the object the operator's `build_service(engine)` returns, and the backend injects the one engine it built.
 - **Agent tools**: every public method of that object becomes a tool, named after the method, described by its docstring and parameterised by its type hints. A helper that should not be a tool takes a leading underscore, and a property is never a tool.
-- **Knowledge prompt**: The prompt is composed at startup, and the configured folder is read exactly once
+- **Knowledge prompt**: The prompt is composed at startup, and the configured folder is read exactly once. Its manifest supplies the persona and scope. When knowledge is loaded, the scope gate runs before the agent.
 - **Model availability**: a deep LiteLLM probe runs at startup. Without a reachable model the process stays up and refuses to serve, answering 503 from `/health` and `/api/chat`. Each later chat attempt re-probes once, and the first healthy verdict builds the agent and answers that request.
 - **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. The game data this deployment serves remains MySQL.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
