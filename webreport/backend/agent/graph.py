@@ -43,6 +43,7 @@ class AgentMessageView(MessageView, Protocol):
 
 class NamedTool(Protocol):
     name: str
+    description: str
 
 
 class BoundModel(Protocol):
