@@ -40,6 +40,7 @@ from .graph import (
     ModelClient,
     NamedTool,
     RunConfig,
+    RunnableConfig,
     SystemMessage,
 )
 from .knowledge import Knowledge, KnowledgeManifest
@@ -295,7 +296,7 @@ def build_gate_node(
 
     async def call_gate(
         state: ConversationState,
-        config: RunConfig,
+        config: RunnableConfig,
     ) -> GateStateUpdate:
         messages = state["messages"]
         boundary = max(

@@ -18,6 +18,7 @@ _errors = importlib.import_module("langgraph.errors")
 _graph = importlib.import_module("langgraph.graph")
 _messages = importlib.import_module("langchain_core.messages")
 _prebuilt = importlib.import_module("langgraph.prebuilt")
+_runnables = importlib.import_module("langchain_core.runnables")
 
 END = _graph.END
 GraphRecursionError = _errors.GraphRecursionError
@@ -27,6 +28,9 @@ SystemMessage = _messages.SystemMessage
 ToolMessage = _messages.ToolMessage
 StateGraph = _graph.StateGraph
 ToolNode = _prebuilt.ToolNode
+# LangGraph injects a node's run configuration only when the parameter carries this
+# exact annotation, so nodes in sibling modules take it from here.
+RunnableConfig = _runnables.RunnableConfig
 
 RECURSION_LIMIT_MARKER: Final = "recursion_limit"
 
