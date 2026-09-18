@@ -705,6 +705,43 @@ class TestAPI(unittest.TestCase):
         )
         print("✅ API surface: exactly the four surviving paths")
 
+    def test_openapi_json_documents_an_optional_scope_verdict(self):
+        """Given the served schema, When it is fetched, Then ChatResponse lists scope_verdict."""
+        response = self.client.get("/openapi.json")
+
+        self.assertEqual(response.status_code, 200)
+        schema = response.json()["components"]["schemas"]["ChatResponse"]
+        self.assertIn("scope_verdict", schema["properties"])
+        self.assertNotIn("scope_verdict", schema.get("required", []))
+        print("✅ API schema: ChatResponse carries an optional scope_verdict")
+
+    def test_chat_envelope_carries_the_scripted_scope_verdict(self):
+        """Given an unrelated verdict, When chat is called over HTTP, Then the field carries it."""
+        main_module = importlib.import_module("main")
+
+        class _GateRefusingAgent:
+            async def process_user_request(self, _message, session_id):
+                return {
+                    "success": True,
+                    "data": None,
+                    "message": "Этот вопрос вне темы набора данных.",
+                    "query_info": [],
+                    "timestamp": "2026-09-18T00:00:00",
+                    "reasoning": None,
+                    "verdict": "unrelated",
+                }
+
+        with patch.object(main_module, "agent_system", _GateRefusingAgent()):
+            response = self.client.post(
+                "/api/chat", json={"message": "какая погода", "session_id": "verdict"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["scope_verdict"], "unrelated")
+        self.assertEqual(body["query_info"], [])
+        print("✅ API chat: the scope verdict reaches the JSON envelope")
+
     def test_chat_refuses_with_503_when_no_model_is_reachable(self):
         """Given no reachable model, When chat is called through real routing, Then it answers 503."""
         main_module = importlib.import_module("main")
@@ -2330,6 +2367,119 @@ class TestStartupInitialization(unittest.TestCase):
             self.assertEqual(probe_sleep.await_count, 0)
 
         asyncio.run(run_test())
+
+    def test_empty_gate_model_probes_exactly_once(self):
+        """Given no gate model, When startup probes, Then the agent model is probed once."""
+        main_module = self._get_main_module()
+
+        async def run_test():
+            probe = AsyncMock(return_value=("healthy", 200, {"healthy_endpoints": ["m"]}))
+            await self._reset_startup_state(main_module)
+            with self._tool_service_patch(main_module, object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=lambda **kwargs: object()), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "AGENT_SCOPE_GATE_MODEL", ""), \
+                 patch.object(main_module, "probe_sleep", AsyncMock()), \
+                 patch.object(main_module, "probe_once", new=probe):
+                await main_module.startup_event()
+                probe_calls = list(probe.await_args_list)
+                proxy_healthy = main_module.llm_proxy_healthy
+                await main_module.shutdown_event()
+            return probe_calls, proxy_healthy
+
+        probe_calls, proxy_healthy = asyncio.run(run_test())
+
+        self.assertEqual(probe_calls, [call(main_module.AGENT_MODEL)])
+        self.assertTrue(proxy_healthy)
+
+    def test_distinct_gate_model_is_probed_beside_the_agent_model(self):
+        """Given a separate gate model, When startup probes, Then both models are probed."""
+        main_module = self._get_main_module()
+        created_agents = []
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        async def run_test():
+            probe = AsyncMock(return_value=("healthy", 200, {"healthy_endpoints": ["m"]}))
+            await self._reset_startup_state(main_module)
+            with self._tool_service_patch(main_module, object()), \
+                 patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system), \
+                 patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"), \
+                 patch.object(main_module, "AGENT_MODEL", "agent-model"), \
+                 patch.object(main_module, "AGENT_SCOPE_GATE_MODEL", "  gate-model  "), \
+                 patch.object(main_module, "probe_sleep", AsyncMock()), \
+                 patch.object(main_module, "probe_once", new=probe):
+                await main_module.startup_event()
+                probe_calls = list(probe.await_args_list)
+                proxy_healthy = main_module.llm_proxy_healthy
+                await main_module.shutdown_event()
+            return probe_calls, proxy_healthy
+
+        probe_calls, proxy_healthy = asyncio.run(run_test())
+
+        self.assertEqual(probe_calls, [call("agent-model"), call("gate-model")])
+        self.assertTrue(proxy_healthy)
+        self.assertEqual(len(created_agents), 1)
+
+    def test_unreachable_gate_model_refuses_to_serve_like_a_bad_agent_model(self):
+        """Given an offline gate model, When the stack serves, Then both routes answer 503."""
+        main_module = self._get_main_module()
+        created_agents = []
+        healthy = self.ProbeResponse(["agent-model"], [])
+
+        def fake_agent_system(**kwargs):
+            created_agents.append(kwargs)
+            return object()
+
+        def request_effect(_url, params=None, timeout=None):
+            if params["model"] == "gate-model":
+                raise main_module.requests.ConnectionError("gate offline")
+            return healthy
+
+        asyncio.run(self._reset_startup_state(main_module))
+        with (
+            self._tool_service_patch(main_module, object()),
+            patch.object(main_module, "ReportAgentSystem", side_effect=fake_agent_system),
+            patch.object(main_module, "CHECKPOINT_DB_PATH", ":memory:"),
+            patch.object(main_module, "AGENT_MODEL", "agent-model"),
+            patch.object(main_module, "AGENT_SCOPE_GATE_MODEL", "gate-model"),
+            patch.object(main_module, "probe_sleep", AsyncMock()),
+            patch.object(
+                main_module.requests, "get", side_effect=request_effect
+            ) as request_get,
+        ):
+            client = ASGITestClient(main_module.app)
+            try:
+                health = client.get("/health")
+                chat = client.post("/api/chat", json={"message": "привет"})
+            finally:
+                client.close()
+            probed_models = [
+                request.kwargs["params"]["model"]
+                for request in request_get.call_args_list
+            ]
+
+        self.assertEqual(created_agents, [])
+        self.assertIsNone(main_module.agent_system)
+        self.assertFalse(main_module.llm_proxy_healthy)
+        self.assertEqual(health.status_code, 503)
+        self.assertFalse(health.json()["services"]["llm_proxy"])
+        self.assertEqual(chat.status_code, 503)
+        chat_body = chat.json()
+        self.assertFalse(chat_body["success"])
+        self.assertEqual(chat_body["error"], "llm_proxy_unavailable")
+        self.assertIsNone(chat_body["scope_verdict"])
+        # The healthy agent model is probed once, the gate model exhausts the retry budget,
+        # then the refused chat re-probes both exactly once.
+        self.assertEqual(
+            probed_models,
+            ["agent-model"]
+            + ["gate-model"] * main_module.PROBE_RETRY_ATTEMPTS
+            + ["agent-model", "gate-model"],
+        )
+        print("✅ An unreachable gate model refuses to serve on /health and /api/chat")
 
     def test_probe_response_classifier_follows_decision_table(self):
         main_module = self._get_main_module()

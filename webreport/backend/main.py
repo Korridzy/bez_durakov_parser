@@ -82,6 +82,7 @@ class ChatResponse(BaseModel):
     timestamp: str
     error: Optional[str] = None
     reasoning: Optional[str] = None
+    scope_verdict: Optional[str] = None
 
 
 class ReportData(BaseModel):
@@ -264,15 +265,20 @@ def _classify_probe_response(status_code: Optional[int], body: Any) -> ProbeVerd
     return "transient"
 
 
-async def probe_once() -> tuple[ProbeVerdict, Optional[int], Any]:
-    """One probe request with the configured timeout and no retries."""
+async def probe_once(model: Optional[str] = None) -> tuple[ProbeVerdict, Optional[int], Any]:
+    """One probe request with the configured timeout and no retries.
+
+    `model` defaults to the agent's own model, resolved at call time so the default
+    follows the module global rather than freezing its import-time value.
+    """
+    probed_model = AGENT_MODEL if model is None else model
     status_code = None
     body = None
     try:
         response = await asyncio.to_thread(
             requests.get,
             f"{LITELLM_BASE_URL}/health",
-            params={"model": AGENT_MODEL},
+            params={"model": probed_model},
             timeout=PROBE_REQUEST_TIMEOUT_SECONDS,
         )
         status_code = response.status_code
@@ -286,14 +292,35 @@ async def probe_once() -> tuple[ProbeVerdict, Optional[int], Any]:
         return "transient", status_code, body
 
 
+def _probed_models() -> list[str]:
+    """Every model a served turn needs: the agent's, plus the gate's when it differs.
+
+    The gate runs in front of every turn, so an unreachable gate model refuses to serve
+    exactly like an unreachable agent model. An empty gate setting resolves to the agent
+    model, which leaves a single model to probe.
+    """
+    gate_model = _resolve_scope_gate_model(AGENT_SCOPE_GATE_MODEL)
+    if gate_model == AGENT_MODEL:
+        return [AGENT_MODEL]
+    return [AGENT_MODEL, gate_model]
+
+
 async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
+    """Retry-probe every required model; the first unhealthy one fails the whole check."""
+    for model in _probed_models():
+        if not await _probe_model(model, sleep=sleep):
+            return False
+    return True
+
+
+async def _probe_model(model: str, *, sleep) -> bool:
     status_code = None
     body = None
     verdict: ProbeVerdict = "transient"
     proxy_is_healthy = False
 
     for attempt in range(1, PROBE_RETRY_ATTEMPTS + 1):
-        verdict, status_code, body = await probe_once()
+        verdict, status_code, body = await probe_once(model)
 
         match verdict:
             case "healthy":
@@ -310,7 +337,8 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
                 assert_never(unreachable)
 
     logger.warning(
-        "LiteLLM probe classified verdict=%s status=%s exception_status=%s",
+        "LiteLLM probe classified model=%s verdict=%s status=%s exception_status=%s",
+        model,
         verdict,
         status_code,
         _probe_exception_status(body),
@@ -518,7 +546,7 @@ async def health_check(response: Response) -> HealthResponse:
 
 
 async def _recover_agent_system() -> Optional[ReportAgentSystem]:
-    """Run the probe once and build the agent on a healthy verdict.
+    """Probe every required model once and build the agent when all are healthy.
 
     Serialised under probe_lock so two concurrent requests cannot build twice, and
     re-checked inside the lock so the loser of the race reuses what the winner built.
@@ -533,16 +561,18 @@ async def _recover_agent_system() -> Optional[ReportAgentSystem]:
         if agent_system is not None:
             return agent_system
 
-        verdict, status_code, body = await probe_once()
-        llm_proxy_healthy = verdict == "healthy"
-        if not llm_proxy_healthy:
-            logger.warning(
-                "LiteLLM re-probe classified verdict=%s status=%s exception_status=%s",
-                verdict,
-                status_code,
-                _probe_exception_status(body),
-            )
-            return None
+        for model in _probed_models():
+            verdict, status_code, body = await probe_once(model)
+            llm_proxy_healthy = verdict == "healthy"
+            if not llm_proxy_healthy:
+                logger.warning(
+                    "LiteLLM re-probe classified model=%s verdict=%s status=%s exception_status=%s",
+                    model,
+                    verdict,
+                    status_code,
+                    _probe_exception_status(body),
+                )
+                return None
 
         agent_system = _build_agent_system(saver)
         return agent_system
@@ -618,6 +648,7 @@ async def chat(message: ChatMessage, response: Response):
             timestamp=result["timestamp"],
             error=result.get("error"),
             reasoning=result.get("reasoning"),
+            scope_verdict=result.get("verdict"),
         )
     except HTTPException:
         raise
