@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     # Print summary
     print(f"\n{'='*60}")
-    print(f"SUMMARY")
+    print("SUMMARY")
     print(f"{'='*60}")
     print(f"Files processed: {len(xlsm_files)}")
     print(f"Successfully parsed: {successful_parses}")

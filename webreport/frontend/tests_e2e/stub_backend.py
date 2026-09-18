@@ -40,7 +40,6 @@ def _chat_response(
     return {
         "success": success,
         "session_id": "e2e-stub-session",
-        "mode": "agent",
         "data": data,
         "query_info": [],
         "message": message,
@@ -119,7 +118,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._record("GET", self.path)
-            self._send({"status": "ok", "service": "stub-backend", "mode": "agent"})
+            self._send({"status": "ok", "service": "stub-backend"})
             return
         self._send({"detail": "not found"}, status=404)
 

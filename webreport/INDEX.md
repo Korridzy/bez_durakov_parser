@@ -35,8 +35,9 @@
 ```
 webreport/
 ├── backend/main.py                       - REST API (FastAPI)
-├── backend/agents/report_agents.py       - LangGraph ReAct agent и fallback adapter
-├── backend/services/game_data_service.py - Сервис данных
+├── backend/agents/report_runtime.py      - LangGraph ReAct agent над найденными инструментами
+├── backend/agent/toolmodule.py           - Загрузка модуля оператора и обнаружение инструментов
+├── ../bd_shared/tools/bez_durakov.py     - Модуль инструментов этого развёртывания
 └── frontend/main.py                      - UI (Streamlit)
 ```
 
@@ -97,17 +98,17 @@ python3 validate_setup.py # Проверка файлов
 Frontend (Streamlit)
     ↓ (HTTP/REST)
 Backend (FastAPI, one replica)
-    ↓ (startup election)
-LangGraph ReAct agent or fallback
+    ↓
+LangGraph ReAct agent over discovered tools
     ↓                ↘
 LiteLLM `litellm:4000`   SQLite checkpoints
     ↓                    `../vm/backend/checkpoints`
-GameDataService
+operator tool module (dataset.tools_module)
     ↓
-Database (MySQL game data)
+MySQL, PostgreSQL or SQLite, read-only
 ```
 
-Backend performs the LiteLLM probe once at startup, then keeps its elected `agent` or `fallback` mode until restart. LangGraph thread state lives in `../vm/backend/checkpoints`. Run one backend replica only; horizontal backend scaling is not supported.
+Backend performs the LiteLLM probe at startup. Without a reachable model it stays up and refuses to serve, answering 503 from `/health` and `/api/chat`, and each later chat attempt re-probes once. LangGraph thread state lives in `../vm/backend/checkpoints`. Run one backend replica only; horizontal backend scaling is not supported.
 
 ## 🛠️ Технологии
 
@@ -174,8 +175,8 @@ curl http://localhost:28000/health
 - ✅ 28/28 проверок пройдено
 - ✅ Frontend (Streamlit)
 - ✅ Backend (FastAPI)
-- ✅ LangGraph agents with startup-elected `agent` or `fallback` mode
-- ✅ Services
+- ✅ LangGraph agents over the operator's discovered tools
+- ✅ Operator tool module contract with a read-only injected engine
 - ✅ Документация
 - ✅ Тесты
 - ✅ Docker поддержка

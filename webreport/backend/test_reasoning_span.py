@@ -140,7 +140,12 @@ class TestCurrentTurnSpan(unittest.IsolatedAsyncioTestCase):
         registry = registry_module.ToolRegistry(service)
         tools = tools_module.build_tools(registry, config)
         client = runtime._new_model_client()
-        graph = graph_module.build_graph(client, tools, memory.InMemorySaver())
+        graph = graph_module.build_graph(
+            client,
+            tools,
+            memory.InMemorySaver(),
+            "Test system prompt for reasoning span tests.",
+        )
 
         with patch.object(litellm, "acompletion", fake_acompletion):
             first_turn = await graph_module.arun(graph, "Покажи команды", THREAD_ID)

@@ -111,8 +111,8 @@ class BdGame:
                 if len(col_data) == 0:
                     raise XLSParseError(f"Column '{col}' is empty in 'Общая таблица'")
 
-        except KeyError as e:
-            raise XLSParseError(f"Sheet 'Общая таблица' not found in the file")
+        except KeyError:
+            raise XLSParseError("Sheet 'Общая таблица' not found in the file")
         except Exception as e:
             raise XLSParseError(f"Error checking game consistency: {e}")
 
@@ -392,15 +392,11 @@ class BdGame:
 
                 # Assign rates to each group
                 rate_position = 0
-                has_conflicts = False
-
                 for group in conflict_groups:
                     group_size = len(group)
 
                     if group_size > 1 and rate_position < len(rate_distribution):
                         # Conflict: multiple teams with same bid and points
-                        has_conflicts = True
-
                         # Calculate average rate for this group
                         rates_sum = 0.0
                         rates_count = 0

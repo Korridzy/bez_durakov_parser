@@ -32,6 +32,9 @@ probe_request_timeout_seconds = 9
 llm_max_retries = 1
 llm_request_timeout_seconds = 59
 
+[dataset]
+tools_module = "bd_shared.tools.bez_durakov"
+
 [xlsm_fetch]
 google_drive_folder_url = "https://drive.google.com/drive/folders/[FOLDER_ID]?usp=sharing"
 modes = ["browser_selenium"]

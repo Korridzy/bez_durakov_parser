@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from .report_contracts import (
-    Mode,
     QueryTrace,
     ReportResponse,
     RuntimeDependencyError,
@@ -36,7 +35,6 @@ def trace(messages: Sequence[StoredMessage]) -> list[QueryTrace]:
 
 def success(
     message: str,
-    mode: Mode,
     query_info: list[QueryTrace],
     data: object | None,
     *,
@@ -48,19 +46,15 @@ def success(
         "data": data,
         "timestamp": datetime.now().isoformat(),
         "message": message,
-        "mode": mode,
         "reasoning": reasoning,
     }
 
 
-def failure(
-    message: str, error: str, mode: Mode, *, reasoning: str | None = None
-) -> ReportResponse:
+def failure(message: str, error: str, *, reasoning: str | None = None) -> ReportResponse:
     return {
         "success": False,
         "error": error,
         "message": message,
-        "mode": mode,
         "timestamp": datetime.now().isoformat(),
         "query_info": [],
         "data": None,

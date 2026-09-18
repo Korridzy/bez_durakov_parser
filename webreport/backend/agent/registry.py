@@ -1,12 +1,13 @@
-"""Single dispatch surface over GameDataService for every agent consumer."""
+"""Single dispatch surface over the operator's discovered service for every agent consumer."""
 import asyncio
 import importlib
-import inspect
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from functools import partial
 from typing import Any
+
+from agent.toolmodule import discover
 
 # Resolved at import time exactly like a static import - a missing package still
 # raises ModuleNotFoundError here - but not as a static resolution target, because
@@ -14,25 +15,13 @@ from typing import Any
 np = importlib.import_module("numpy")
 pd = importlib.import_module("pandas")
 
-TOOL_NAMES = (
-    "get_all_games_summary",
-    "get_game_by_id",
-    "get_games_by_date_range",
-    "get_team_game_scores",
-    "get_all_teams",
-    "get_team_statistics",
-    "get_team_wins",
-    "get_top_teams",
-)
-
 ONE_SECOND = np.timedelta64(1, "s")
 ONE_FEMTOSECOND = np.timedelta64(1, "fs")
 SECONDS_PER_FEMTOSECOND = float(ONE_FEMTOSECOND / ONE_SECOND)
 
-DATE_RANGE_TOOL = "get_games_by_date_range"
-DATE_RANGE_PARAMS = ("start_date", "end_date")
-
-ID_COLUMN = "game_id"
+# The synthesised column name for a bare list result. Deliberately neutral, and chosen so it
+# cannot collide with a real column of an operator's own table.
+ID_COLUMN = "item"
 
 
 class ToolError(Exception):
@@ -110,16 +99,15 @@ def _as_response(result: Any) -> Any:
 
 
 class ToolRegistry:
-    """Validated, off-loop access to the eight supported GameDataService methods."""
+    """Validated, off-loop access to every tool discovered on the operator's service."""
 
     def __init__(self, service: Any):
         self.service = service
-        self.names = frozenset(TOOL_NAMES)
-        self.param_specs = {name: self._read_params(service, name) for name in TOOL_NAMES}
-
-    @staticmethod
-    def _read_params(service: Any, name: str) -> tuple[str, ...]:
-        return tuple(inspect.signature(getattr(service, name)).parameters)
+        self.specs = {spec.name: spec for spec in discover(service)}
+        self.names = frozenset(self.specs)
+        self.param_specs = {
+            name: tuple(param.name for param in spec.params) for name, spec in self.specs.items()
+        }
 
     def validate_args(self, name: str, args: Mapping[str, Any]) -> None:
         if name not in self.names:
@@ -130,18 +118,18 @@ class ToolRegistry:
             raise ToolError(f"Tool '{name}' does not accept: {', '.join(unsupported)}")
 
     def _adapt_args(self, name: str, args: Mapping[str, Any]) -> dict[str, Any]:
+        """Turn the ISO strings the model sends back into the dates the method annotated."""
         adapted = dict(args)
-        if name != DATE_RANGE_TOOL:
-            return adapted
-
-        for param in DATE_RANGE_PARAMS:
-            value = adapted.get(param)
+        for param in self.specs[name].params:
+            if not param.needs_date:
+                continue
+            value = adapted.get(param.name)
             if isinstance(value, str):
                 try:
-                    adapted[param] = date.fromisoformat(value)
+                    adapted[param.name] = param.python_type.fromisoformat(value)
                 except ValueError as error:
                     raise ToolError(
-                        f"Tool '{name}' got an invalid ISO date for {param}: {value!r}"
+                        f"Tool '{name}' got an invalid ISO date for {param.name}: {value!r}"
                     ) from error
         return adapted
 

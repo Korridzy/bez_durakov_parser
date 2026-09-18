@@ -2,10 +2,6 @@
 import subprocess
 import sys
 import unittest
-from pathlib import Path
-
-_DATA_COLLECTOR_DIR = Path(__file__).parent
-sys.path.insert(0, str(_DATA_COLLECTOR_DIR))
 
 from entrypoint import _parse_start_time
 
@@ -61,8 +57,7 @@ class ParseStartTimeTests(unittest.TestCase):
         # explicit conditional so out-of-range values are still rejected.
         code = "\n".join(
             [
-                f"import sys; sys.path.insert(0, {str(_DATA_COLLECTOR_DIR)!r})",
-                "from entrypoint import _parse_start_time",
+                "from webreport.data_collector.entrypoint import _parse_start_time",
                 "try:",
                 "    _parse_start_time('25:00')",
                 "except ValueError:",

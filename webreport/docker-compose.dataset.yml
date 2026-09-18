@@ -1,0 +1,18 @@
+# Overlay applied on top of docker-compose.yml when a DATASET is selected.
+#
+# It keeps every dataset-specific file outside the repository: DATASET_DIR is bound
+# read-only at /dataset, and the backend reads its config overlay, its operator tool module
+# and its knowledge folder from there. The bundled MySQL and the XLSM collector belong to
+# bez_durakov, so the backend no longer waits for them and the Makefile starts only the
+# three application services.
+services:
+  backend:
+    volumes:
+      - ${DATASET_DIR:?DATASET_DIR must point at the dataset directory}:/dataset:ro
+    environment:
+      BD_CONFIG_LOCAL_FILE: /dataset/config/config.local.toml
+      BD_CHECKPOINT_DB_PATH: /data/checkpoints-${DATASET}.db
+      PYTHONPATH: /:/dataset
+    depends_on: !override
+      litellm:
+        condition: service_healthy

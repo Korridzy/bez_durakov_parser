@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import ClassVar, final
 
+import fastapi
+
 # Parent of the mounted bd_shared directory, same convention as main.py:16
 sys.path.insert(0, '/')
 
@@ -102,12 +104,43 @@ def _report_response(**overrides: object) -> dict[str, object]:
         "success": True,
         "data": None,
         "message": "готовый ответ",
-        "mode": "agent",
         "query_info": [{"tool": "list_games", "args": {}}],
         "timestamp": "2026-08-07T00:00:00",
     }
     response.update(overrides)
     return response
+
+
+KNOWLEDGE_DOCUMENT_BODY = "\n".join(
+    f"KNOWLEDGE_FIXTURE_DOCUMENT_LINE_{index:03d}" for index in range(64)
+)
+KNOWLEDGE_DOCUMENT = f"# knowledge-fixture\n\n{KNOWLEDGE_DOCUMENT_BODY}"
+KNOWLEDGE_TOOL_CALL_ID = "knowledge-call-1"
+
+
+def _read_knowledge_turn(messages):
+    return [
+        messages.HumanMessage(content="вопрос о правилах"),
+        messages.AIMessage(
+            content="",
+            additional_kwargs={"reasoning_content": "Шаг 1"},
+            tool_calls=[
+                {
+                    "name": "read_knowledge",
+                    "args": {"topic": "fixture-topic"},
+                    "id": KNOWLEDGE_TOOL_CALL_ID,
+                }
+            ],
+        ),
+        messages.ToolMessage(
+            content=KNOWLEDGE_DOCUMENT,
+            tool_call_id=KNOWLEDGE_TOOL_CALL_ID,
+        ),
+        messages.AIMessage(
+            content="ответ",
+            additional_kwargs={"reasoning_content": "Шаг 2"},
+        ),
+    ]
 
 
 class TestHistoryEntries(_MainImports, unittest.TestCase):
@@ -185,6 +218,25 @@ class TestHistoryEntries(_MainImports, unittest.TestCase):
             ],
         )
 
+    def test_read_knowledge_turn_hides_document_and_keeps_reasoning(self):
+        """Given a knowledge tool turn, When built, Then only its chat entries remain."""
+        entries = self.main._history_entries(_read_knowledge_turn(self.messages))
+
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(
+            entries,
+            [
+                {"role": "user", "content": "вопрос о правилах"},
+                {
+                    "role": "assistant",
+                    "content": "ответ",
+                    "reasoning": "Шаг 1\n\nШаг 2",
+                },
+            ],
+        )
+        for entry in entries:
+            self.assertNotIn(KNOWLEDGE_DOCUMENT_BODY, entry["content"])
+
     def test_assistant_entry_carries_a_null_reasoning_key_when_absent(self):
         """Given no thought, When built, Then the key is present and None."""
         stored = [self.messages.HumanMessage(content="вопрос"), self._ai("ответ")]
@@ -251,7 +303,6 @@ class TestChatResponseShape(_MainImports, unittest.TestCase):
         fields: dict[str, object] = {
             "success": True,
             "session_id": "s-1",
-            "mode": "agent",
             "query_info": [],
             "message": "ответ",
             "timestamp": "2026-08-07T00:00:00",
@@ -288,11 +339,17 @@ class TestChatEndpointReasoning(
     """/api/chat forwards the reasoning the agent system reports."""
 
     async def _chat(self, response: Mapping[str, object], session_id: str = "s-1"):
+        """Drive the handler directly, supplying the Response that FastAPI would inject."""
         self.main.agent_system = StubAgentSystem(response)
         self.main.checkpoint_saver = StubSaver()
-        return await self.main.chat(
-            self.main.ChatMessage(message="покажи игры", session_id=session_id)
+        self.main.tool_service = object()
+        http_response = fastapi.Response()
+        envelope = await self.main.chat(
+            self.main.ChatMessage(message="покажи игры", session_id=session_id),
+            http_response,
         )
+        self.assertEqual(http_response.status_code, 200)
+        return envelope
 
     async def test_chat_forwards_reasoning_to_the_response(self):
         """Given a reasoning-bearing result, When chatting, Then JSON carries it."""
@@ -301,6 +358,28 @@ class TestChatEndpointReasoning(
         self.assertEqual(result.reasoning, "Шаг 1\n\nШаг 2")
         payload = json.loads(result.model_dump_json())
         self.assertEqual(payload["reasoning"], "Шаг 1\n\nШаг 2")
+
+    async def test_chat_read_knowledge_matches_data_tool_response_shape(self):
+        """Given a knowledge tool result, When chatting, Then its JSON shape is unchanged."""
+        data_tool = await self._chat(_report_response())
+        knowledge_query = [
+            {"tool": "read_knowledge", "args": {"topic": "fixture-topic"}}
+        ]
+        knowledge = await self._chat(
+            _report_response(
+                query_info=knowledge_query,
+                reasoning="Шаг 1\n\nШаг 2",
+            )
+        )
+
+        data_payload = json.loads(data_tool.model_dump_json())
+        knowledge_payload = json.loads(knowledge.model_dump_json())
+
+        self.assertEqual(set(knowledge_payload), set(data_payload))
+        self.assertEqual(knowledge_payload["query_info"], knowledge_query)
+        self.assertEqual(knowledge_payload["reasoning"], "Шаг 1\n\nШаг 2")
+        for value in knowledge_payload.values():
+            self.assertNotIn(KNOWLEDGE_DOCUMENT_BODY, str(value))
 
     async def test_chat_without_reasoning_serializes_null(self):
         """Given a result without reasoning, When chatting, Then JSON holds null."""
@@ -370,6 +449,28 @@ class TestHistoryEndpointWiring(
                 },
             ],
         )
+
+    async def test_history_endpoint_hides_read_knowledge_document(self):
+        """Given a knowledge tool turn, When history is read, Then only chat data is served."""
+        payload = await self._history(
+            self._checkpoint(_read_knowledge_turn(self.messages))
+        )
+
+        self.assertEqual(set(payload), {"session_id", "history"})
+        self.assertEqual(len(payload["history"]), 2)
+        self.assertEqual(
+            payload["history"],
+            [
+                {"role": "user", "content": "вопрос о правилах"},
+                {
+                    "role": "assistant",
+                    "content": "ответ",
+                    "reasoning": "Шаг 1\n\nШаг 2",
+                },
+            ],
+        )
+        for entry in payload["history"]:
+            self.assertNotIn(KNOWLEDGE_DOCUMENT_BODY, entry["content"])
 
     async def test_history_matches_the_pure_helper(self):
         """Given stored messages, When history is read, Then the helper output is served."""

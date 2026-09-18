@@ -13,8 +13,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 CHAT_REQUEST_TIMEOUT_SECONDS = int(os.environ["CHAT_REQUEST_TIMEOUT_SECONDS"])
 
 st.set_page_config(
-    page_title="Game Data Reports",
-    page_icon="🎮",
+    page_title="Отчёты по данным",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
 )

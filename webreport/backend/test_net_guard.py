@@ -22,13 +22,11 @@ sys.path.insert(0, '/')
 
 _config = importlib.import_module("bd_shared.config")
 
-_hostname = urlsplit(str(_config.DATABASE_URL)).hostname
-if _hostname is None:
-    raise RuntimeError(f"database URL carries no host: {_config.DATABASE_URL!r}")
-
-# Under BD_DOCKER this is the Compose service host (`mysql`), which the
-# GameDataService tests are allowed to reach when the stack happens to be up.
-DATABASE_HOST: str = _hostname
+# Under BD_DOCKER this is the Compose service host (`mysql`), which the tests against a
+# real database are allowed to reach when the stack happens to be up. A file-based URL
+# such as SQLite has no remote host at all, which is the normal shape for that dialect
+# rather than a misconfiguration, so the guard then allows only loopback.
+DATABASE_HOST: str | None = urlsplit(str(_config.DATABASE_URL)).hostname
 
 _original_connect = socket.socket.connect
 _original_connect_ex = socket.socket.connect_ex
@@ -45,11 +43,15 @@ def _database_addresses_once() -> frozenset[str]:
 
     cached = _database_addresses
     if cached is None:
-        try:
-            resolved = socket.getaddrinfo(DATABASE_HOST, None)
-        except socket.gaierror:
-            # Stack down: the host has no address, so there is nothing to allow.
+        if DATABASE_HOST is None:
+            # A host-less URL has no remote address to allow.
             resolved = []
+        else:
+            try:
+                resolved = socket.getaddrinfo(DATABASE_HOST, None)
+            except socket.gaierror:
+                # Stack down: the host has no address, so there is nothing to allow.
+                resolved = []
         cached = frozenset(str(info[4][0]) for info in resolved)
         _database_addresses = cached
 
@@ -67,7 +69,7 @@ def _is_allowed(family: int, address: object) -> bool:
     try:
         parsed = ipaddress.ip_address(host)
     except ValueError:
-        return host == DATABASE_HOST
+        return DATABASE_HOST is not None and host == DATABASE_HOST
 
     return parsed.is_loopback or host in _database_addresses_once()
 
@@ -76,10 +78,12 @@ def _require_allowed(sock: socket.socket, address: object) -> None:
     if _is_allowed(sock.family, address):
         return
 
-    message = (
-        f"blocked outbound connection to {address!r}; offline tests may reach "
-        f"only loopback and the Compose database host {DATABASE_HOST!r}"
+    permitted = (
+        "only loopback, because the configured database URL carries no host"
+        if DATABASE_HOST is None
+        else f"only loopback and the Compose database host {DATABASE_HOST!r}"
     )
+    message = f"blocked outbound connection to {address!r}; offline tests may reach {permitted}"
     print(f"NET GUARD: {message}", file=sys.stderr, flush=True)
     raise BlockedEgressError(message)
 

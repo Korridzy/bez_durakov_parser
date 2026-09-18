@@ -45,16 +45,16 @@ class RegistryShapeTests(RegistryCaseBase):
         self.assertEqual(records, [{"team_name": "X", "games_played": 3}])
         self.assertEqual(cols, ["team_name", "games_played"])
 
-    async def test_normalized_id_list_yields_game_id_records(self):
-        """Given a list of game ids, When execute_normalized runs, Then each becomes a record."""
+    async def test_normalized_id_list_yields_synthesised_item_records(self):
+        """Given a bare list, When execute_normalized runs, Then each entry becomes an item record."""
         self.service.results["get_games_by_date_range"] = [11, 12, 13]
 
         records, cols = await self.registry.execute_normalized(
             "get_games_by_date_range", {"start_date": "2025-01-01"}
         )
 
-        self.assertEqual(records, [{"game_id": 11}, {"game_id": 12}, {"game_id": 13}])
-        self.assertEqual(cols, ["game_id"])
+        self.assertEqual(records, [{"item": 11}, {"item": 12}, {"item": 13}])
+        self.assertEqual(cols, ["item"])
 
     async def test_normalized_empty_results_yield_empty_pairs(self):
         """Given None or empty results, When execute_normalized runs, Then both parts are empty."""
@@ -221,12 +221,6 @@ class RegistryShapeTests(RegistryCaseBase):
 
         self.service.results["get_game_by_id"] = None
         self.assertIsNone(await self.registry.execute_response("get_game_by_id", {"game_id": 1}))
-
-    def test_service_has_no_execute_custom_query(self):
-        """Given GameDataService, When inspected, Then the custom-query escape hatch is gone."""
-        service_module = importlib.import_module("services.game_data_service")
-
-        self.assertFalse(hasattr(service_module.GameDataService, "execute_custom_query"))
 
 
 if __name__ == "__main__":

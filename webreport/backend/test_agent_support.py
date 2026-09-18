@@ -11,12 +11,13 @@ import unittest
 from datetime import date
 from typing import Any
 
+# Alphabetical, because discovery walks dir() and the built tool order follows it.
 TOOL_NAMES = (
     "get_all_games_summary",
+    "get_all_teams",
     "get_game_by_id",
     "get_games_by_date_range",
     "get_team_game_scores",
-    "get_all_teams",
     "get_team_statistics",
     "get_team_wins",
     "get_top_teams",
@@ -24,10 +25,10 @@ TOOL_NAMES = (
 
 TOOL_PARAMS = {
     "get_all_games_summary": (),
+    "get_all_teams": (),
     "get_game_by_id": ("game_id",),
     "get_games_by_date_range": ("start_date", "end_date"),
     "get_team_game_scores": ("game_id",),
-    "get_all_teams": (),
     "get_team_statistics": ("team_name",),
     "get_team_wins": ("team_name", "year"),
     "get_top_teams": ("limit",),
@@ -37,10 +38,11 @@ TOOL_PARAMS = {
 class StubService:
     """Test double for GameDataService with byte-identical signatures.
 
-    ToolRegistry introspects these signatures at construction and validates
-    caller arguments against them, so a signature drift here would silently
-    weaken every dispatch assertion. RegistryDispatchTests.test_stub_mirrors_real_service
-    pins the double against the real class to keep that honest.
+    ToolRegistry discovers this object at construction and validates caller arguments
+    against the signatures it finds, so a drift here would silently weaken every dispatch
+    assertion. Discovery also refuses a method without a docstring or without parameter
+    annotations, which is why the double carries both.
+    RegistryDispatchTests.test_stub_mirrors_real_service pins it against the real class.
     """
 
     def __init__(self):
@@ -56,31 +58,39 @@ class StubService:
             raise self.raises[name]
         return self.results.get(name)
 
-    def get_all_games_summary(self):
+    def get_all_games_summary(self) -> Any:
+        """Get summary of all games."""
         return self._record("get_all_games_summary", {})
 
-    def get_game_by_id(self, game_id):
+    def get_game_by_id(self, game_id: int) -> Any:
+        """Get full game data by ID."""
         return self._record("get_game_by_id", {"game_id": game_id})
 
-    def get_games_by_date_range(self, start_date, end_date=None):
+    def get_games_by_date_range(self, start_date: date, end_date: date | None = None) -> Any:
+        """Get game IDs within an inclusive date range."""
         return self._record(
             "get_games_by_date_range",
             {"start_date": start_date, "end_date": end_date},
         )
 
-    def get_team_game_scores(self, game_id=None):
+    def get_team_game_scores(self, game_id: int | None = None) -> Any:
+        """Get team game scores, optionally for one game."""
         return self._record("get_team_game_scores", {"game_id": game_id})
 
-    def get_all_teams(self):
+    def get_all_teams(self) -> Any:
+        """Get all teams."""
         return self._record("get_all_teams", {})
 
-    def get_team_statistics(self, team_name):
+    def get_team_statistics(self, team_name: str) -> Any:
+        """Get statistics for a specific team."""
         return self._record("get_team_statistics", {"team_name": team_name})
 
-    def get_team_wins(self, team_name, year=None):
+    def get_team_wins(self, team_name: str, year: int | None = None) -> Any:
+        """Get games won by a specific team."""
         return self._record("get_team_wins", {"team_name": team_name, "year": year})
 
-    def get_top_teams(self, limit=10):
+    def get_top_teams(self, limit: int = 10) -> Any:
+        """Get top teams by total points."""
         return self._record("get_top_teams", {"limit": limit})
 
 

@@ -14,6 +14,7 @@ Central library providing ORM models, database operations, configuration, and ga
 | `config.py` | TOML config loader. Constants: `DATABASE_URL`, `DEFAULT_GAME_DATE`, `XLSM_FETCH_CONFIG` |
 | `config.toml` | Tracked base config. `config.local.toml` is an ignored server-local overlay; `BD_CONFIG_FILE` selects a complete alternate config |
 | `test_config.toml` | Test DB config — used by `test_alembic_migration.py` |
+| `knowledge/` | Operator knowledge folders: manifest plus Markdown topics for `read_knowledge` |
 
 ## WHERE TO LOOK
 
@@ -26,6 +27,7 @@ Central library providing ORM models, database operations, configuration, and ga
 | Game round structure | `bd_game.py` | `_initialize_team_structures()` — vybor, chisla, pref, pairs, razobl, auction, mot |
 | DB connection | `config.py` | `DATABASE_URL` from `config.toml` `[database]` section |
 | WebReport config | `config.py` | `WEBREPORT_BACKEND_PORT`, `WEBREPORT_FRONTEND_PORT`, `WEBREPORT_DEBUG` |
+| Knowledge config | `config.py` | `KNOWLEDGE_DIR`, `KNOWLEDGE_MAX_TITLE_CHARS`, `KNOWLEDGE_MAX_SUMMARY_CHARS`, `KNOWLEDGE_MAX_PERSONA_CHARS`, `KNOWLEDGE_MAX_TOPICS`, `KNOWLEDGE_MAX_DOC_BYTES` |
 
 ## ORM TABLES
 

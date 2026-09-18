@@ -25,9 +25,9 @@ def render_report_pane(refresh: Callable[[], None]) -> None:
             st.info("Отчёт появится здесь сразу после ответа агента.")
             st.markdown("""
             Примеры запросов:
-            - все игры;
-            - топ 10 команд по очкам;
-            - статистика команды.
+            - сводка по всем записям;
+            - десять наибольших значений;
+            - подробности по одному объекту.
             """)
             return
         st.caption(f"Запрос: {report['request_text']}")
@@ -57,12 +57,9 @@ def _render_data(data: object) -> None:
     if isinstance(data, list) and data:
         dataframe = pd.DataFrame(data)
         st.markdown("#### Основные показатели")
-        total, points, columns_count = st.columns(3)
+        total, columns_count = st.columns(2)
         with total:
             st.metric("Всего записей", len(dataframe))
-        with points:
-            if "total_points" in dataframe.columns:
-                st.metric("Средние очки", f"{dataframe['total_points'].mean():.2f}")
         with columns_count:
             st.metric("Колонок", len(dataframe.columns))
         st.dataframe(dataframe, use_container_width=True, height=320)

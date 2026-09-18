@@ -1,0 +1,26 @@
+
+# Loaded only by the test recipes, never by the running stack, so docker-compose.yml keeps
+# an empty diff and a developer's own services are untouched.
+services:
+  postgres_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fixture
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: fixture
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fixture -d fixture"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - webreport-network
+
+  backend:
+    # !override replaces the merged dependency map rather than adding to it, so this lane
+    # does not drag mysql and litellm in from docker-compose.yml.
+    depends_on: !override
+      postgres_test:
+        condition: service_healthy
