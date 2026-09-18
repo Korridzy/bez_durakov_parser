@@ -77,6 +77,7 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
                 max_topics=50,
                 max_doc_bytes=65536,
                 max_bytes_per_turn=131072,
+                max_scope_chars=2000,
             ),
         )
 

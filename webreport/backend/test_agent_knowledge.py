@@ -92,8 +92,8 @@ class KnowledgeTypesTests(unittest.TestCase):
         self.assertIsNone(error.observed)
         self.assertIsNone(error.permitted)
 
-    def test_knowledge_limits_holds_six_integer_fields(self):
-        """Given KnowledgeLimits, When constructed with six values, Then all six are accessible as the given integers."""
+    def test_knowledge_limits_holds_seven_integer_fields(self):
+        """Given KnowledgeLimits, When constructed with seven values, Then all seven are accessible as the given integers."""
         knowledge_module = self.knowledge_module
 
         limits = knowledge_module.KnowledgeLimits(
@@ -103,6 +103,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
         self.assertEqual(limits.max_title_chars, 80)
@@ -111,6 +112,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         self.assertEqual(limits.max_topics, 50)
         self.assertEqual(limits.max_doc_bytes, 65536)
         self.assertEqual(limits.max_bytes_per_turn, 131072)
+        self.assertEqual(limits.max_scope_chars, 2000)
 
     def test_knowledge_topic_exposes_id_title_summary_text(self):
         """Given a KnowledgeTopic, When constructed, Then id, title, summary and text are all accessible."""
@@ -227,6 +229,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
     def _assert_manifest_path(self, error, manifest_path):
@@ -512,6 +515,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=2,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -598,6 +602,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=bd_shared_config.KNOWLEDGE_MAX_TOPICS,
             max_doc_bytes=bd_shared_config.KNOWLEDGE_MAX_DOC_BYTES,
             max_bytes_per_turn=131072,
+            max_scope_chars=bd_shared_config.KNOWLEDGE_MAX_SCOPE_CHARS,
         )
 
         knowledge = self.knowledge_module.load_knowledge(
@@ -942,6 +947,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=10,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -994,6 +1000,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=5,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1318,6 +1325,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             ("max_persona_chars", "knowledge_max_persona_chars"),
             ("max_topics", "knowledge_max_topics"),
             ("max_doc_bytes", "knowledge_max_doc_bytes"),
+            ("max_scope_chars", "knowledge_max_scope_chars"),
         )
         valid_limit_values = {
             "max_title_chars": 80,
@@ -1326,6 +1334,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             "max_topics": 50,
             "max_doc_bytes": 65536,
             "max_bytes_per_turn": 131072,
+            "max_scope_chars": 2000,
         }
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1358,6 +1367,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             ("max_persona_chars", "knowledge_max_persona_chars", 2000.5),
             ("max_topics", "knowledge_max_topics", 50.5),
             ("max_doc_bytes", "knowledge_max_doc_bytes", 65536.5),
+            ("max_scope_chars", "knowledge_max_scope_chars", 2000.5),
         )
         valid_limit_values: dict[str, int | float] = {
             "max_title_chars": 80,
@@ -1366,6 +1376,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             "max_topics": 50,
             "max_doc_bytes": 65536,
             "max_bytes_per_turn": 131072,
+            "max_scope_chars": 2000,
         }
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1399,6 +1410,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             max_topics=True,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1416,6 +1428,52 @@ class KnowledgeTypesTests(unittest.TestCase):
                 self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
 
             self.assertIn("knowledge_max_topics", str(raised.exception))
+
+    def test_validate_limits_rejects_invalid_scope_limit_and_names_key(self):
+        """Given a zero, boolean or string max_scope_chars, When validated, Then KnowledgeError names knowledge_max_scope_chars."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        valid_limit_values: dict[str, object] = {
+            "max_title_chars": 80,
+            "max_summary_chars": 200,
+            "max_persona_chars": 2000,
+            "max_topics": 50,
+            "max_doc_bytes": 65536,
+            "max_bytes_per_turn": 131072,
+            "max_scope_chars": 2000,
+        }
+
+        for invalid_value in (0, True, "2000"):
+            with self.subTest(value=invalid_value):
+                limit_values = dict(valid_limit_values)
+                limit_values["max_scope_chars"] = invalid_value
+                limits = self.knowledge_module.KnowledgeLimits(**limit_values)
+
+                with self.assertRaises(knowledge_error) as raised:
+                    self.knowledge_module.validate_limits(limits)
+
+                error = raised.exception
+                self.assertIn("knowledge_max_scope_chars", str(error))
+                self.assertEqual(error.key, "knowledge_max_scope_chars")
+                self.assertEqual(error.rule, "integer_minimum")
+                self.assertEqual(error.observed, invalid_value)
+                self.assertIs(type(error.observed), type(invalid_value))
+                self.assertEqual(error.permitted, 1)
+
+    def test_validate_limits_accepts_the_configured_scope_limit(self):
+        """Given the configured scope limit, When validated with the other six, Then no error is raised."""
+        bd_shared_config = importlib.import_module("bd_shared.config")
+
+        limits = self.knowledge_module.KnowledgeLimits(
+            max_title_chars=bd_shared_config.KNOWLEDGE_MAX_TITLE_CHARS,
+            max_summary_chars=bd_shared_config.KNOWLEDGE_MAX_SUMMARY_CHARS,
+            max_persona_chars=bd_shared_config.KNOWLEDGE_MAX_PERSONA_CHARS,
+            max_topics=bd_shared_config.KNOWLEDGE_MAX_TOPICS,
+            max_doc_bytes=bd_shared_config.KNOWLEDGE_MAX_DOC_BYTES,
+            max_bytes_per_turn=bd_shared_config.KNOWLEDGE_MAX_BYTES_PER_TURN,
+            max_scope_chars=bd_shared_config.KNOWLEDGE_MAX_SCOPE_CHARS,
+        )
+
+        self.knowledge_module.validate_limits(limits)
 
 
 if __name__ == "__main__":

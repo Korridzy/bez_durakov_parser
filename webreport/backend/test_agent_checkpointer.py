@@ -92,7 +92,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         return self.knowledge_module.load_knowledge(
             path,
             "fixture",
-            self.knowledge_module.KnowledgeLimits(80, 200, 2000, 50, 65536, 131072),
+            self.knowledge_module.KnowledgeLimits(80, 200, 2000, 50, 65536, 131072, 2000),
         )
 
     def _read_response(self, call_id="knowledge-1"):
@@ -391,6 +391,7 @@ class TestPromptCases(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
     def test_system_prompt_without_knowledge_is_byte_exact(self):

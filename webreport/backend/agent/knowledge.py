@@ -56,6 +56,7 @@ class KnowledgeLimits:
     max_topics: int
     max_doc_bytes: int
     max_bytes_per_turn: int
+    max_scope_chars: int
 
 
 def validate_limits(limits: KnowledgeLimits) -> None:
@@ -66,6 +67,7 @@ def validate_limits(limits: KnowledgeLimits) -> None:
         ("knowledge_max_topics", limits.max_topics),
         ("knowledge_max_doc_bytes", limits.max_doc_bytes),
         ("knowledge_max_bytes_per_turn", limits.max_bytes_per_turn),
+        ("knowledge_max_scope_chars", limits.max_scope_chars),
     )
     for config_key, value in limit_values:
         if not (isinstance(value, int) and not isinstance(value, bool) and value >= 1):

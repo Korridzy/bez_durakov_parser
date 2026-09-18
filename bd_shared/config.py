@@ -131,6 +131,7 @@ KNOWLEDGE_MAX_PERSONA_CHARS = config["webreport"].get("knowledge_max_persona_cha
 KNOWLEDGE_MAX_TOPICS = config["webreport"].get("knowledge_max_topics", 50)
 KNOWLEDGE_MAX_DOC_BYTES = config["webreport"].get("knowledge_max_doc_bytes", 65536)
 KNOWLEDGE_MAX_BYTES_PER_TURN = config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
+KNOWLEDGE_MAX_SCOPE_CHARS = config["webreport"].get("knowledge_max_scope_chars", 2000)
 
 
 def _dataset_config_error(

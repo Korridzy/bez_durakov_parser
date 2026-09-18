@@ -40,6 +40,7 @@ knowledge_max_persona_chars = 2000
 knowledge_max_topics = 50
 knowledge_max_doc_bytes = 65536
 knowledge_max_bytes_per_turn = 131072
+knowledge_max_scope_chars = 2000
 
 [dataset]
 # Dotted import path of the Python module that exposes build_service(engine).

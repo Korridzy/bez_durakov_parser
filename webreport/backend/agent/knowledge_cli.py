@@ -8,6 +8,7 @@ from bd_shared.config import (
     KNOWLEDGE_MAX_BYTES_PER_TURN,
     KNOWLEDGE_MAX_DOC_BYTES,
     KNOWLEDGE_MAX_PERSONA_CHARS,
+    KNOWLEDGE_MAX_SCOPE_CHARS,
     KNOWLEDGE_MAX_SUMMARY_CHARS,
     KNOWLEDGE_MAX_TITLE_CHARS,
     KNOWLEDGE_MAX_TOPICS,
@@ -25,6 +26,7 @@ def main() -> int:
         max_topics=KNOWLEDGE_MAX_TOPICS,
         max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
         max_bytes_per_turn=KNOWLEDGE_MAX_BYTES_PER_TURN,
+        max_scope_chars=KNOWLEDGE_MAX_SCOPE_CHARS,
     )
 
     try:
