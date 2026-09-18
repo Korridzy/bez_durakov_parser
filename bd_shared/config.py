@@ -118,6 +118,12 @@ CHECKPOINT_TTL_SECONDS = int(config["webreport"].get("checkpoint_ttl_seconds", 3
 LITELLM_BASE_URL = config["webreport"].get("litellm_base_url", "http://litellm:4000")
 AGENT_MODEL = config["webreport"].get("agent_model", "gpt-4o")
 
+# Scope gate settings, left uncoerced so backend startup can reject a bad type instead of
+# hiding it behind str()/int(). An empty model falls back to AGENT_MODEL at client
+# construction time; the history window is the number of prior turns the gate may read.
+AGENT_SCOPE_GATE_MODEL = config["webreport"].get("agent_scope_gate_model", "")
+AGENT_SCOPE_GATE_HISTORY_TURNS = config["webreport"].get("agent_scope_gate_history_turns", 1)
+
 # Startup LiteLLM probe and LLM client retry policy
 PROBE_RETRY_ATTEMPTS = int(config["webreport"].get("probe_retry_attempts", 5))
 PROBE_RETRY_DELAY_SECONDS = int(config["webreport"].get("probe_retry_delay_seconds", 2))

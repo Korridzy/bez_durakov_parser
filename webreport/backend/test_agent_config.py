@@ -2,6 +2,7 @@
 
 import importlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,52 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, "/")
+
+# The probes run startup for real in a child process, because the settings under test are
+# read at import time and only a fresh interpreter can observe a scratch config file.
+HAPPY_STARTUP_PROBE = """\
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+import main
+
+async def probe():
+    assert main.KNOWLEDGE_DIR is not None, 'the shipped config configures a knowledge folder'
+    with patch.object(main, 'initialize_tool_service_with_retry',
+                      new=AsyncMock(return_value=(None, object(), ()))) as db, \\
+         patch.object(main, 'probe_llm_proxy', new=AsyncMock(return_value=True)), \\
+         patch.object(main, '_build_agent_system', new=MagicMock()) as build:
+        await main.startup_event()
+        db.assert_awaited_once()
+        build.assert_called_once()
+        assert main.agent_system is build.return_value
+    await main.shutdown_event()
+    print('startup reached agent construction')
+
+asyncio.run(probe())
+"""
+
+FAILING_STARTUP_PROBE = """\
+import asyncio
+import sys
+from unittest.mock import AsyncMock, patch
+import main
+
+expected_key = sys.argv[1]
+
+async def probe():
+    with patch.object(main, 'initialize_tool_service_with_retry', new=AsyncMock()) as db:
+        try:
+            await main.startup_event()
+        except main.ScopeGateConfigError as error:
+            assert error.key == expected_key, error.key
+            assert expected_key in str(error), str(error)
+            db.assert_not_called()
+        else:
+            raise AssertionError('invalid scope gate value accepted')
+    print('startup aborted on ' + expected_key)
+
+asyncio.run(probe())
+"""
 
 
 class KnowledgeConfigTests(unittest.TestCase):
@@ -152,6 +199,174 @@ class KnowledgeConfigTests(unittest.TestCase):
         with patch("socket.socket", side_effect=RuntimeError("attempted to open a socket during DATABASE_NAME derivation")):
             config_module = self._reload_config({"BD_CONFIG_FILE": "test_config.toml"})
         self.assertEqual(config_module.DATABASE_NAME, "bez_durakov_test")
+
+
+class ScopeGateConfigTests(unittest.TestCase):
+    """The two scope gate keys, their raw types and the startup validation over them."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.main_module = importlib.import_module("main")
+
+    def _reload_config(self, env=None):
+        config_module = importlib.import_module("bd_shared.config")
+        with patch.dict(os.environ, {"BD_CONFIG_FILE": "config.toml", **(env or {})}):
+            return importlib.reload(config_module)
+
+    def tearDown(self):
+        self._reload_config()
+
+    @staticmethod
+    def _scratch_config(directory, line):
+        """Write test_config.toml with one extra [webreport] line, as the other cases do."""
+        config_path = Path(directory) / "config.toml"
+        config_path.write_text(
+            Path("/bd_shared/test_config.toml")
+            .read_text()
+            .replace("[webreport]\n", f"[webreport]\n{line}\n", 1)
+        )
+        return config_path
+
+    def _run_probe(self, source, config_path, argv=(), timeout=120):
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            probe_path = Path(directory) / "startup_probe.py"
+            probe_path.write_text(source)
+            return subprocess.run(
+                [sys.executable, str(probe_path), *argv],
+                env={
+                    **os.environ,
+                    "BD_CONFIG_FILE": str(config_path),
+                    "BD_CHECKPOINT_DB_PATH": str(Path(directory) / "checkpoints.db"),
+                    "PYTHONPATH": os.pathsep.join(
+                        (str(Path(__file__).parent), os.environ.get("PYTHONPATH", ""))
+                    ),
+                },
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+            )
+
+    def test_shipped_config_carries_the_scope_gate_defaults(self):
+        """Given the shipped config.toml, When config loads, Then the gate model is empty and the window is one turn."""
+        config_module = self._reload_config()
+
+        self.assertEqual(config_module.AGENT_SCOPE_GATE_MODEL, "")
+        self.assertIs(type(config_module.AGENT_SCOPE_GATE_MODEL), str)
+        self.assertEqual(config_module.AGENT_SCOPE_GATE_HISTORY_TURNS, 1)
+        self.assertIs(type(config_module.AGENT_SCOPE_GATE_HISTORY_TURNS), int)
+
+    def test_scope_gate_defaults_apply_when_the_keys_are_absent(self):
+        """Given a config without the keys, When config loads, Then the in-code defaults apply."""
+        config_module = self._reload_config({"BD_CONFIG_FILE": "test_config.toml"})
+
+        self.assertEqual(config_module.AGENT_SCOPE_GATE_MODEL, "")
+        self.assertEqual(config_module.AGENT_SCOPE_GATE_HISTORY_TURNS, 1)
+
+    def test_scope_gate_values_reach_config_uncoerced(self):
+        """Given odd TOML values, When config loads, Then each constant keeps its raw type for startup to judge."""
+        cases = (
+            ("agent_scope_gate_model", '"gpt-4o-mini"', "gpt-4o-mini"),
+            ("agent_scope_gate_model", "5", 5),
+            ("agent_scope_gate_model", "true", True),
+            ("agent_scope_gate_history_turns", "0", 0),
+            ("agent_scope_gate_history_turns", "-1", -1),
+            ("agent_scope_gate_history_turns", "true", True),
+            ("agent_scope_gate_history_turns", "1.5", 1.5),
+            ("agent_scope_gate_history_turns", '"1"', "1"),
+        )
+        for key, toml_value, expected in cases:
+            with self.subTest(key=key, value=toml_value):
+                with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+                    config_path = self._scratch_config(directory, f"{key} = {toml_value}")
+                    config_module = self._reload_config({"BD_CONFIG_FILE": str(config_path)})
+                    observed = getattr(config_module, key.upper())
+
+                self.assertEqual(observed, expected)
+                self.assertIs(type(observed), type(expected))
+
+    def test_empty_model_resolves_to_the_agent_model(self):
+        """Given an empty or blank gate model, When it is resolved, Then the agent model is used."""
+        main_module = self.main_module
+
+        for raw_value in ("", "   ", "\n"):
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(
+                    main_module._resolve_scope_gate_model(raw_value),
+                    main_module.AGENT_MODEL,
+                )
+
+    def test_a_named_model_is_resolved_stripped(self):
+        """Given a gate model with surrounding whitespace, When it is resolved, Then it is stripped and kept."""
+        self.assertEqual(
+            self.main_module._resolve_scope_gate_model("  gpt-4o-mini "), "gpt-4o-mini"
+        )
+
+    def test_non_string_model_is_rejected_naming_the_key(self):
+        """Given a number or a boolean gate model, When it is resolved, Then startup validation refuses it."""
+        main_module = self.main_module
+
+        for raw_value in (5, True, 1.5, None, ["gpt-4o"]):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(main_module.ScopeGateConfigError) as raised:
+                    main_module._resolve_scope_gate_model(raw_value)
+                error = raised.exception
+                self.assertEqual(error.key, "agent_scope_gate_model")
+                self.assertEqual(error.observed, raw_value)
+                self.assertIs(type(error.observed), type(raw_value))
+                self.assertEqual(error.permitted, "string")
+                self.assertIn("agent_scope_gate_model", str(error))
+                self.assertIn(repr(raw_value), str(error))
+
+    def test_history_window_accepts_zero_and_above(self):
+        """Given a non-negative integer window, When it is validated, Then the value passes through."""
+        for raw_value in (0, 1, 7):
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(
+                    self.main_module._validate_scope_gate_history_turns(raw_value), raw_value
+                )
+
+    def test_history_window_rejects_every_non_integer_shape_naming_the_key(self):
+        """Given a negative, boolean, float or string window, When it is validated, Then it is refused naming the key."""
+        main_module = self.main_module
+
+        for raw_value in (-1, True, False, 1.5, "1", None):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(main_module.ScopeGateConfigError) as raised:
+                    main_module._validate_scope_gate_history_turns(raw_value)
+                error = raised.exception
+                self.assertEqual(error.key, "agent_scope_gate_history_turns")
+                self.assertEqual(error.observed, raw_value)
+                self.assertIs(type(error.observed), type(raw_value))
+                self.assertEqual(error.permitted, 0)
+                self.assertIn("agent_scope_gate_history_turns", str(error))
+                self.assertIn(repr(raw_value), str(error))
+
+    def test_invalid_scope_gate_values_abort_real_startup_before_the_database(self):
+        """Given an invalid gate key, When startup runs for real, Then it aborts naming the key and never reaches the database."""
+        cases = (
+            ("agent_scope_gate_history_turns", "-1"),
+            ("agent_scope_gate_history_turns", "true"),
+            ("agent_scope_gate_history_turns", "1.5"),
+            ("agent_scope_gate_history_turns", '"1"'),
+            ("agent_scope_gate_model", "5"),
+        )
+        for key, toml_value in cases:
+            with self.subTest(key=key, value=toml_value):
+                with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+                    config_path = self._scratch_config(directory, f"{key} = {toml_value}")
+                    result = self._run_probe(
+                        FAILING_STARTUP_PROBE, config_path, argv=(key,)
+                    )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(f"startup aborted on {key}", result.stdout)
+
+    def test_shipped_config_startup_reaches_agent_construction(self):
+        """Given the shipped config, When startup runs with the database mocked, Then it passes validation and builds the agent."""
+        result = self._run_probe(HAPPY_STARTUP_PROBE, "config.toml")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("startup reached agent construction", result.stdout)
 
 
 class DatabaseNameDerivationTests(unittest.TestCase):

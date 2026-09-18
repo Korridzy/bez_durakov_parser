@@ -18,6 +18,8 @@ from sqlalchemy.exc import ArgumentError, NoSuchModuleError
 
 from bd_shared.config import (
     AGENT_MODEL,
+    AGENT_SCOPE_GATE_HISTORY_TURNS,
+    AGENT_SCOPE_GATE_MODEL,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
     DATABASE_NAME,
@@ -350,6 +352,46 @@ async def rebuild_session_index() -> None:
     await sessions.seed(retained_ids)
 
 
+class ScopeGateConfigError(RuntimeError):
+    """Raised when a scope gate configuration key carries an unusable value."""
+
+    def __init__(self, message, *, key, observed, permitted):
+        super().__init__(message)
+        self.key = key
+        self.observed = observed
+        self.permitted = permitted
+
+
+def _resolve_scope_gate_model(value: object) -> str:
+    """Resolve agent_scope_gate_model; an empty value means the agent's own model.
+
+    The value is never stringified: a boolean or a number is a configuration mistake, and
+    silently rendering it as text would send the gate at a model name nobody wrote.
+    """
+    if type(value) is not str:
+        raise ScopeGateConfigError(
+            f"Invalid scope gate setting agent_scope_gate_model: observed {value!r} "
+            f"({type(value).__name__}); must be a string, empty to fall back to agent_model",
+            key="agent_scope_gate_model",
+            observed=value,
+            permitted="string",
+        )
+    return value.strip() or AGENT_MODEL
+
+
+def _validate_scope_gate_history_turns(value: object) -> int:
+    """Accept only a real integer of zero or more, so a bool, a float or "1" aborts startup."""
+    if not (type(value) is int and value >= 0):
+        raise ScopeGateConfigError(
+            f"Invalid scope gate setting agent_scope_gate_history_turns: observed {value!r} "
+            f"({type(value).__name__}); must be an integer greater than or equal to 0",
+            key="agent_scope_gate_history_turns",
+            observed=value,
+            permitted=0,
+        )
+    return value
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
@@ -371,6 +413,15 @@ async def startup_event():
             max_scope_chars=KNOWLEDGE_MAX_SCOPE_CHARS,
         )
         validate_limits(knowledge_limits)
+        scope_gate_model = _resolve_scope_gate_model(AGENT_SCOPE_GATE_MODEL)
+        scope_gate_history_turns = _validate_scope_gate_history_turns(
+            AGENT_SCOPE_GATE_HISTORY_TURNS
+        )
+        logger.info(
+            "Scope gate configured: model=%s, history_turns=%d",
+            scope_gate_model,
+            scope_gate_history_turns,
+        )
         if KNOWLEDGE_DIR is None:
             logger.warning(
                 "Knowledge folder is not configured (dataset.knowledge_dir is unset); the agent runs without dataset knowledge."
@@ -395,6 +446,9 @@ async def startup_event():
             )
     except KnowledgeError as error:
         logger.error("Knowledge folder is invalid: %s", error)
+        raise
+    except ScopeGateConfigError as error:
+        logger.error("Scope gate configuration is invalid: %s", error)
         raise
 
     # The discovered specs are logged by the helper and re-derived by ToolRegistry from the

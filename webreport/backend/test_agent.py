@@ -160,6 +160,10 @@ class TestKnowledgeConfig(knowledge_config_cases.KnowledgeConfigTests):
     pass
 
 
+class TestScopeGateConfig(knowledge_config_cases.ScopeGateConfigTests):
+    """The two scope gate keys and the startup validation that judges them."""
+
+
 class TestDatabaseNameDerivation(knowledge_config_cases.DatabaseNameDerivationTests):
     """DATABASE_NAME derivation for server and file-based URLs."""
 
