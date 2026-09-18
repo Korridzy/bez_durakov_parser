@@ -432,7 +432,9 @@ class TestPromptCases(unittest.TestCase):
                 "some_db",
                 limits,
             )
-            expected_prompt = (
+            # The boundary-rule prose that follows the scope heading is deliberately not
+            # pinned here; agent/knowledge.py's own suite covers it by sentinel substring.
+            expected_prefix = (
                 "Some text.\n\n"
                 "- Get data ONLY through the tools.\n"
                 "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
@@ -444,12 +446,14 @@ class TestPromptCases(unittest.TestCase):
                 "- Before answering a question covered by a listed topic, "
                 "call read_knowledge with that topic id.\n\n"
                 "## Knowledge topics\n\n"
-                "rules: Rules. Some summary paragraph text."
+                "rules: Rules. Some summary paragraph text.\n\n"
+                "## Dataset scope\n\nSome scope text.\n\n- "
             )
 
             actual_prompt = self.knowledge_module.compose_system_prompt(knowledge)
+            actual_prefix_bytes = actual_prompt.encode("utf-8")[: len(expected_prefix.encode("utf-8"))]
 
-            self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
+            self.assertEqual(expected_prefix.encode("utf-8"), actual_prefix_bytes)
 
 
 if __name__ == "__main__":

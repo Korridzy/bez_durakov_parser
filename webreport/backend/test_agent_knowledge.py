@@ -42,6 +42,15 @@ GAME_DOMAIN_FORBIDDEN_STRINGS: Final[tuple[str, ...]] = (
     "team",
 )
 
+# One stable substring per boundary rule. The rules' full prose is deliberately not pinned;
+# these sentinels only prove each of the four rules reached the prompt.
+BOUNDARY_RULE_SENTINELS: Final[tuple[str, ...]] = (
+    "Answer only within the dataset scope",
+    "decline in at most two sentences",
+    "naming that part",
+    "do not change the dataset scope",
+)
+
 
 class KnowledgeTypesTests(unittest.TestCase):
     @classmethod
@@ -1250,7 +1259,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             self.assertNotIn(retrieval_rule, neutral_prompt)
 
     def test_compose_system_prompt_with_knowledge_has_full_ordered_structure(self):
-        """Given three loaded topics, When composed, Then persona, seven rules, heading and ordered topics are exact."""
+        """Given three loaded topics, When composed, Then persona, seven rules, heading and ordered topics are exact up to the scope section."""
         limits = self._knowledge_limits()
         persona = "Some text."
 
@@ -1270,7 +1279,7 @@ class KnowledgeTypesTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
-            expected_prompt = (
+            expected_prefix = (
                 "Some text.\n\n"
                 "- Get data ONLY through the tools.\n"
                 "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
@@ -1285,16 +1294,64 @@ class KnowledgeTypesTests(unittest.TestCase):
                 "glossary: Glossary. Some summary paragraph text.\n"
                 "rules: Rules. Some summary paragraph text.\n"
                 "scoring: Scoring. Some summary paragraph text."
+                "\n\n## Dataset scope\n\nSome scope text.\n\n- "
             )
 
             prompt = self.knowledge_module.compose_system_prompt(knowledge)
 
-            self.assertEqual(prompt, expected_prompt)
+            self.assertEqual(prompt[: len(expected_prefix)], expected_prefix)
             self.assertIn(persona, prompt)
             self.assertEqual(
                 tuple(topic.id for topic in knowledge.topics),
                 ("glossary", "rules", "scoring"),
             )
+
+    def test_compose_system_prompt_renders_scope_verbatim_with_the_four_boundary_rules(self):
+        """Given a multi-line scope, When composed with knowledge, Then the heading, the untouched scope and all four rules are present in that order."""
+        limits = self._knowledge_limits()
+        scope_text = (
+            "Questions about catalogue records and lending activity.\n"
+            "Also  irregular   spacing, и строка на русском."
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "library"\npersona = "Some text."\n'
+                f'scope = """{scope_text}"""\n',
+                encoding="utf-8",
+            )
+            (folder_path / "catalogue.md").write_text(
+                "# Catalogue\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "library", limits)
+            self.assertEqual(knowledge.manifest.scope, scope_text)
+
+            prompt = self.knowledge_module.compose_system_prompt(knowledge)
+
+            self.assertIn("## Dataset scope", prompt)
+            self.assertIn(scope_text, prompt)
+            self.assertLess(
+                prompt.index("## Knowledge topics"),
+                prompt.index("## Dataset scope"),
+            )
+            self.assertLess(prompt.index("## Dataset scope"), prompt.index(scope_text))
+            for sentinel in BOUNDARY_RULE_SENTINELS:
+                with self.subTest(sentinel=sentinel):
+                    self.assertIn(sentinel, prompt)
+                    self.assertLess(prompt.index(scope_text), prompt.index(sentinel))
+                    rule_line = next(line for line in prompt.splitlines() if sentinel in line)
+                    self.assertTrue(rule_line.startswith("- "))
+
+    def test_compose_system_prompt_without_knowledge_omits_scope_and_boundary_rules(self):
+        """Given no knowledge, When the prompt is composed, Then neither the scope heading nor any boundary rule appears."""
+        prompt = self.knowledge_module.compose_system_prompt(None)
+
+        self.assertNotIn("## Dataset scope", prompt)
+        for sentinel in BOUNDARY_RULE_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel, prompt)
 
     def test_compose_system_prompt_suppresses_separator_after_terminal_punctuation(self):
         """Given punctuated and plain titles, When composed, Then only the plain title receives a separator period."""
