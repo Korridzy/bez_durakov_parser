@@ -1526,6 +1526,137 @@ class KnowledgeTypesTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 0, result.stdout)
 
+    def _run_startup_probe(self, probe_path, config_path, argv=()):
+        """Run a startup probe in a child process, the only reader of a scratch config."""
+        return subprocess.run(
+            [sys.executable, str(probe_path), *argv],
+            env={**os.environ, "BD_CONFIG_FILE": str(config_path),
+                 "PYTHONPATH": os.pathsep.join((str(Path(__file__).parent),
+                                                os.environ.get("PYTHONPATH", "")))},
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=60,
+        )
+
+    def test_invalid_scope_settings_abort_real_startup_naming_the_key(self):
+        """Given an invalid scope limit or gate key, When startup runs for real, Then it aborts naming that key before the database."""
+        config_module = importlib.import_module("bd_shared.config")
+        base_config = Path(inspect.getfile(config_module)).with_name("test_config.toml").read_text()
+        cases = (
+            ("knowledge_max_scope_chars", '"2000"'),
+            ("knowledge_max_scope_chars", "true"),
+            ("knowledge_max_scope_chars", "1.5"),
+            ("knowledge_max_scope_chars", "0"),
+            ("agent_scope_gate_model", "5"),
+            ("agent_scope_gate_history_turns", "-1"),
+            ("agent_scope_gate_history_turns", '"1"'),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            probe_path = Path(temp_dir) / "startup_probe.py"
+            probe_path.write_text(
+                "import asyncio\n"
+                "import sys\n"
+                "from unittest.mock import AsyncMock, patch\n"
+                "import main\n"
+                "from agent.knowledge import KnowledgeError\n"
+                "expected_key = sys.argv[1]\n"
+                "async def probe():\n"
+                "    with patch.object(main, 'initialize_tool_service_with_retry', "
+                "new=AsyncMock()) as db:\n"
+                "        try:\n"
+                "            await main.startup_event()\n"
+                "        except (KnowledgeError, main.ScopeGateConfigError) as error:\n"
+                "            assert error.key == expected_key, error.key\n"
+                "            assert expected_key in str(error), str(error)\n"
+                "            db.assert_not_called()\n"
+                "        else:\n"
+                "            raise AssertionError('invalid setting accepted: ' + expected_key)\n"
+                "    print('startup aborted on ' + expected_key)\n"
+                "asyncio.run(probe())\n"
+            )
+            for key, toml_value in cases:
+                with self.subTest(key=key, value=toml_value):
+                    config_path.write_text(base_config.replace(
+                        "[webreport]\n", f"[webreport]\n{key} = {toml_value}\n"
+                    ))
+                    result = self._run_startup_probe(probe_path, config_path, (key,))
+
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(f"startup aborted on {key}", result.stdout)
+
+    def test_manifest_scope_failures_abort_real_startup_naming_the_manifest_and_key(self):
+        """Given a missing, empty or over-long manifest scope, When startup runs for real, Then it aborts naming the manifest and the key."""
+        config_module = importlib.import_module("bd_shared.config")
+        base_config = Path(inspect.getfile(config_module)).with_name("test_config.toml").read_text()
+        # test_config.toml names the same database in its url and its docker_url, so the
+        # derived dataset name is this either way; declaring it keeps the scope the only
+        # defect under test instead of a dataset mismatch.
+        scratch_dataset = "bez_durakov_test"
+        over_long_limit = 40
+        cases = (
+            ("missing", None, "", ""),
+            ("empty", "", "", ""),
+            (
+                "over_long",
+                "S" * (over_long_limit + 1),
+                f"knowledge_max_scope_chars = {over_long_limit}\n",
+                f"scope is {over_long_limit + 1} characters, limit is {over_long_limit}",
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            probe_path = Path(temp_dir) / "startup_probe.py"
+            probe_path.write_text(
+                "import asyncio\n"
+                "import sys\n"
+                "from unittest.mock import AsyncMock, patch\n"
+                "import main\n"
+                "from agent.knowledge import KnowledgeError\n"
+                "expected_manifest, expected_detail = sys.argv[1], sys.argv[2]\n"
+                "async def probe():\n"
+                "    assert main.KNOWLEDGE_DIR is not None\n"
+                "    with patch.object(main, 'initialize_tool_service_with_retry', "
+                "new=AsyncMock()) as db:\n"
+                "        try:\n"
+                "            await main.startup_event()\n"
+                "        except KnowledgeError as error:\n"
+                "            assert error.key == 'scope', error.key\n"
+                "            assert expected_manifest in str(error), str(error)\n"
+                "            assert expected_detail in str(error), str(error)\n"
+                "            db.assert_not_called()\n"
+                "        else:\n"
+                "            raise AssertionError('invalid manifest scope accepted')\n"
+                "    print('startup aborted on scope')\n"
+                "asyncio.run(probe())\n"
+            )
+            for name, scope, webreport_extra, expected_detail in cases:
+                with self.subTest(case=name):
+                    folder_path = Path(temp_dir) / f"knowledge_{name}"
+                    folder_path.mkdir()
+                    manifest = f'dataset = "{scratch_dataset}"\npersona = "Some text."\n'
+                    if scope is not None:
+                        manifest += f'scope = "{scope}"\n'
+                    (folder_path / "manifest.toml").write_text(manifest, encoding="utf-8")
+                    (folder_path / "rules.md").write_text(
+                        "# Rules\n\nSome summary paragraph text.\n", encoding="utf-8"
+                    )
+                    config_path = Path(temp_dir) / f"config_{name}.toml"
+                    config_path.write_text(
+                        base_config
+                        .replace("[webreport]\n", f"[webreport]\n{webreport_extra}")
+                        .replace("[dataset]\n", f'[dataset]\nknowledge_dir = "{folder_path}"\n')
+                    )
+
+                    result = self._run_startup_probe(
+                        probe_path,
+                        config_path,
+                        (str(folder_path / "manifest.toml"), expected_detail),
+                    )
+
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("startup aborted on scope", result.stdout)
+
     def test_load_knowledge_rejects_each_below_one_limit_and_names_key(self):
         knowledge_error = self.knowledge_module.KnowledgeError
         limit_cases = (
