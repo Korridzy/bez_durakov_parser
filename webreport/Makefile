@@ -171,7 +171,7 @@ fetch-data: generate-env
 		exit 1; \
 	fi
 	@echo "🔄 Starting manual XLSM fetch..."
-	$(DOCKER_COMPOSE) exec -T data_collector python fetch_pipeline.py
+	$(DOCKER_COMPOSE) run --rm --no-deps data_collector python fetch_pipeline.py
 
 fetch-data-log:
 	@echo "📜 Fetch log since last run start (Ctrl+C to stop)..."

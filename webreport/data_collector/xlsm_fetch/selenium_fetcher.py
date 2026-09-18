@@ -9,6 +9,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
 from .base_fetcher import BaseFetcher
 import shutil
@@ -21,7 +23,9 @@ import hashlib
 class SeleniumFetcher(BaseFetcher):
     """Fetcher that uses Selenium browser automation to get files from Google Drive."""
 
-    def __init__(self, folder_url: str, download_dir: Optional[str] = None, headless: bool = True):
+    def __init__(
+        self, folder_url: str, download_dir: Optional[str] = None, headless: bool = True
+    ):
         """Initialize with Google Drive folder URL and optional download directory.
 
         Args:
@@ -55,15 +59,18 @@ class SeleniumFetcher(BaseFetcher):
             "download": {
                 "default_directory": str(target_download_dir.resolve()),
                 "prompt_for_download": False,
-                "directory_upgrade": True
+                "directory_upgrade": True,
             }
         }
 
         import json
-        with open(preferences_file, 'w', encoding='utf-8') as f:
+
+        with open(preferences_file, "w", encoding="utf-8") as f:
             json.dump(preferences_data, f, indent=2)
 
-        self._log(f"Created Chrome profile with download directory: {target_download_dir}")
+        self._log(
+            f"Created Chrome profile with download directory: {target_download_dir}"
+        )
 
         # Setup Chrome options
         chrome_options = ChromeOptions()
@@ -92,8 +99,7 @@ class SeleniumFetcher(BaseFetcher):
         chrome_options.add_argument("--disable-features=TranslateUI")
         chrome_options.add_argument("--disable-ipc-flooding-protection")
         chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--lang=en-US")
         chrome_options.add_argument("--disable-web-security")
         chrome_options.add_argument("--allow-running-insecure-content")
 
@@ -103,10 +109,14 @@ class SeleniumFetcher(BaseFetcher):
             driver.set_page_load_timeout(60)
 
             self._log("Opening Google Drive folder...")
-            driver.get(self.folder_url)
-
-            self._log("Waiting 60 seconds for page to load...")
-            time.sleep(60)
+            separator = "&" if "?" in self.folder_url else "?"
+            driver.get(f"{self.folder_url}{separator}hl=en")
+            WebDriverWait(driver, 60).until(
+                lambda current_driver: current_driver.find_elements(
+                    By.CSS_SELECTOR,
+                    "[role='row'][data-id]",
+                )
+            )
 
             # Step 1: Scroll through files and select all
             self._scroll_and_select_files(driver)
@@ -118,7 +128,7 @@ class SeleniumFetcher(BaseFetcher):
                     "❌ Failed to find or click download button",
                     level=logging.ERROR,
                 )
-                return []
+                raise RuntimeError("Failed to find or click download button")
 
             # Step 3: Wait for download to complete
             zip_path = self._wait_for_download_completion(driver, target_download_dir)
@@ -127,10 +137,12 @@ class SeleniumFetcher(BaseFetcher):
                     "❌ Download did not complete successfully",
                     level=logging.ERROR,
                 )
-                return []
+                raise RuntimeError("Download did not complete successfully")
 
             # Step 4: Process downloaded archive
-            added_files = self._process_downloaded_archive(zip_path, target_download_dir)
+            added_files = self._process_downloaded_archive(
+                zip_path, target_download_dir
+            )
 
             # Return the actual file names instead of dummy names
             self._log(f"Fetch completed. Found {len(added_files)} new files.")
@@ -142,7 +154,7 @@ class SeleniumFetcher(BaseFetcher):
                 level=logging.ERROR,
                 exc_info=True,
             )
-            return []
+            raise
 
         finally:
             if driver:
@@ -167,6 +179,68 @@ class SeleniumFetcher(BaseFetcher):
         """
         self._log("Starting to scroll down (scrolling container)...")
 
+        try:
+            rows = WebDriverWait(driver, 60).until(
+                lambda current_driver: current_driver.find_elements(
+                    By.CSS_SELECTOR,
+                    "[role='row'][data-id]",
+                )
+            )
+        except TimeoutException:
+            rows = []
+
+        if rows:
+            rows[0].click()
+            seen_ids = {row.get_attribute("data-id") for row in rows}
+
+            while True:
+                ActionChains(driver).move_to_element(rows[-1]).scroll_by_amount(
+                    0,
+                    800,
+                ).perform()
+
+                try:
+                    rows = WebDriverWait(driver, 5).until(
+                        lambda current_driver: (
+                            (
+                                current_rows
+                                if {
+                                    row.get_attribute("data-id") for row in current_rows
+                                }
+                                - seen_ids
+                                else False
+                            )
+                            if (
+                                current_rows := current_driver.find_elements(
+                                    By.CSS_SELECTOR,
+                                    "[role='row'][data-id]",
+                                )
+                            )
+                            else False
+                        )
+                    )
+                except TimeoutException:
+                    break
+
+                seen_ids.update(row.get_attribute("data-id") for row in rows)
+
+            ActionChains(driver).key_down(Keys.SHIFT).click(rows[-1]).key_up(
+                Keys.SHIFT
+            ).perform()
+            WebDriverWait(driver, 10).until(
+                lambda current_driver: (
+                    len(
+                        current_driver.find_elements(
+                            By.CSS_SELECTOR,
+                            "[role='row'][aria-selected='true']",
+                        )
+                    )
+                    == len(seen_ids)
+                )
+            )
+            self._log(f"Selected {len(seen_ids)} files")
+            return
+
         # Send ArrowDown directly to the browser window (no element detection)
         max_presses = 500
         stagnation_limit = 60
@@ -175,7 +249,12 @@ class SeleniumFetcher(BaseFetcher):
 
         def count_items():
             try:
-                return int(driver.execute_script("return (document.querySelectorAll('[data-id]').length)") or 0)
+                return int(
+                    driver.execute_script(
+                        "return (document.querySelectorAll('[data-id]').length)"
+                    )
+                    or 0
+                )
             except Exception:
                 return 0
 
@@ -193,8 +272,10 @@ class SeleniumFetcher(BaseFetcher):
             except Exception:
                 try:
                     # fallback: send to body element
-                    body = driver.find_element(By.TAG_NAME, 'body')
-                    ActionChains(driver).move_to_element(body).send_keys(Keys.ARROW_DOWN).perform()
+                    body = driver.find_element(By.TAG_NAME, "body")
+                    ActionChains(driver).move_to_element(body).send_keys(
+                        Keys.ARROW_DOWN
+                    ).perform()
                 except Exception:
                     pass
 
@@ -208,24 +289,30 @@ class SeleniumFetcher(BaseFetcher):
                 presses_since_last_growth = presses - last_growth_press
                 last_growth_press = presses
                 stagnation = 0
-                self._log(f"Detected growth: {current_count} -> {new_count} (after {presses_since_last_growth} presses, previous stagnation={prev_stagnation})")
+                self._log(
+                    f"Detected growth: {current_count} -> {new_count} (after {presses_since_last_growth} presses, previous stagnation={prev_stagnation})"
+                )
                 current_count = new_count
             else:
                 stagnation += 1
 
-        self._log(f"Key-scrolling finished after {presses} presses, items={current_count}")
+        self._log(
+            f"Key-scrolling finished after {presses} presses, items={current_count}"
+        )
 
         # Select all files with Ctrl+A
         try:
-            ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-            self._log('Sent Ctrl+A to select all files')
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("a").key_up(
+                Keys.CONTROL
+            ).perform()
+            self._log("Sent Ctrl+A to select all files")
         except Exception:
             try:
                 # fallback: send via ActionChains without key_down/up
-                ActionChains(driver).send_keys(Keys.CONTROL, 'a').perform()
-                self._log('Sent Ctrl+A (fallback)')
+                ActionChains(driver).send_keys(Keys.CONTROL, "a").perform()
+                self._log("Sent Ctrl+A (fallback)")
             except Exception:
-                self._log('Failed to send Ctrl+A', level=logging.WARNING)
+                self._log("Failed to send Ctrl+A", level=logging.WARNING)
 
         # wait for the selection to be registered and toolbar to appear
         time.sleep(10)
@@ -239,19 +326,62 @@ class SeleniumFetcher(BaseFetcher):
         Returns:
             True if download button was found and clicked successfully, False otherwise
         """
+        selected_rows = driver.find_elements(
+            By.CSS_SELECTOR,
+            "[role='row'][aria-selected='true']",
+        )
+        if selected_rows:
+            selected_rows[-1].send_keys(Keys.SHIFT, Keys.F10)
+            try:
+                menu_items = WebDriverWait(driver, 10).until(
+                    lambda current_driver: [
+                        item
+                        for item in current_driver.find_elements(
+                            By.CSS_SELECTOR,
+                            "[role='menuitem']",
+                        )
+                        if item.is_displayed()
+                        and (item.get_attribute("textContent") or "").strip()
+                        == "Download"
+                    ]
+                )
+            except TimeoutException:
+                menu_items = []
+
+            if menu_items:
+                driver.execute_script(
+                    "arguments[0].click()",
+                    menu_items[0],
+                )
+                self._log("Clicked selected-items Download action")
+                return True
+
+        for button in driver.find_elements(
+            By.CSS_SELECTOR,
+            "button[aria-label='Download']",
+        ):
+            if button.is_displayed():
+                driver.execute_script("arguments[0].click()", button)
+                self._log("Clicked native Download button")
+                return True
+
         self._log("=== SEARCHING BY PROPERTY COMBINATION ===")
-        self._log("Looking for elements with: role='button', cursor='pointer', blue text, focusable, active, top-right quadrant")
+        self._log(
+            "Looking for elements with: role='button', cursor='pointer', blue text, focusable, active, top-right quadrant"
+        )
 
         try:
             # Get screen dimensions
-            screen_size = driver.execute_script("return {width: window.innerWidth, height: window.innerHeight};")
-            screen_width = screen_size['width']
-            screen_height = screen_size['height']
+            screen_size = driver.execute_script(
+                "return {width: window.innerWidth, height: window.innerHeight};"
+            )
+            screen_width = screen_size["width"]
+            screen_height = screen_size["height"]
 
             # Calculate top-right quadrant boundaries (divide screen into 3x3 grid)
             # Top-right quadrant: x > 2/3 * width, y < 1/3 * height
-            min_x = (2/3) * screen_width
-            max_y = (1/3) * screen_height
+            min_x = (2 / 3) * screen_width
+            max_y = (1 / 3) * screen_height
 
             self._log(f"Screen size: {screen_width}x{screen_height}")
             self._log(f"Top-right quadrant: x > {min_x}, y < {max_y}")
@@ -272,12 +402,13 @@ class SeleniumFetcher(BaseFetcher):
                     rect = driver.execute_script(
                         "var r=arguments[0].getBoundingClientRect(); "
                         "return {top:r.top, left:r.left, width:r.width, height:r.height, "
-                        "right:r.right, bottom:r.bottom};", elem
+                        "right:r.right, bottom:r.bottom};",
+                        elem,
                     )
 
                     # Check if in top-right quadrant
-                    elem_x = rect['left']
-                    elem_y = rect['top']
+                    elem_x = rect["left"]
+                    elem_y = rect["top"]
 
                     if elem_x <= min_x or elem_y >= max_y:
                         continue
@@ -290,19 +421,20 @@ class SeleniumFetcher(BaseFetcher):
                         "  color: styles.color, "
                         "  visibility: styles.visibility, "
                         "  display: styles.display "
-                        "};", elem
+                        "};",
+                        elem,
                     )
 
                     # Check cursor pointer
-                    if css_props.get('cursor') != 'pointer':
+                    if css_props.get("cursor") != "pointer":
                         continue
 
                     # Check if element has blue text (RGB values for blue color)
-                    color = css_props.get('color', '')
+                    color = css_props.get("color", "")
                     is_blue = False
-                    if 'rgb(' in color:
+                    if "rgb(" in color:
                         # Extract RGB values
-                        rgb_match = re.search(r'rgb\((\d+),\s*(\d+),\s*(\d+)\)', color)
+                        rgb_match = re.search(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", color)
                         if rgb_match:
                             r, g, b = map(int, rgb_match.groups())
                             # Blue text typically has: low red, low green, high blue
@@ -318,31 +450,42 @@ class SeleniumFetcher(BaseFetcher):
                         "var el=arguments[0]; var result={}; "
                         "for(var i=0; i<el.attributes.length; i++) {"
                         "  result[el.attributes[i].name] = el.attributes[i].value; "
-                        "} return result;", elem
+                        "} return result;",
+                        elem,
                     )
 
                     # Check if focusable (tabindex >= 0 or naturally focusable)
-                    tabindex = attrs.get('tabindex')
-                    is_focusable = (tabindex is not None and int(tabindex) >= 0) or elem.tag_name.lower() in ['button', 'a', 'input', 'select', 'textarea']
+                    tabindex = attrs.get("tabindex")
+                    is_focusable = (
+                        tabindex is not None and int(tabindex) >= 0
+                    ) or elem.tag_name.lower() in [
+                        "button",
+                        "a",
+                        "input",
+                        "select",
+                        "textarea",
+                    ]
 
                     if not is_focusable:
                         continue
 
                     # Check if active (not disabled)
-                    aria_disabled = attrs.get('aria-disabled', '').lower()
-                    disabled = attrs.get('disabled')
-                    is_active = aria_disabled != 'true' and disabled is None
+                    aria_disabled = attrs.get("aria-disabled", "").lower()
+                    disabled = attrs.get("disabled")
+                    is_active = aria_disabled != "true" and disabled is None
 
                     if not is_active:
                         continue
 
                     # If all conditions are met, add to matching elements
-                    matching_elements.append({
-                        'element': elem,
-                        'position': rect,
-                        'css_props': css_props,
-                        'attrs': attrs
-                    })
+                    matching_elements.append(
+                        {
+                            "element": elem,
+                            "position": rect,
+                            "css_props": css_props,
+                            "attrs": attrs,
+                        }
+                    )
 
                 except Exception as ex:
                     self._log(
@@ -351,16 +494,18 @@ class SeleniumFetcher(BaseFetcher):
                     )
                     continue
 
-            self._log(f"✅ Found {len(matching_elements)} elements matching all criteria")
+            self._log(
+                f"✅ Found {len(matching_elements)} elements matching all criteria"
+            )
 
             # Analyze each matching element
             for i, elem_data in enumerate(matching_elements, start=1):
                 self._log(f"\n--- MATCHING ELEMENT #{i} DETAILED ANALYSIS ---")
-                self._analyze_element_details(driver, elem_data['element'])
+                self._analyze_element_details(driver, elem_data["element"])
 
             # Click the first matching element if found
             if matching_elements:
-                download_button = matching_elements[0]['element']
+                download_button = matching_elements[0]["element"]
                 self._log("\n🖱️ FOCUSING AND PRESSING SPACE ON DOWNLOAD BUTTON...")
 
                 try:
@@ -368,7 +513,9 @@ class SeleniumFetcher(BaseFetcher):
                     ActionChains(driver).move_to_element(download_button).perform()
                     time.sleep(1)  # Give time for focus
                     download_button.send_keys(Keys.SPACE)
-                    self._log("✅ Download button focused and space pressed successfully")
+                    self._log(
+                        "✅ Download button focused and space pressed successfully"
+                    )
 
                     return True  # Download button found and clicked
 
@@ -403,11 +550,13 @@ class SeleniumFetcher(BaseFetcher):
         # Get initial files in target download directory
         initial_files = set()
         if target_download_dir.exists():
-            initial_files = set(f.name for f in target_download_dir.iterdir() if f.is_file())
+            initial_files = set(
+                f.name for f in target_download_dir.iterdir() if f.is_file()
+            )
         self._log(f"Initial files in target directory: {len(initial_files)}")
 
         max_wait_time = 300  # 5 minutes maximum wait
-        check_interval = 5   # Check every 5 seconds
+        check_interval = 5  # Check every 5 seconds
         elapsed_time = 0
 
         while elapsed_time < max_wait_time:
@@ -415,22 +564,28 @@ class SeleniumFetcher(BaseFetcher):
             elapsed_time += check_interval
 
             if not target_download_dir.exists():
-                self._log(f"Target directory doesn't exist yet, waiting... ({elapsed_time}s)")
+                self._log(
+                    f"Target directory doesn't exist yet, waiting... ({elapsed_time}s)"
+                )
                 continue
 
             # Get current files in target directory
-            current_files = set(f.name for f in target_download_dir.iterdir() if f.is_file())
+            current_files = set(
+                f.name for f in target_download_dir.iterdir() if f.is_file()
+            )
             new_files = current_files - initial_files
 
             # Check for .crdownload files (Chrome partial downloads)
-            partial_downloads = [f for f in current_files if f.endswith('.crdownload')]
+            partial_downloads = [f for f in current_files if f.endswith(".crdownload")]
 
             if partial_downloads:
-                self._log(f"📥 Download in progress: {partial_downloads} ({elapsed_time}s)")
+                self._log(
+                    f"📥 Download in progress: {partial_downloads} ({elapsed_time}s)"
+                )
                 continue
 
             # Check for new zip files
-            new_zip_files = [f for f in new_files if f.lower().endswith('.zip')]
+            new_zip_files = [f for f in new_files if f.lower().endswith(".zip")]
 
             if new_zip_files:
                 zip_file = new_zip_files[0]
@@ -464,11 +619,15 @@ class SeleniumFetcher(BaseFetcher):
             self._log("🔍 Final target directory contents:")
             for file_path in all_files:
                 if file_path.is_file():
-                    self._log(f"  - {file_path.name} ({file_path.stat().st_size} bytes)")
+                    self._log(
+                        f"  - {file_path.name} ({file_path.stat().st_size} bytes)"
+                    )
 
         return None
 
-    def _process_downloaded_archive(self, zip_path: Path, target_download_dir: Path) -> List[str]:
+    def _process_downloaded_archive(
+        self, zip_path: Path, target_download_dir: Path
+    ) -> List[str]:
         """Unpack downloaded zip, compare its .xlsm files with target directory and copy new/different ones.
 
         After processing removes the downloaded zip and temporary extraction directory.
@@ -483,7 +642,7 @@ class SeleniumFetcher(BaseFetcher):
         try:
             # Extract archive
             try:
-                with zipfile.ZipFile(zip_path, 'r') as zf:
+                with zipfile.ZipFile(zip_path, "r") as zf:
                     zf.extractall(tmp_dir)
                 self._log(f"✅ Extracted archive to temporary dir: {tmp_dir}")
             except Exception as ex:
@@ -497,15 +656,15 @@ class SeleniumFetcher(BaseFetcher):
             # Helper to compute SHA256 of a file
             def file_hash(p: Path) -> str:
                 h = hashlib.sha256()
-                with p.open('rb') as f:
-                    for chunk in iter(lambda: f.read(8192), b''):
+                with p.open("rb") as f:
+                    for chunk in iter(lambda: f.read(8192), b""):
                         h.update(chunk)
                 return h.hexdigest()
 
             # Gather existing files hashes in target directory
             existing_files = {}
             if target_download_dir.exists():
-                for p in target_download_dir.glob('*.xlsm'):
+                for p in target_download_dir.glob("*.xlsm"):
                     if p.is_file():
                         try:
                             existing_files[p.name] = file_hash(p)
@@ -513,7 +672,7 @@ class SeleniumFetcher(BaseFetcher):
                             existing_files[p.name] = None
 
             # Find extracted .xlsm files
-            extracted_files = [p for p in tmp_dir.rglob('*.xlsm') if p.is_file()]
+            extracted_files = [p for p in tmp_dir.rglob("*.xlsm") if p.is_file()]
             self._log(f"Found {len(extracted_files)} extracted .xlsm files")
 
             added_files = []
@@ -585,7 +744,8 @@ class SeleniumFetcher(BaseFetcher):
                 "var el=arguments[0]; var result={}; "
                 "for(var i=0; i<el.attributes.length; i++) {"
                 "  result[el.attributes[i].name] = el.attributes[i].value; "
-                "} return result;", elem
+                "} return result;",
+                elem,
             )
             self._log(f"Attributes: {attrs}")
 
@@ -593,7 +753,8 @@ class SeleniumFetcher(BaseFetcher):
             rect = driver.execute_script(
                 "var r=arguments[0].getBoundingClientRect(); "
                 "return {top:r.top, left:r.left, width:r.width, height:r.height, "
-                "right:r.right, bottom:r.bottom};", elem
+                "right:r.right, bottom:r.bottom};",
+                elem,
             )
             self._log(f"Position: {rect}")
 
@@ -615,7 +776,8 @@ class SeleniumFetcher(BaseFetcher):
                 "  borderRadius: styles.borderRadius, "
                 "  padding: styles.padding, "
                 "  margin: styles.margin "
-                "};", elem
+                "};",
+                elem,
             )
             self._log(f"CSS Properties: {css_props}")
 
@@ -627,7 +789,8 @@ class SeleniumFetcher(BaseFetcher):
                 "for(var i=0; i<el.attributes.length; i++) {"
                 "  attrs[el.attributes[i].name] = el.attributes[i].value; "
                 "} "
-                "return {tagName: el.tagName, attributes: attrs};", elem
+                "return {tagName: el.tagName, attributes: attrs};",
+                elem,
             )
             self._log(f"Parent: {parent_info}")
 
@@ -649,7 +812,8 @@ class SeleniumFetcher(BaseFetcher):
                 "  } "
                 "  return '/' + parts.join('/'); "
                 "} "
-                "return getXPath(arguments[0]);", elem
+                "return getXPath(arguments[0]);",
+                elem,
             )
             self._log(f"Generated XPath: {xpath}")
 
@@ -675,7 +839,8 @@ class SeleniumFetcher(BaseFetcher):
                 "  } "
                 "  return path.join(' > '); "
                 "} "
-                "return getCSSPath(arguments[0]);", elem
+                "return getCSSPath(arguments[0]);",
+                elem,
             )
             self._log(f"Generated CSS Selector: {css_selector}")
 
@@ -685,7 +850,8 @@ class SeleniumFetcher(BaseFetcher):
                 "return {"
                 "  onclick: el.onclick ? 'present' : 'none', "
                 "  hasEventListeners: typeof el._eventListeners !== 'undefined' ? 'possible' : 'unknown' "
-                "};", elem
+                "};",
+                elem,
             )
             self._log(f"Event Handlers: {events_info}")
 
@@ -697,7 +863,8 @@ class SeleniumFetcher(BaseFetcher):
                 "  innerText: el.innerText, "
                 "  innerHTML: el.innerHTML, "
                 "  outerHTML: el.outerHTML.substring(0, 500) "
-                "};", elem
+                "};",
+                elem,
             )
             self._log(f"Text Content: {text_info['textContent']}")
             self._log(f"Inner Text: {text_info['innerText']}")
@@ -707,33 +874,36 @@ class SeleniumFetcher(BaseFetcher):
             # Unique characteristics for future identification
             unique_props = []
 
-            if attrs.get('id'):
+            if attrs.get("id"):
                 unique_props.append(f"id='{attrs['id']}'")
-            if attrs.get('class'):
+            if attrs.get("class"):
                 unique_props.append(f"class='{attrs['class']}'")
-            if attrs.get('role'):
+            if attrs.get("role"):
                 unique_props.append(f"role='{attrs['role']}'")
-            if attrs.get('data-tooltip'):
+            if attrs.get("data-tooltip"):
                 unique_props.append(f"data-tooltip='{attrs['data-tooltip']}'")
-            if attrs.get('aria-label'):
+            if attrs.get("aria-label"):
                 unique_props.append(f"aria-label='{attrs['aria-label']}'")
 
             # Add CSS-based identification
-            if css_props.get('backgroundColor') and css_props['backgroundColor'] != 'rgba(0, 0, 0, 0)':
+            if (
+                css_props.get("backgroundColor")
+                and css_props["backgroundColor"] != "rgba(0, 0, 0, 0)"
+            ):
                 unique_props.append(f"background-color: {css_props['backgroundColor']}")
 
             self._log(f"🎯 UNIQUE IDENTIFICATION PROPERTIES: {unique_props}")
 
             # Alternative selectors for future use
             alt_selectors = []
-            if attrs.get('id'):
+            if attrs.get("id"):
                 alt_selectors.append(f"#{attrs['id']}")
-            if attrs.get('class'):
-                classes = attrs['class'].replace(' ', '.')
+            if attrs.get("class"):
+                classes = attrs["class"].replace(" ", ".")
                 alt_selectors.append(f"{tag_name}.{classes}")
-            if attrs.get('role'):
+            if attrs.get("role"):
                 alt_selectors.append(f"[role='{attrs['role']}']")
-            if attrs.get('data-tooltip'):
+            if attrs.get("data-tooltip"):
                 alt_selectors.append(f"[data-tooltip='{attrs['data-tooltip']}']")
 
             self._log(f"🔍 ALTERNATIVE SELECTORS: {alt_selectors}")
@@ -761,7 +931,9 @@ class SeleniumFetcher(BaseFetcher):
                 )
                 return
 
-            self._log(f"✅ Found {len(elements)} element(s) with exact text 'Скачать все'")
+            self._log(
+                f"✅ Found {len(elements)} element(s) with exact text 'Скачать все'"
+            )
 
             for i, elem in enumerate(elements, start=1):
                 self._log(f"\n--- ELEMENT #{i} DETAILED ANALYSIS ---")
@@ -776,7 +948,8 @@ class SeleniumFetcher(BaseFetcher):
                         "var el=arguments[0]; var result={}; "
                         "for(var i=0; i<el.attributes.length; i++) {"
                         "  result[el.attributes[i].name] = el.attributes[i].value; "
-                        "} return result;", elem
+                        "} return result;",
+                        elem,
                     )
                     self._log(f"Attributes: {attrs}")
 
@@ -784,7 +957,8 @@ class SeleniumFetcher(BaseFetcher):
                     rect = driver.execute_script(
                         "var r=arguments[0].getBoundingClientRect(); "
                         "return {top:r.top, left:r.left, width:r.width, height:r.height, "
-                        "right:r.right, bottom:r.bottom};", elem
+                        "right:r.right, bottom:r.bottom};",
+                        elem,
                     )
                     self._log(f"Position: {rect}")
 
@@ -806,7 +980,8 @@ class SeleniumFetcher(BaseFetcher):
                         "  borderRadius: styles.borderRadius, "
                         "  padding: styles.padding, "
                         "  margin: styles.margin "
-                        "};", elem
+                        "};",
+                        elem,
                     )
                     self._log(f"CSS Properties: {css_props}")
 
@@ -818,7 +993,8 @@ class SeleniumFetcher(BaseFetcher):
                         "for(var i=0; i<el.attributes.length; i++) {"
                         "  attrs[el.attributes[i].name] = el.attributes[i].value; "
                         "} "
-                        "return {tagName: el.tagName, attributes: attrs};", elem
+                        "return {tagName: el.tagName, attributes: attrs};",
+                        elem,
                     )
                     self._log(f"Parent: {parent_info}")
 
@@ -840,7 +1016,8 @@ class SeleniumFetcher(BaseFetcher):
                         "  } "
                         "  return '/' + parts.join('/'); "
                         "} "
-                        "return getXPath(arguments[0]);", elem
+                        "return getXPath(arguments[0]);",
+                        elem,
                     )
                     self._log(f"Generated XPath: {xpath}")
 
@@ -866,7 +1043,8 @@ class SeleniumFetcher(BaseFetcher):
                         "  } "
                         "  return path.join(' > '); "
                         "} "
-                        "return getCSSPath(arguments[0]);", elem
+                        "return getCSSPath(arguments[0]);",
+                        elem,
                     )
                     self._log(f"Generated CSS Selector: {css_selector}")
 
@@ -876,7 +1054,8 @@ class SeleniumFetcher(BaseFetcher):
                         "return {"
                         "  onclick: el.onclick ? 'present' : 'none', "
                         "  hasEventListeners: typeof el._eventListeners !== 'undefined' ? 'possible' : 'unknown' "
-                        "};", elem
+                        "};",
+                        elem,
                     )
                     self._log(f"Event Handlers: {events_info}")
 
@@ -888,7 +1067,8 @@ class SeleniumFetcher(BaseFetcher):
                         "  innerText: el.innerText, "
                         "  innerHTML: el.innerHTML, "
                         "  outerHTML: el.outerHTML.substring(0, 500) "
-                        "};", elem
+                        "};",
+                        elem,
                     )
                     self._log(f"Text Content: {text_info['textContent']}")
                     self._log(f"Inner Text: {text_info['innerText']}")
@@ -898,34 +1078,41 @@ class SeleniumFetcher(BaseFetcher):
                     # Unique characteristics for future identification
                     unique_props = []
 
-                    if attrs.get('id'):
+                    if attrs.get("id"):
                         unique_props.append(f"id='{attrs['id']}'")
-                    if attrs.get('class'):
+                    if attrs.get("class"):
                         unique_props.append(f"class='{attrs['class']}'")
-                    if attrs.get('role'):
+                    if attrs.get("role"):
                         unique_props.append(f"role='{attrs['role']}'")
-                    if attrs.get('data-tooltip'):
+                    if attrs.get("data-tooltip"):
                         unique_props.append(f"data-tooltip='{attrs['data-tooltip']}'")
-                    if attrs.get('aria-label'):
+                    if attrs.get("aria-label"):
                         unique_props.append(f"aria-label='{attrs['aria-label']}'")
 
                     # Add CSS-based identification
-                    if css_props.get('backgroundColor') and css_props['backgroundColor'] != 'rgba(0, 0, 0, 0)':
-                        unique_props.append(f"background-color: {css_props['backgroundColor']}")
+                    if (
+                        css_props.get("backgroundColor")
+                        and css_props["backgroundColor"] != "rgba(0, 0, 0, 0)"
+                    ):
+                        unique_props.append(
+                            f"background-color: {css_props['backgroundColor']}"
+                        )
 
                     self._log(f"🎯 UNIQUE IDENTIFICATION PROPERTIES: {unique_props}")
 
                     # Alternative selectors for future use
                     alt_selectors = []
-                    if attrs.get('id'):
+                    if attrs.get("id"):
                         alt_selectors.append(f"#{attrs['id']}")
-                    if attrs.get('class'):
-                        classes = attrs['class'].replace(' ', '.')
+                    if attrs.get("class"):
+                        classes = attrs["class"].replace(" ", ".")
                         alt_selectors.append(f"{tag_name}.{classes}")
-                    if attrs.get('role'):
+                    if attrs.get("role"):
                         alt_selectors.append(f"[role='{attrs['role']}']")
-                    if attrs.get('data-tooltip'):
-                        alt_selectors.append(f"[data-tooltip='{attrs['data-tooltip']}']")
+                    if attrs.get("data-tooltip"):
+                        alt_selectors.append(
+                            f"[data-tooltip='{attrs['data-tooltip']}']"
+                        )
 
                     self._log(f"🔍 ALTERNATIVE SELECTORS: {alt_selectors}")
 

@@ -3,33 +3,51 @@
 Adapted from root xlsm_fetch.py for use as an importable module
 called by APScheduler. Exposes run_fetch() as the main entry point.
 """
+
 import logging
 from collections.abc import Iterable
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bd_shared.bd_game import BdGame
 from bd_shared.config import XLSM_FETCH_CONFIG
 from bd_shared.db_helpers import initialize_database, save_game_to_database
-from xlsm_fetch import SeleniumFetcher
+
+if TYPE_CHECKING:
+    from .xlsm_fetch import SeleniumFetcher
+else:
+    SeleniumFetcher = import_module(
+        f"{__package__}.xlsm_fetch" if __package__ else "xlsm_fetch"
+    ).SeleniumFetcher
 
 
 logger = logging.getLogger(__name__)
 
 
-def create_fetcher(mode: str, folder_url: str, cfg: dict | None = None, headless: bool = True) -> SeleniumFetcher:
+def create_fetcher(
+    mode: str,
+    folder_url: str,
+    cfg: dict[str, str | list[str] | int] | None = None,
+    headless: bool = True,
+) -> SeleniumFetcher:
     download_dir = None
     if cfg is not None:
-        configured_download_dir = cfg.get('download_dir')
+        configured_download_dir = cfg.get("download_dir")
         if configured_download_dir is not None:
             download_dir = str(configured_download_dir)
 
-    if mode == 'browser_selenium':
+    if mode == "browser_selenium":
         return SeleniumFetcher(folder_url, download_dir, headless=headless)
-    elif mode == 'public_api':
-        raise NotImplementedError("Fetch mode 'public_api' is not supported yet. Use 'browser_selenium'.")
-    elif mode == 'gdown':
-        raise NotImplementedError("Fetch mode 'gdown' is not supported yet. Use 'browser_selenium'.")
+    elif mode == "public_api":
+        raise NotImplementedError(
+            "Fetch mode 'public_api' is not supported yet. Use 'browser_selenium'."
+        )
+    elif mode == "gdown":
+        raise NotImplementedError(
+            "Fetch mode 'gdown' is not supported yet. Use 'browser_selenium'."
+        )
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -66,12 +84,11 @@ def process_downloaded_files(files, download_dir):
     normalized_files: list[str] = []
     for file_entry in files:
         if isinstance(file_entry, dict):
-            normalized_files.append(file_entry.get('name', 'unknown'))
+            normalized_files.append(file_entry.get("name", "unknown"))
         else:
             normalized_files.append(file_entry)
 
     for file_name in normalized_files:
-
         file_path = Path(download_dir) / file_name
 
         logger.info("Processing downloaded file: %s", file_name)
@@ -89,7 +106,9 @@ def process_downloaded_files(files, download_dir):
             if save_game_to_database(game, db):
                 successful_saves += 1
             else:
-                logger.warning("Failed to save downloaded file to database: %s", file_name)
+                logger.warning(
+                    "Failed to save downloaded file to database: %s", file_name
+                )
         else:
             logger.error("Failed to parse downloaded file: %s", file_name)
 
@@ -131,26 +150,31 @@ def run_fetch() -> list[str]:
 
     config = XLSM_FETCH_CONFIG
 
-    if not config.get('google_drive_folder_url'):
-        raise ValueError("google_drive_folder_url is required in config.toml [xlsm_fetch] section")
+    if not config.get("google_drive_folder_url"):
+        raise ValueError(
+            "google_drive_folder_url is required in config.toml [xlsm_fetch] section"
+        )
 
     # Always headless in scheduled mode
     headless = True
 
-    modes_config = config.get('modes', ['browser_selenium'])
+    modes_config = config.get("modes", ["browser_selenium"])
     if isinstance(modes_config, str):
         modes_to_try = [modes_config]
     elif isinstance(modes_config, Iterable):
         modes_to_try = [str(mode) for mode in modes_config]
     else:
         raise TypeError("xlsm_fetch.modes must be a string or iterable of strings")
-    logger.info(f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}")
+    logger.info(
+        f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}"
+    )
 
-    folder_url = config['google_drive_folder_url']
+    folder_url = config["google_drive_folder_url"]
     logger.info(f"Folder URL: {folder_url}")
 
     files = []
     download_dir = None
+    fetch_succeeded = False
 
     for mode in modes_to_try:
         logger.info(f"Trying mode: {mode}")
@@ -159,12 +183,9 @@ def run_fetch() -> list[str]:
             fetcher = create_fetcher(mode, folder_url, config, headless=headless)
             files = fetcher.fetch()
             download_dir = fetcher.download_dir
-
-            if files:
-                logger.info(f"Successfully fetched {len(files)} files using {mode}")
-                break
-            else:
-                logger.warning(f"No files found using {mode}")
+            fetch_succeeded = True
+            logger.info(f"Successfully fetched {len(files)} files using {mode}")
+            break
 
         except Exception as e:
             logger.error(f"Error with {mode}: {e}")
@@ -172,8 +193,12 @@ def run_fetch() -> list[str]:
                 raise
             continue
 
-    if not files:
+    if not fetch_succeeded:
         logger.warning("All methods failed")
+        return []
+
+    if not files:
+        logger.info("No new files found")
         return []
 
     _ = process_downloaded_files(files, download_dir)
@@ -181,6 +206,8 @@ def run_fetch() -> list[str]:
     return files
 
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     _ = run_fetch()

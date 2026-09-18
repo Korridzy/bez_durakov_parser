@@ -10,4 +10,6 @@ class GdownFetcher(BaseFetcher):
         super().__init__(folder_url, download_dir)
 
     def fetch(self) -> list[str]:
-        raise NotImplementedError("GdownFetcher is a stub and does not download files. Use browser_selenium instead.")
+        raise NotImplementedError(
+            "GdownFetcher is a stub and does not download files. Use browser_selenium instead."
+        )
