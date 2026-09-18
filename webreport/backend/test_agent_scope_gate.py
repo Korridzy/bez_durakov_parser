@@ -6,11 +6,14 @@ misclassify a user's turn. Every rejected payload must raise, never parse.
 """
 
 import ast
+import asyncio
 import importlib
 import inspect
 import json
+import os
 import unittest
 from typing import Final, get_args
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -73,12 +76,37 @@ class StubTool:
         self.description = description
 
 
+class StubGateClient:
+    """One-shot gate client recording exactly what was bound and invoked."""
+
+    def __init__(self, *, response=None, error=None, model="fixture-gate"):
+        self.response = response
+        self.error = error
+        self.model = model
+        self.bound_tools = []
+        self.parallel_tool_calls = None
+        self.requests = []
+        self.invocation_count = 0
+
+    def bind_tools(self, tools, *, parallel_tool_calls):
+        self.bound_tools = list(tools)
+        self.parallel_tool_calls = parallel_tool_calls
+        return self
+
+    async def ainvoke(self, messages):
+        self.invocation_count += 1
+        self.requests.append(messages)
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
 def schema_tool_call(arguments, *, name="record_scope_decision", call_id="call-1"):
     """One `ToolCall` in the shape graph.py:29-34 declares."""
     return {"name": name, "args": arguments, "id": call_id, "type": "tool_call"}
 
 
-class ScopeGateDecisionTests(unittest.TestCase):
+class ScopeGateDecisionTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         cls.scope_gate = importlib.import_module("agent.scope_gate")
@@ -430,6 +458,273 @@ class ScopeGateDecisionTests(unittest.TestCase):
         self.assertIn("summarize_beta: Summarize beta records.", system_text)
         self.assertNotIn("not prompt input", system_text)
         self.assertNotIn("also not prompt input", system_text)
+
+    def _gate_state(self, message="NEW_MESSAGE_SENTINEL"):
+        return {
+            "messages": [
+                self.messages.HumanMessage(content="older question"),
+                self.messages.AIMessage(content="older answer"),
+                self.messages.HumanMessage(content=message),
+            ],
+            "report_payload": None,
+            "rows_consumed": 0,
+            "knowledge_bytes_consumed": 0,
+        }
+
+    def _gate_config(self, thread_id="scope-thread"):
+        return {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 3,
+        }
+
+    def _gate_harness(self, *, response=None, error=None, model="fixture-gate"):
+        client = StubGateClient(response=response, error=error, model=model)
+        data_tools = [
+            StubTool("lookup_alpha", "Look up alpha records."),
+            StubTool("summarize_beta", "Summarize beta records."),
+        ]
+        node, router = self.scope_gate.build_gate_node(
+            client,
+            self._knowledge_fixture(),
+            data_tools,
+            history_turns=1,
+        )
+        return client, data_tools, node, router
+
+    async def test_unrelated_returns_one_fresh_plain_message_and_routes_to_end(self):
+        """Given an unrelated decision, When the gate runs, Then only its fresh reply enters state."""
+        reply = "Not my subject. Ask about Alpha topic."
+        raw = self.messages.AIMessage(
+            content="RAW_RESPONSE_SENTINEL",
+            tool_calls=[
+                schema_tool_call(
+                    {"verdict": "unrelated", "reply": reply, "note": None},
+                    name="GateDecision",
+                )
+            ],
+        )
+        client, data_tools, node, router = self._gate_harness(response=raw)
+
+        update = await node(self._gate_state(), self._gate_config())
+
+        self.assertEqual(update["scope_verdict"], "unrelated")
+        self.assertIsNone(update["scope_note"])
+        self.assertEqual(len(update["messages"]), 1)
+        reply_message = update["messages"][0]
+        self.assertIsInstance(reply_message, self.messages.AIMessage)
+        self.assertIsNot(reply_message, raw)
+        self.assertEqual(reply_message.content, reply)
+        self.assertEqual(reply_message.tool_calls, [])
+        self.assertEqual(router(update), self.scope_gate.END)
+        self.assertEqual(client.bound_tools, [self.scope_gate.GateDecision])
+        self.assertFalse(client.parallel_tool_calls)
+        self.assertFalse(any(tool in client.bound_tools for tool in data_tools))
+        self.assertEqual(client.invocation_count, 1)
+
+    async def test_unclear_returns_a_fresh_question_and_routes_to_end(self):
+        """Given an unclear decision, When the gate runs, Then it asks and ends before the agent."""
+        reply = "Which supported topic do you mean?"
+        raw = StubResponse(
+            tool_calls=[
+                schema_tool_call(
+                    {"verdict": "unclear", "reply": reply, "note": None}
+                )
+            ]
+        )
+        _, _, node, router = self._gate_harness(response=raw)
+
+        update = await node(self._gate_state(), self._gate_config())
+
+        self.assertEqual(update["scope_verdict"], "unclear")
+        self.assertEqual(update["messages"][0].content, reply)
+        self.assertEqual(update["messages"][0].tool_calls, [])
+        self.assertEqual(router(update), self.scope_gate.END)
+
+    async def test_mixed_returns_the_note_without_a_message_and_routes_to_agent(self):
+        """Given a mixed decision, When the gate runs, Then its note continues without raw output."""
+        note = "Skip the unrelated request."
+        raw = StubResponse(
+            content="RAW_RESPONSE_SENTINEL",
+            tool_calls=[
+                schema_tool_call(
+                    {"verdict": "mixed", "reply": None, "note": note}
+                )
+            ],
+        )
+        _, _, node, router = self._gate_harness(response=raw)
+
+        update = await node(self._gate_state(), self._gate_config())
+
+        self.assertEqual(
+            update,
+            {"scope_verdict": "mixed", "scope_note": note},
+        )
+        self.assertEqual(router(update), "agent")
+
+    async def test_in_scope_returns_no_note_or_message_and_routes_to_agent(self):
+        """Given an in-scope decision, When the gate runs, Then the untouched request continues."""
+        raw = StubResponse(
+            tool_calls=[
+                schema_tool_call(
+                    {"verdict": "in_scope", "reply": None, "note": None}
+                )
+            ]
+        )
+        _, _, node, router = self._gate_harness(response=raw)
+
+        update = await node(self._gate_state(), self._gate_config())
+
+        self.assertEqual(
+            update,
+            {"scope_verdict": "in_scope", "scope_note": None},
+        )
+        self.assertEqual(router(update), "agent")
+
+    def _failure_exceptions(self):
+        request = importlib.import_module("httpx").Request(
+            "POST", "http://127.0.0.1:1/chat"
+        )
+        response = importlib.import_module("httpx").Response(
+            200,
+            request=request,
+        )
+        openai = importlib.import_module("openai")
+        httpx = importlib.import_module("httpx")
+        validation_error = None
+        try:
+            self.scope_gate.GateDecision.model_validate(
+                {"verdict": "invalid", "reply": None, "note": None}
+            )
+        except ValidationError as error:
+            validation_error = error
+        if validation_error is None:  # pragma: no cover - pinned by schema tests above
+            self.fail("invalid decision unexpectedly validated")
+        return (
+            ("timeout", TimeoutError("PROMPT_SENTINEL")),
+            ("timeout", openai.APITimeoutError(request=request)),
+            ("timeout", httpx.TimeoutException("PROMPT_SENTINEL")),
+            ("validation", validation_error),
+            (
+                "validation",
+                openai.APIResponseValidationError(
+                    response=response,
+                    body={"response": "RESPONSE_SENTINEL"},
+                    message="RESPONSE_SENTINEL",
+                ),
+            ),
+            ("validation", self.scope_gate.GateOutputError("RESPONSE_SENTINEL")),
+            (
+                "transport",
+                openai.APIError(
+                    "RESPONSE_SENTINEL",
+                    request=request,
+                    body=None,
+                ),
+            ),
+            ("transport", httpx.TransportError("RESPONSE_SENTINEL")),
+        )
+
+    async def test_every_named_failure_class_fails_open_once_without_sensitive_logs(self):
+        """Given each allowed exception, When invocation fails, Then one safe warning opens the gate."""
+        for expected_kind, error in self._failure_exceptions():
+            with self.subTest(error=type(error).__name__):
+                client, _, node, router = self._gate_harness(error=error)
+
+                with self.assertLogs("agent.scope_gate", level="WARNING") as captured:
+                    update = await node(
+                        self._gate_state("PROMPT_SENTINEL"),
+                        self._gate_config("taxonomy-thread"),
+                    )
+
+                self.assertEqual(
+                    update,
+                    {"scope_verdict": "gate_unavailable", "scope_note": None},
+                )
+                self.assertEqual(router(update), "agent")
+                self.assertEqual(client.invocation_count, 1)
+                self.assertEqual(len(captured.records), 1)
+                log_message = captured.records[0].getMessage()
+                self.assertIn(f"kind={expected_kind}", log_message)
+                self.assertIn("model=fixture-gate", log_message)
+                self.assertIn("thread_id=taxonomy-thread", log_message)
+                self.assertIn(f"exception={type(error).__name__}", log_message)
+                self.assertIn("action=fail_open", log_message)
+                self.assertNotIn("PROMPT_SENTINEL", log_message)
+                self.assertNotIn("RESPONSE_SENTINEL", log_message)
+                self.assertNotIn("Traceback", log_message)
+
+    async def test_unparsable_response_fails_open_once_and_routes_to_agent(self):
+        """Given malformed model output, When parsing fails, Then it logs once and opens the gate."""
+        response = StubResponse(content="RESPONSE_SENTINEL is not JSON")
+        _, _, node, router = self._gate_harness(response=response)
+
+        with self.assertLogs("agent.scope_gate", level="WARNING") as captured:
+            update = await node(
+                self._gate_state("PROMPT_SENTINEL"),
+                self._gate_config("parse-thread"),
+            )
+
+        self.assertEqual(
+            update,
+            {"scope_verdict": "gate_unavailable", "scope_note": None},
+        )
+        self.assertEqual(router(update), "agent")
+        self.assertEqual(len(captured.records), 1)
+        log_message = captured.records[0].getMessage()
+        self.assertIn("kind=validation", log_message)
+        self.assertIn("exception=GateOutputError", log_message)
+        self.assertIn("action=fail_open", log_message)
+        self.assertNotIn("PROMPT_SENTINEL", log_message)
+        self.assertNotIn("RESPONSE_SENTINEL", log_message)
+        self.assertNotIn("Traceback", log_message)
+
+    async def test_cancelled_error_and_unknown_exception_propagate_without_logging(self):
+        """Given cancellation or an unknown bug, When the gate runs, Then neither is over-caught."""
+        for error in (asyncio.CancelledError(), Exception("unexpected failure")):
+            with self.subTest(error=type(error).__name__):
+                _, _, node, _ = self._gate_harness(error=error)
+
+                with self.assertNoLogs("agent.scope_gate", level="WARNING"):
+                    with self.assertRaises(type(error)):
+                        await node(self._gate_state(), self._gate_config())
+
+    async def test_real_chat_litellm_refused_connection_falls_inside_transport_taxonomy(self):
+        """Given real LiteLLM wrapping, When localhost refuses, Then its APIError fails open."""
+        with patch.dict(os.environ, {"LITELLM_LOCAL_MODEL_COST_MAP": "True"}):
+            chat_litellm = importlib.import_module("langchain_litellm")
+            client = chat_litellm.ChatLiteLLM(
+                model="openai/gpt-4o-mini",
+                api_base="http://127.0.0.1:1",
+                api_key="sk-noop",
+                request_timeout=0.2,
+                model_kwargs={"num_retries": 0},
+            )
+            node, router = self.scope_gate.build_gate_node(
+                client,
+                self._knowledge_fixture(),
+                [StubTool("lookup_alpha", "Look up alpha records.")],
+                history_turns=0,
+            )
+
+            with self.assertLogs("agent.scope_gate", level="WARNING") as captured:
+                update = await node(
+                    self._gate_state(),
+                    self._gate_config("refused-thread"),
+                )
+
+        self.assertEqual(
+            update,
+            {"scope_verdict": "gate_unavailable", "scope_note": None},
+        )
+        self.assertEqual(router(update), "agent")
+        self.assertEqual(len(captured.records), 1)
+        log_message = captured.records[0].getMessage()
+        self.assertIn("kind=transport", log_message)
+        self.assertIn("model=openai/gpt-4o-mini", log_message)
+        self.assertIn("thread_id=refused-thread", log_message)
+        self.assertIn("action=fail_open", log_message)
+        self.assertNotIn("NEW_MESSAGE_SENTINEL", log_message)
+        self.assertNotIn("Traceback", log_message)
 
 
 if __name__ == "__main__":

@@ -16,9 +16,12 @@ passes configuration in.
 """
 
 import json
-from collections.abc import Mapping, Sequence
-from typing import cast, Literal, TypeAlias, TypedDict
+import logging
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import cast, ClassVar, Literal, TypeAlias, TypedDict
 
+import httpx
+import openai
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -29,16 +32,23 @@ from pydantic import (
 
 from .graph import (
     AIMessage,
+    END,
     AgentMessageView,
+    ConversationState,
     HumanMessage,
     MessageView,
+    ModelClient,
     NamedTool,
+    RunConfig,
     SystemMessage,
 )
 from .knowledge import Knowledge, KnowledgeManifest
 from .reasoning import extract_text
 
 ScopeVerdict: TypeAlias = Literal["in_scope", "unrelated", "unclear", "mixed"]
+GateVerdict: TypeAlias = ScopeVerdict | Literal["gate_unavailable"]
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationTurn(TypedDict):
@@ -62,6 +72,9 @@ class GateDecision(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    name: ClassVar[str] = "GateDecision"
+    description: ClassVar[str] = "Record one dataset-scope gate decision."
 
     verdict: ScopeVerdict
     reply: str | None
@@ -227,3 +240,120 @@ def parse_gate_decision(response: AgentMessageView) -> GateDecision:
         raise GateOutputError(
             f"the response text is not a decision: {error}"
         ) from error
+
+
+class GateStateUpdate(TypedDict, total=False):
+    """The state fields emitted by the gate before graph wiring adds channels."""
+
+    messages: list[MessageView]
+    scope_verdict: GateVerdict
+    scope_note: str | None
+
+
+GateNode: TypeAlias = Callable[
+    [ConversationState, RunConfig],
+    Awaitable[GateStateUpdate],
+]
+GateRouter: TypeAlias = Callable[[Mapping[str, object]], str]
+
+
+def _effective_model(client: object) -> str:
+    """Return the configured model without coupling this module to one client class."""
+    model = getattr(client, "model", None)
+    if isinstance(model, str):
+        return model
+    wrapped = getattr(client, "client", None)
+    model = getattr(wrapped, "model", None)
+    return model if isinstance(model, str) else type(client).__name__
+
+
+def _fail_open(
+    *,
+    kind: str,
+    client: object,
+    thread_id: str,
+    error: BaseException,
+) -> GateStateUpdate:
+    logger.warning(
+        "Scope gate failed kind=%s model=%s thread_id=%s exception=%s action=fail_open",
+        kind,
+        _effective_model(client),
+        thread_id,
+        type(error).__name__,
+    )
+    return {"scope_verdict": "gate_unavailable", "scope_note": None}
+
+
+def build_gate_node(
+    gate_client: ModelClient,
+    knowledge: Knowledge,
+    tools: Sequence[NamedTool],
+    history_turns: int,
+) -> tuple[GateNode, GateRouter]:
+    """Build the dataset-scope classifier node and its terminal router."""
+    bound_gate = gate_client.bind_tools([GateDecision], parallel_tool_calls=False)
+
+    async def call_gate(
+        state: ConversationState,
+        config: RunConfig,
+    ) -> GateStateUpdate:
+        messages = state["messages"]
+        boundary = max(
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, HumanMessage)
+        )
+        prompt = build_gate_prompt(
+            knowledge,
+            tools,
+            messages[:boundary],
+            extract_text(messages[boundary].content),
+            history_turns,
+        )
+        thread_id = config["configurable"]["thread_id"]
+
+        try:
+            response = await bound_gate.ainvoke(prompt)
+            decision = parse_gate_decision(response)
+        except (
+            TimeoutError,
+            openai.APITimeoutError,
+            httpx.TimeoutException,
+        ) as error:
+            return _fail_open(
+                kind="timeout",
+                client=gate_client,
+                thread_id=thread_id,
+                error=error,
+            )
+        except (
+            ValidationError,
+            openai.APIResponseValidationError,
+            GateOutputError,
+        ) as error:
+            return _fail_open(
+                kind="validation",
+                client=gate_client,
+                thread_id=thread_id,
+                error=error,
+            )
+        except (openai.APIError, httpx.TransportError) as error:
+            return _fail_open(
+                kind="transport",
+                client=gate_client,
+                thread_id=thread_id,
+                error=error,
+            )
+
+        update: GateStateUpdate = {
+            "scope_verdict": decision.verdict,
+            "scope_note": decision.note,
+        }
+        if decision.verdict in ("unrelated", "unclear"):
+            update["messages"] = [AIMessage(content=cast(str, decision.reply))]
+        return update
+
+    def route_after_gate(state: Mapping[str, object]) -> str:
+        return END if state.get("scope_verdict") in ("unrelated", "unclear") else "agent"
+
+    return call_gate, route_after_gate
