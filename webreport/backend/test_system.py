@@ -1721,31 +1721,31 @@ class TestStartupInitialization(unittest.TestCase):
 
     def test_invalid_knowledge_folder_unknown_key_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
-            'dataset = "bez_durakov"\npersona = "x"\nlanguage = "ru"\n',
+            'dataset = "bez_durakov"\npersona = "x"\nscope = "y"\nlanguage = "ru"\n',
             ("language",),
         )
 
     def test_invalid_knowledge_folder_bad_dataset_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
-            'dataset = "Bad_Dataset"\npersona = "x"\n',
+            'dataset = "Bad_Dataset"\npersona = "x"\nscope = "y"\n',
             ("dataset",),
         )
 
     def test_invalid_knowledge_folder_empty_persona_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
-            'dataset = "bez_durakov"\npersona = ""\n',
+            'dataset = "bez_durakov"\npersona = ""\nscope = "y"\n',
             ("persona",),
         )
 
     def test_invalid_knowledge_folder_overlong_persona_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
-            'dataset = "bez_durakov"\npersona = "xxxxxx"\n',
+            'dataset = "bez_durakov"\npersona = "xxxxxx"\nscope = "y"\n',
             ("persona", "max_persona_chars"),
         )
 
     def test_invalid_knowledge_folder_dataset_mismatch_aborts_before_the_tool_service_loads(self):
         self._assert_invalid_knowledge_folder_aborts(
-            'dataset = "wrong_db"\npersona = "x"\n',
+            'dataset = "wrong_db"\npersona = "x"\nscope = "y"\n',
             ("wrong_db", "bez_durakov"),
             expect_manifest_path=False,
         )

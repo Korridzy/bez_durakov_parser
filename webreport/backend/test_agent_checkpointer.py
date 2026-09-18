@@ -82,7 +82,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(folder.cleanup)
         path = Path(folder.name)
         (path / "manifest.toml").write_text(
-            'dataset = "fixture"\npersona = "Fixture analyst."\n', encoding="utf-8"
+            'dataset = "fixture"\npersona = "Fixture analyst."\nscope = "Fixture readings."\n', encoding="utf-8"
         )
         text = f"# Rules\n\nFixture summary.\n\n{body}\n"
         (path / "rules.md").write_text(text, encoding="utf-8")
@@ -420,7 +420,7 @@ class TestPromptCases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(

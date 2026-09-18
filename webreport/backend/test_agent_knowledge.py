@@ -139,17 +139,34 @@ class KnowledgeTypesTests(unittest.TestCase):
         self.assertIs(knowledge.manifest, manifest_stub)
         self.assertEqual(tuple(t.id for t in knowledge.topics), ("a", "b"))
 
-    def test_knowledge_manifest_accepts_only_dataset_and_persona(self):
-        """Given dataset and persona, When a KnowledgeManifest is constructed, Then both fields are accepted exactly."""
+    def test_knowledge_manifest_accepts_only_dataset_persona_and_scope(self):
+        """Given dataset, persona and scope, When a KnowledgeManifest is constructed, Then all three fields are accepted exactly."""
         knowledge_manifest = self.knowledge_module.KnowledgeManifest
 
-        manifest = knowledge_manifest(dataset="ok_dataset", persona="Some persona text.")
+        manifest = knowledge_manifest(
+            dataset="ok_dataset",
+            persona="Some persona text.",
+            scope="Some scope text.",
+        )
 
-        self.assertEqual(set(knowledge_manifest.model_fields), {"dataset", "persona"})
+        self.assertEqual(set(knowledge_manifest.model_fields), {"dataset", "persona", "scope"})
         self.assertEqual(
             manifest.model_dump(),
-            {"dataset": "ok_dataset", "persona": "Some persona text."},
+            {
+                "dataset": "ok_dataset",
+                "persona": "Some persona text.",
+                "scope": "Some scope text.",
+            },
         )
+
+    def test_knowledge_manifest_requires_scope_and_names_scope(self):
+        """Given a manifest without scope, When a KnowledgeManifest is constructed, Then the error names scope."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest(dataset="ok_dataset", persona="Some persona text.")
+
+        self.assertIn("scope", str(raised.exception))
 
     def test_knowledge_manifest_rejects_unknown_key_and_names_language(self):
         """Given extra=\"forbid\", When language is supplied to a KnowledgeManifest, Then the error names language."""
@@ -159,6 +176,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             knowledge_manifest(
                 dataset="ok_dataset",
                 persona="Some persona text.",
+                scope="Some scope text.",
                 language="ru",
             )
 
@@ -169,7 +187,11 @@ class KnowledgeTypesTests(unittest.TestCase):
         knowledge_manifest = self.knowledge_module.KnowledgeManifest
 
         with self.assertRaises(ValidationError) as raised:
-            knowledge_manifest(dataset="Bad_Durakov", persona="Some persona text.")
+            knowledge_manifest(
+                dataset="Bad_Durakov",
+                persona="Some persona text.",
+                scope="Some scope text.",
+            )
 
         self.assertIn("dataset", str(raised.exception))
 
@@ -178,9 +200,18 @@ class KnowledgeTypesTests(unittest.TestCase):
         knowledge_manifest = self.knowledge_module.KnowledgeManifest
 
         with self.assertRaises(ValidationError) as raised:
-            knowledge_manifest(dataset="ok_dataset", persona="")
+            knowledge_manifest(dataset="ok_dataset", persona="", scope="Some scope text.")
 
         self.assertIn("persona", str(raised.exception))
+
+    def test_knowledge_manifest_rejects_empty_scope_and_names_scope(self):
+        """Given an empty scope, When a KnowledgeManifest is constructed, Then the error names scope."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest(dataset="ok_dataset", persona="Some persona text.", scope="")
+
+        self.assertIn("scope", str(raised.exception))
 
     def test_knowledge_manifest_rejects_persona_over_context_limit_and_names_persona(self):
         """Given max_persona_chars is supplied in validation context, When persona exceeds it, Then the error names persona."""
@@ -188,11 +219,31 @@ class KnowledgeTypesTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError) as raised:
             knowledge_manifest.model_validate(
-                {"dataset": "ok_dataset", "persona": "x" * 10},
+                {
+                    "dataset": "ok_dataset",
+                    "persona": "x" * 10,
+                    "scope": "Some scope text.",
+                },
                 context={"max_persona_chars": 5},
             )
 
         self.assertIn("persona", str(raised.exception))
+
+    def test_knowledge_manifest_rejects_scope_over_context_limit_and_names_scope(self):
+        """Given max_scope_chars is supplied in validation context, When scope exceeds it, Then the error names scope."""
+        knowledge_manifest = self.knowledge_module.KnowledgeManifest
+
+        with self.assertRaises(ValidationError) as raised:
+            knowledge_manifest.model_validate(
+                {
+                    "dataset": "ok_dataset",
+                    "persona": "Some persona text.",
+                    "scope": "x" * 10,
+                },
+                context={"max_scope_chars": 5},
+            )
+
+        self.assertIn("scope", str(raised.exception))
 
     def test_load_knowledge_rejects_persona_over_max_chars_with_observed_limit(self):
         """Given an over-long manifest persona, When loaded, Then its length, limit and manifest path are reported."""
@@ -205,7 +256,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             manifest_path = folder_path / "manifest.toml"
             persona = "P" * observed
             manifest_path.write_text(
-                f'dataset = "some_db"\npersona = "{persona}"\n',
+                f'dataset = "some_db"\npersona = "{persona}"\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
 
@@ -220,6 +271,103 @@ class KnowledgeTypesTests(unittest.TestCase):
             )
             self.assertEqual(raised.exception.observed, observed)
             self.assertEqual(raised.exception.permitted, limits.max_persona_chars)
+
+    def test_load_knowledge_rejects_missing_scope_and_names_manifest_and_key(self):
+        """Given a manifest without scope, When loaded, Then KnowledgeError names the manifest and the key."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            manifest_path = folder_path / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "some_db"\npersona = "Some text."\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn("scope", str(raised.exception))
+            self.assertEqual(raised.exception.key, "scope")
+            self.assertEqual(raised.exception.rule, "missing")
+
+    def test_load_knowledge_rejects_empty_scope_and_names_manifest_and_key(self):
+        """Given an empty manifest scope, When loaded, Then KnowledgeError names the manifest and the key."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            manifest_path = folder_path / "manifest.toml"
+            manifest_path.write_text(
+                'dataset = "some_db"\npersona = "Some text."\nscope = ""\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn("scope", str(raised.exception))
+            self.assertEqual(raised.exception.key, "scope")
+            self.assertEqual(raised.exception.rule, "string_too_short")
+
+    def test_load_knowledge_rejects_scope_over_max_chars_with_observed_limit(self):
+        """Given an over-long manifest scope, When loaded, Then its length, limit and manifest path are reported."""
+        knowledge_error = self.knowledge_module.KnowledgeError
+        limits = self._knowledge_limits()
+        observed = limits.max_scope_chars + 1
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            manifest_path = folder_path / "manifest.toml"
+            scope = "S" * observed
+            manifest_path.write_text(
+                f'dataset = "some_db"\npersona = "Some text."\nscope = "{scope}"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(knowledge_error) as raised:
+                self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            message = str(raised.exception)
+            self._assert_manifest_path(raised.exception, manifest_path)
+            self.assertIn("max_scope_chars", message)
+            self.assertIn(
+                f"scope is {observed} characters, limit is {limits.max_scope_chars}",
+                message,
+            )
+            self.assertEqual(raised.exception.key, "scope")
+            self.assertEqual(raised.exception.rule, "max_scope_chars")
+            self.assertEqual(raised.exception.observed, observed)
+            self.assertEqual(raised.exception.permitted, limits.max_scope_chars)
+            self.assertEqual(
+                manifest_path.read_text(encoding="utf-8"),
+                f'dataset = "some_db"\npersona = "Some text."\nscope = "{scope}"\n',
+            )
+
+    def test_load_knowledge_keeps_a_multiline_scope_character_for_character(self):
+        """Given a three-key manifest, When loaded, Then manifest.scope equals the declared text exactly."""
+        limits = self._knowledge_limits()
+        scope_text = "Первая строка границы.\nВторая строка границы."
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder_path = Path(temp_dir)
+            (folder_path / "manifest.toml").write_text(
+                'dataset = "some_db"\npersona = "Some text."\n'
+                f'scope = """{scope_text}"""\n',
+                encoding="utf-8",
+            )
+            (folder_path / "rules.md").write_text(
+                "# Rules\n\nSome summary paragraph text.\n",
+                encoding="utf-8",
+            )
+
+            knowledge = self.knowledge_module.load_knowledge(folder_path, "some_db", limits)
+
+            self.assertEqual(knowledge.manifest.scope, scope_text)
 
     def _knowledge_limits(self):
         return self.knowledge_module.KnowledgeLimits(
@@ -261,7 +409,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             folder_path = Path(temp_dir)
             wrong_case_path = folder_path / "Manifest.TOML"
             manifest_path = folder_path / "manifest.toml"
-            wrong_case_path.write_text('dataset = "some_db"\npersona = "Some text."\n', encoding="utf-8")
+            wrong_case_path.write_text('dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n', encoding="utf-8")
             self.assertFalse(manifest_path.exists())
 
             with self.assertRaises(knowledge_error) as raised:
@@ -281,7 +429,7 @@ class KnowledgeTypesTests(unittest.TestCase):
             manifest_path = Path(temp_dir) / "manifest.toml"
             outside_manifest_path = Path(outside_dir) / "manifest.toml"
             outside_manifest_path.write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             manifest_path.symlink_to(outside_manifest_path)
@@ -314,7 +462,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "manifest.toml"
             manifest_path.write_text(
-                'dataset = "some_db"\npersona = "Some text."\nlanguage = "ru"\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\nlanguage = "ru"\n',
                 encoding="utf-8",
             )
 
@@ -329,7 +477,7 @@ class KnowledgeTypesTests(unittest.TestCase):
     def test_load_knowledge_wraps_directory_enumeration_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder = Path(temp_dir)
-            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\nscope="Some scope."\n')
             denied = PermissionError(13, "Permission denied", str(folder))
 
             def failing_iterator():
@@ -349,7 +497,7 @@ class KnowledgeTypesTests(unittest.TestCase):
     def test_load_knowledge_wraps_entry_inspection_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder = Path(temp_dir)
-            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\nscope="Some scope."\n')
             entry = folder / "rules.md"
             entry.write_text("# Rules\n\nSummary.\n")
             original_is_dir = Path.is_dir
@@ -375,7 +523,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "manifest.toml"
             manifest_path.write_text(
-                'dataset = "Bad_Dataset"\npersona = "Some text."\n',
+                'dataset = "Bad_Dataset"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
 
@@ -395,7 +543,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "manifest.toml"
             manifest_path.write_text(
-                'dataset = "wrong_dataset"\npersona = "Some text."\n',
+                'dataset = "wrong_dataset"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
 
@@ -426,7 +574,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "manifest.toml"
             manifest_path.write_text(
-                'dataset = "actual_dataset"\npersona = "Some text."\n',
+                'dataset = "actual_dataset"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (Path(temp_dir) / "rules.md").write_text("# Rules\n\nSome text.\n", encoding="utf-8")
@@ -445,7 +593,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "notes.txt").write_text("Arbitrary notes.\n", encoding="utf-8")
@@ -477,7 +625,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -499,7 +647,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
 
@@ -521,7 +669,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             for filename, title in (
@@ -553,7 +701,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "Rules.md").write_text(
@@ -572,7 +720,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             for filename, title in (
@@ -619,6 +767,10 @@ class KnowledgeTypesTests(unittest.TestCase):
         )
         self.assertEqual(knowledge.manifest.dataset, "bez_durakov")
         self.assertGreater(len(knowledge.manifest.persona), 0)
+        self.assertGreater(len(knowledge.manifest.scope), 0)
+        self.assertLessEqual(
+            len(knowledge.manifest.scope), bd_shared_config.KNOWLEDGE_MAX_SCOPE_CHARS
+        )
 
     def test_load_knowledge_rejects_document_without_heading_and_names_file(self):
         """Given a document without a heading, When loaded, Then KnowledgeError names the file."""
@@ -628,7 +780,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -649,7 +801,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -677,7 +829,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text("# Rules\n\n", encoding="utf-8")
@@ -695,7 +847,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -723,7 +875,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -744,7 +896,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -765,7 +917,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             # Tilde fences are the equivalent form in this C3 marker category.
@@ -787,7 +939,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -808,7 +960,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -829,7 +981,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -850,7 +1002,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -876,7 +1028,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             folder = Path(temp_dir)
-            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\n')
+            (folder / "manifest.toml").write_text('dataset="some_db"\npersona="Text."\nscope="Some scope."\n')
             entry = folder / "rules.md"
             for body, rule, key in cases:
                 with self.subTest(rule=rule):
@@ -894,7 +1046,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "scoring-rules.md").write_text(
@@ -920,7 +1072,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "scoring.md").write_text(
@@ -953,7 +1105,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             oversize_path = folder_path / "rules.md"
@@ -979,7 +1131,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             bad_utf8_path = folder_path / "rules.md"
@@ -1006,7 +1158,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             bad_path = folder_path / "rules.md"
@@ -1027,7 +1179,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "a-.md").write_text(
@@ -1078,7 +1230,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -1105,7 +1257,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                f'dataset = "some_db"\npersona = "{persona}"\n',
+                f'dataset = "some_db"\npersona = "{persona}"\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             for filename, title in (
@@ -1151,7 +1303,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "question.md").write_text(
@@ -1184,7 +1336,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                f'dataset = "library"\npersona = "{persona}"\n',
+                f'dataset = "library"\npersona = "{persona}"\nscope = "Questions about catalogue records and lending activity."\n',
                 encoding="utf-8",
             )
             (folder_path / "catalogue.md").write_text(
@@ -1340,7 +1492,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -1382,7 +1534,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -1416,7 +1568,7 @@ class KnowledgeTypesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(

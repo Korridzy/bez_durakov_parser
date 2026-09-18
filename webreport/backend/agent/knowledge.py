@@ -101,6 +101,7 @@ class KnowledgeManifest(BaseModel):
 
     dataset: str = Field(pattern=r"^[a-z0-9_-]{1,64}$")
     persona: str = Field(min_length=1)
+    scope: str = Field(min_length=1)
 
     @field_validator("persona")
     @classmethod
@@ -110,6 +111,17 @@ class KnowledgeManifest(BaseModel):
             raise ValueError(
                 f"persona exceeds max_persona_chars: persona is {len(value)} characters, "
                 f"limit is {max_persona_chars}"
+            )
+        return value
+
+    @field_validator("scope")
+    @classmethod
+    def validate_scope_length(cls, value: str, info: ValidationInfo) -> str:
+        max_scope_chars = (info.context or {}).get("max_scope_chars")
+        if max_scope_chars is not None and len(value) > max_scope_chars:
+            raise ValueError(
+                f"scope exceeds max_scope_chars: scope is {len(value)} characters, "
+                f"limit is {max_scope_chars}"
             )
         return value
 
@@ -286,7 +298,10 @@ def load_knowledge(
     try:
         manifest = KnowledgeManifest.model_validate(
             manifest_data,
-            context={"max_persona_chars": limits.max_persona_chars},
+            context={
+                "max_persona_chars": limits.max_persona_chars,
+                "max_scope_chars": limits.max_scope_chars,
+            },
         )
     except ValidationError as error:
         persona = manifest_data.get("persona")
@@ -299,6 +314,17 @@ def load_knowledge(
                 rule="max_persona_chars",
                 observed=len(persona),
                 permitted=limits.max_persona_chars,
+            ) from error
+        scope = manifest_data.get("scope")
+        if isinstance(scope, str) and len(scope) > limits.max_scope_chars:
+            detail = str(error).replace("\n", " ")
+            raise KnowledgeError(
+                f"Invalid knowledge manifest {manifest_path}: {detail}",
+                path=manifest_path,
+                key="scope",
+                rule="max_scope_chars",
+                observed=len(scope),
+                permitted=limits.max_scope_chars,
             ) from error
         failure = error.errors()[0]
         raise KnowledgeError(
