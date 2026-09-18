@@ -32,6 +32,7 @@ knowledge_config_cases = importlib.import_module("test_agent_config")
 engine_cases = importlib.import_module("test_agent_engine")
 toolmodule_cases = importlib.import_module("test_agent_toolmodule")
 net_guard_cases = importlib.import_module("test_agent_net_guard")
+scope_gate_cases = importlib.import_module("test_agent_scope_gate")
 net_guard = importlib.import_module("test_net_guard")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
@@ -218,6 +219,10 @@ class TestCheckpointer(checkpointer_cases.TestCheckpointerCases):
 
 class TestPrompt(checkpointer_cases.TestPromptCases):
     pass
+
+
+class TestScopeGateDecision(scope_gate_cases.ScopeGateDecisionTests):
+    """The gate verdict schema and the strict parser over a model response."""
 
 if __name__ == "__main__":
     unittest.main()
