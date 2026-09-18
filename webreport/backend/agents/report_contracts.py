@@ -17,6 +17,7 @@ class ReportResponse(TypedDict):
     timestamp: str
     message: str
     reasoning: str | None
+    verdict: str | None
     error: NotRequired[str]
 
 

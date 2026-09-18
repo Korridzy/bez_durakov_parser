@@ -1589,6 +1589,22 @@ class TestStartupInitialization(unittest.TestCase):
                 message_module.AIMessage(content="Правила прочитаны."),
             ]
         )
+        # With knowledge loaded the runtime also builds a gate client; scripting it keeps
+        # this offline suite from constructing a real ChatLiteLLM for the gate.
+        gate_model = ScriptedStub(
+            [
+                message_module.AIMessage(
+                    content="",
+                    tool_calls=[
+                        _tool_call(
+                            "GateDecision",
+                            {"verdict": "in_scope", "reply": None, "note": None},
+                            "startup-gate-1",
+                        )
+                    ],
+                )
+            ]
+        )
 
         asyncio.run(self._reset_startup_state(main_module))
         with (
@@ -1602,6 +1618,9 @@ class TestStartupInitialization(unittest.TestCase):
                 new=AsyncMock(return_value=True),
             ),
             patch.object(runtime_module, "_new_model_client", return_value=model),
+            patch.object(
+                runtime_module, "_new_gate_model_client", return_value=gate_model
+            ),
             self.assertLogs(main_module.logger, level="INFO") as captured_logs,
         ):
             client = ASGITestClient(main_module.app)

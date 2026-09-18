@@ -246,9 +246,25 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             service = self.support.StubService()
             service.results["get_all_teams"] = []
+            # Knowledge builds the scope gate, so script its client too: an unscripted
+            # gate would construct a real ChatLiteLLM inside this offline suite.
+            gate_model = self.graph_cases.ScriptedModel(
+                [
+                    self.messages.AIMessage(
+                        content="",
+                        tool_calls=[
+                            self.graph_cases.tool_call(
+                                "GateDecision",
+                                {"verdict": "in_scope", "reply": None, "note": None},
+                                "gate-recover",
+                            )
+                        ],
+                    )
+                ]
+            )
             agent = self.runtime.ReportAgentSystem(
                 service=service, model_client=model, checkpointer=saver,
-                knowledge=knowledge,
+                knowledge=knowledge, gate_model_client=gate_model,
             )
             if failure_mode == "timeout":
                 with patch.object(model, "ainvoke", side_effect=block_after_read), patch.object(
