@@ -54,6 +54,7 @@ webreport/
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
 - **Config flow**: `bd_shared/config.toml` + optional `config.local.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
 - **ASGI wrapper**. Keep `application` as the outermost wrapper; start it with `uvicorn.run("main:application")`.
+- `main.py` and `start.py` call `configure_logging` from `bd_shared.logging_setup` at module level before other code runs.
 - **Dataset switch**: `DATASET` moves the overlay out of the repository through `BD_CONFIG_LOCAL_FILE`, and the dataset directory supplies its own tool module, knowledge folder and optional `webreport.compose.yml` for database networking. Nothing dataset-specific belongs in this directory.
 - **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: with the bundled MySQL the backend connects at `mysql:3306` on the Docker network, not localhost

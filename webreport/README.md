@@ -100,7 +100,7 @@ cd webreport
 Используемые секции и полный список ключей `[webreport]` и `[dataset]`:
 
 - `[database]`: `url`, `docker_url`, `sqlalchemy_logging`
-- `[application]`: `debug`, `log_level`, `default_game_date`
+- `[application]`: `debug`, `log_level`, `environment`, `log_format`, `default_game_date`
 - `[webreport]`:
   - Сеть и запуск: `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
   - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`
