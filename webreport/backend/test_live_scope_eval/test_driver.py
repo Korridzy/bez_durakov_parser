@@ -134,7 +134,9 @@ class DriverTests(unittest.TestCase):
         self.assertIn("bez_durakov", stderr.getvalue())
         self.assertIn("Dataset mismatch", stderr.getvalue())
 
-    def test_matching_multiturn_case_uses_one_session_and_prints_each_turn(self) -> None:
+    def test_matching_multiturn_case_uses_one_session_and_prints_each_turn(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = Path(temp_dir)
             case_file = _case_file(
@@ -162,7 +164,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(post.call_count, 2)
         self.assertEqual(post.sessions[0], post.sessions[1])
-        self.assertTrue(post.sessions[0].startswith("scope-eval-case_one-"))
+        self.assertTrue(post.sessions[0].startswith("test-scope-eval-case_one-"))
         self.assertEqual(stdout.getvalue().count("| case_one/turn_"), 2)
 
     def test_mismatch_is_printed_twice_then_exits_one(self) -> None:
@@ -230,7 +232,9 @@ class DriverTests(unittest.TestCase):
             directory = Path(temp_dir)
             case_file = _case_file(directory, acceptable='"unclear"')
             knowledge_dir = _knowledge_dir(directory)
-            response = FakeResponse(_envelope("unclear", "Что именно? За какой период?"))
+            response = FakeResponse(
+                _envelope("unclear", "Что именно? За какой период?")
+            )
             post = RecordingPost([response, response])
             stdout = io.StringIO()
 
@@ -251,9 +255,7 @@ class DriverTests(unittest.TestCase):
             directory = Path(temp_dir)
             case_file = _case_file(directory)
             knowledge_dir = _knowledge_dir(directory)
-            response = FakeResponse(
-                _envelope("unrelated", "Первое. Второе. Третье.")
-            )
+            response = FakeResponse(_envelope("unrelated", "Первое. Второе. Третье."))
             post = RecordingPost([response, response])
             stdout = io.StringIO()
 

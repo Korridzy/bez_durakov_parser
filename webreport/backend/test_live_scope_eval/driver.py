@@ -133,7 +133,9 @@ def load_case_set(path: Path) -> CaseSet:
         with path.open("rb") as stream:
             data = cast(dict[str, object], tomllib.load(stream))
     except (OSError, tomllib.TOMLDecodeError) as error:
-        raise EvalConfigError(f"Cannot read scope eval case file {path}: {error}") from error
+        raise EvalConfigError(
+            f"Cannot read scope eval case file {path}: {error}"
+        ) from error
 
     dataset = _nonempty_string(data.get("dataset"), "dataset")
     cases_value = data.get("cases")
@@ -271,7 +273,7 @@ def _post_turn(
 
 def _session_id(case_id: str) -> str:
     safe_case_id = _SESSION_SAFE.sub("-", case_id).strip("-") or "case"
-    return f"scope-eval-{safe_case_id}-{uuid.uuid4().hex}"
+    return f"test-scope-eval-{safe_case_id}-{uuid.uuid4().hex}"
 
 
 def _print_observation(

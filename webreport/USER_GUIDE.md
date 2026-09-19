@@ -288,13 +288,13 @@ Knowledge folder is invalid: Knowledge document summary exceeds 200 characters: 
 Для базового набора выполните
 
 ```bash
-make -C webreport scope-eval
+make -C webreport test-live-scope-eval
 ```
 
 Для другого файла случаев задайте переменную `CASE_FILE`.
 
 ```bash
-make -C webreport scope-eval CASE_FILE=scope_eval/other-cases.toml
+make -C webreport test-live-scope-eval CASE_FILE=test_live_scope_eval/other-cases.toml
 ```
 
 Таблица выводит результат для каждого случая. Несовпадающий случай отправляется ещё один раз и только один раз. Если повтор тоже не проходит проверку вердикта или структуры ответа, случай считается проваленным.
