@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class GenerateEnvTests(unittest.TestCase):
@@ -92,6 +93,96 @@ class GenerateEnvTests(unittest.TestCase):
                     ".env.mysql",
                 },
             )
+
+    @staticmethod
+    def _parse_env_file(content: str) -> dict[str, str]:
+        return {
+            key: value
+            for line in content.splitlines()
+            if "=" in line
+            for key, value in [line.split("=", 1)]
+        }
+
+    def _generate_with_patched_git(
+        self,
+        *,
+        result: subprocess.CompletedProcess[str] | None = None,
+        error: BaseException | None = None,
+    ) -> dict[str, dict[str, str]]:
+        source_script = Path(__file__).with_name("generate_env.py")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            script = Path(temp_directory) / source_script.name
+            _ = shutil.copyfile(source_script, script)
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            try:
+                if error is not None:
+                    with patch("subprocess.run", side_effect=error):
+                        _ = runpy.run_path(str(script), run_name="__main__")
+                else:
+                    assert result is not None
+                    with patch("subprocess.run", return_value=result):
+                        _ = runpy.run_path(str(script), run_name="__main__")
+            finally:
+                _ = sys.path.pop(0)
+
+            return {
+                path.name: self._parse_env_file(path.read_text(encoding="utf-8"))
+                for path in Path(temp_directory).glob(".env*")
+            }
+
+    def test_generates_application_logging_environment(self) -> None:
+        # Given: git returns a short commit identifier.
+        completed = subprocess.CompletedProcess(
+            ["git", "rev-parse", "--short", "HEAD"],
+            0,
+            stdout="abc1234\n",
+            stderr="",
+        )
+
+        # When: environment generation runs in a copied script directory.
+        generated = self._generate_with_patched_git(result=completed)
+
+        # Then: application settings reach only the application service environment files.
+        expected = {
+            "BD_LOG_LEVEL": "INFO",
+            "BD_LOG_FORMAT": "console",
+            "BD_ENVIRONMENT": "development",
+            "BD_APP_VERSION": "abc1234",
+        }
+        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
+            with self.subTest(file_name=file_name):
+                for key, value in expected.items():
+                    self.assertEqual(generated[file_name][key], value)
+        for file_name in (".env", ".env.mysql", ".env.litellm"):
+            with self.subTest(file_name=file_name):
+                for key in expected:
+                    self.assertNotIn(key, generated[file_name])
+
+    def test_uses_unknown_app_version_when_git_is_missing(self) -> None:
+        # Given: git cannot be started.
+        generated = self._generate_with_patched_git(error=FileNotFoundError("git"))
+
+        # Then: application environments use the documented fallback version.
+        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
+            with self.subTest(file_name=file_name):
+                self.assertEqual(generated[file_name]["BD_APP_VERSION"], "unknown")
+
+    def test_uses_unknown_app_version_when_git_returns_nonzero(self) -> None:
+        # Given: the directory is not a git repository.
+        completed = subprocess.CompletedProcess(
+            ["git", "rev-parse", "--short", "HEAD"],
+            128,
+            stdout="",
+            stderr="fatal: not a git repository\n",
+        )
+
+        # When: environment generation runs.
+        generated = self._generate_with_patched_git(result=completed)
+
+        # Then: application environments use the documented fallback version.
+        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
+            with self.subTest(file_name=file_name):
+                self.assertEqual(generated[file_name]["BD_APP_VERSION"], "unknown")
 
     def _generate_with_database_url(self, url: str) -> tuple[Path, dict[str, str]]:
         """Run the generator against a config whose database URL is `url`.

@@ -3,6 +3,7 @@
 Generate environment files for WebReport from config.toml.
 """
 import os
+import subprocess
 from pathlib import Path
 from typing import cast
 
@@ -11,6 +12,7 @@ from sqlalchemy.engine import make_url
 from bd_shared.config import get_config
 
 config = cast(dict[str, object], get_config())
+application_config = cast(dict[str, object], config["application"])
 database_config = cast(dict[str, object], config["database"])
 webreport_config = cast(dict[str, object], config["webreport"])
 xlsm_fetch_config = cast(dict[str, object], config["xlsm_fetch"])
@@ -35,6 +37,24 @@ else:
     database_name = database_user = database_password = "unused"
 
 
+def resolve_app_version() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return "unknown"
+
+    if completed.returncode != 0:
+        return "unknown"
+    version = completed.stdout.strip()
+    return version or "unknown"
+
+
 def dotenv_quote(value: str) -> str:
     return "'" + value.replace("'", "\\'") + "'"
 
@@ -57,6 +77,10 @@ def write_env_file(file_name: str, values: dict[str, str]) -> None:
 
 debug = str(cast(bool, webreport_config.get("debug", False))).lower()
 reload_enabled = str(cast(bool, webreport_config.get("reload", True))).lower()
+log_level = str(application_config.get("log_level", "INFO")).upper()
+log_format = str(application_config.get("log_format", "console"))
+environment = str(application_config.get("environment", "development"))
+app_version = resolve_app_version()
 env_files: dict[str, dict[str, str]] = {
     ".env": {
         "WEBREPORT_BACKEND_PORT": str(
@@ -74,6 +98,10 @@ env_files: dict[str, dict[str, str]] = {
     },
     ".env.backend": {
         "BD_DOCKER": "true",
+        "BD_LOG_LEVEL": log_level,
+        "BD_LOG_FORMAT": log_format,
+        "BD_ENVIRONMENT": environment,
+        "BD_APP_VERSION": app_version,
         "WEBREPORT_DEBUG": debug,
         "WEBREPORT_RELOAD": reload_enabled,
         "WEBREPORT_BACKEND_DEBUG_PORT": str(
@@ -82,11 +110,19 @@ env_files: dict[str, dict[str, str]] = {
     },
     ".env.data_collector": {
         "BD_DOCKER": "true",
+        "BD_LOG_LEVEL": log_level,
+        "BD_LOG_FORMAT": log_format,
+        "BD_ENVIRONMENT": environment,
+        "BD_APP_VERSION": app_version,
         "TZ": dotenv_quote(
             cast(str, xlsm_fetch_config.get("timezone", "Europe/Belgrade"))
         ),
     },
     ".env.frontend": {
+        "BD_LOG_LEVEL": log_level,
+        "BD_LOG_FORMAT": log_format,
+        "BD_ENVIRONMENT": environment,
+        "BD_APP_VERSION": app_version,
         "API_BASE_URL": dotenv_quote("http://backend:8000"),
         "CHAT_REQUEST_TIMEOUT_SECONDS": str(
             cast(int, webreport_config["chat_request_timeout_seconds"])

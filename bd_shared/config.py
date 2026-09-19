@@ -57,6 +57,8 @@ if local_config_file_path is not None:
 SQLALCHEMY_LOGGING = bool(config["database"].get("sqlalchemy_logging", False))
 DEBUG = bool(config["application"].get("debug", False))
 LOG_LEVEL = config["application"].get("log_level", "INFO")
+ENVIRONMENT = str(config["application"].get("environment", "development"))
+LOG_FORMAT = str(config["application"].get("log_format", "console"))
 
 # Parse default game date from config
 DEFAULT_GAME_DATE_STR = config["application"].get("default_game_date", "02.03.2022")
