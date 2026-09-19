@@ -30,6 +30,30 @@ else:
 logger = get_logger(__name__)
 
 
+def _exc_info_for_logging(
+    exc: BaseException, *sensitive_values: str
+) -> object:
+    message = str(exc)
+    values_to_redact = [
+        value for value in sensitive_values if value and value in message
+    ]
+    if not values_to_redact:
+        return True
+
+    redacted_message = message
+    for value in values_to_redact:
+        redacted_message = redacted_message.replace(
+            value, "[REDACTED_FOLDER_URL]"
+        )
+
+    try:
+        redacted = type(exc)(redacted_message)
+    except Exception:
+        redacted = Exception(redacted_message)
+    redacted.__traceback__ = exc.__traceback__
+    return type(redacted), redacted, exc.__traceback__
+
+
 def create_fetcher(
     mode: str,
     folder_url: str,
@@ -172,8 +196,12 @@ def _run_fetch() -> list[str]:
             logger.info("files_fetched", count=len(files), mode=mode)
             break
 
-        except Exception:
-            logger.error("fetch_method_failed", mode=mode, exc_info=True)
+        except Exception as exc:
+            logger.error(
+                "fetch_method_failed",
+                mode=mode,
+                exc_info=_exc_info_for_logging(exc, folder_url),
+            )
             if len(modes_to_try) == 1:
                 raise
             continue
@@ -193,6 +221,8 @@ def _run_fetch() -> list[str]:
 
 def run_fetch() -> list[str]:
     """Fetch XLSM files with a correlation id bound for the full job run."""
+    folder_url = XLSM_FETCH_CONFIG.get("google_drive_folder_url")
+
     with structlog.contextvars.bound_contextvars(
         job_id=uuid.uuid4().hex, job_name="xlsm_fetch"
     ):
@@ -204,11 +234,11 @@ def run_fetch() -> list[str]:
         )
         try:
             files = _run_fetch()
-        except Exception:
+        except Exception as exc:
             logger.error(
                 "fetch_failed",
                 duration_ms=(time.perf_counter() - started) * 1000,
-                exc_info=True,
+                exc_info=_exc_info_for_logging(exc, folder_url),
             )
             raise
 

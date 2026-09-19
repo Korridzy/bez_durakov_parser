@@ -35,6 +35,16 @@ class RaisingFetcher:
         raise RuntimeError("fetch broke")
 
 
+class UrlRaisingFetcher:
+    download_dir: str = "/tmp/downloads"
+
+    def __init__(self, folder_url: str):
+        self.folder_url = folder_url
+
+    def fetch(self) -> list[str]:
+        raise RuntimeError(f"connection failed: {self.folder_url}")
+
+
 class LoggingJobTests(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
@@ -141,6 +151,28 @@ class LoggingJobTests(unittest.TestCase):
             self.assertIn("exception", record)
             self.assertEqual(record["job_id"], started["job_id"])
         self.assertNotIn("job_id", structlog.contextvars.get_contextvars())
+
+    def test_folder_url_is_redacted_from_failure_logs_but_propagates(self):
+        some_folder_url = (
+            "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz"
+        )
+        original_message = f"connection failed: {some_folder_url}"
+        fetcher = UrlRaisingFetcher(some_folder_url)
+        config = {**self.config, "google_drive_folder_url": some_folder_url}
+
+        with (
+            patch.object(fetch_pipeline, "XLSM_FETCH_CONFIG", config),
+            patch.object(fetch_pipeline, "create_fetcher", return_value=fetcher),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            fetch_pipeline.run_fetch()
+
+        self.assertEqual(str(raised.exception), original_message)
+        self.assertIn(some_folder_url, str(raised.exception))
+        records = self.records()
+        self.assertTrue(records)
+        for record in records:
+            self.assertNotIn(some_folder_url, json.dumps(record))
 
     def test_folder_url_is_never_logged(self):
         _ = self.run_successfully()

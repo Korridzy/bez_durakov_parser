@@ -42,7 +42,7 @@ class SeleniumFetcher(BaseFetcher):
         Returns:
             List of file names (strings) that were downloaded and added
         """
-        self._log(f"Starting Selenium fetch from: {self.folder_url}")
+        self._log("Starting Selenium fetch")
 
         # Use download directory from base class (with fallback logic)
         target_download_dir = self.download_dir
