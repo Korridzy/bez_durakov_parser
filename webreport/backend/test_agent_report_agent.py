@@ -221,10 +221,12 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
             request_timeout=60,
             model_kwargs={"num_retries": 0},
         )
+        injected = graph_builder.call_args.args[0]
+        self.assertIsInstance(injected, self.runtime_module.OutboundReasoningFilter)
         self.assertIsInstance(
-            graph_builder.call_args.args[0], self.runtime_module.OutboundReasoningFilter
+            injected.client, self.runtime_module.CorrelatedModelClient
         )
-        self.assertIs(graph_builder.call_args.args[0].client, client)
+        self.assertIs(injected.client.client, client)
 
     def _construct_clients(self, gate_setting):
         """Build a knowledge-backed system over a fake proxy module and report its calls."""
@@ -289,7 +291,10 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(
                     injected, self.runtime_module.OutboundReasoningFilter
                 )
-                self.assertIs(injected.client, client)
+                self.assertIsInstance(
+                    injected.client, self.runtime_module.CorrelatedModelClient
+                )
+                self.assertIs(injected.client.client, client)
                 self.assertEqual(
                     gate_builder.call_args.args[3],
                     self.runtime_module.CONFIG.AGENT_SCOPE_GATE_HISTORY_TURNS,

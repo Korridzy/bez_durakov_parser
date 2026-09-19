@@ -14,6 +14,8 @@ from typing import (
     runtime_checkable,
 )
 
+from bd_shared.logging_setup import adopt_third_party_loggers
+from agent.correlation import CorrelatedModelClient
 from agent.graph import (
     CompiledGraph,
     ModelClient,
@@ -119,16 +121,21 @@ def _parse_handle(payload: object) -> tuple[str, ToolArgs]:
 
 def _new_model_client() -> ModelClient:
     module: object = importlib.import_module("langchain_litellm")
+    adopt_third_party_loggers("LiteLLM", "LiteLLM Proxy", "LiteLLM Router")
     if not isinstance(module, ChatModelModule):
         raise RuntimeDependencyError("Invalid chat model module")
+    model = "litellm_proxy/" + CONFIG.AGENT_MODEL
     # Anthropic-style thinking models are unsupported because thinking_blocks do not round-trip.
     return OutboundReasoningFilter(
-        module.ChatLiteLLM(
-            model="litellm_proxy/" + CONFIG.AGENT_MODEL,
-            api_base=CONFIG.LITELLM_BASE_URL,
-            api_key="sk-noop",
-            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
-            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        CorrelatedModelClient(
+            module.ChatLiteLLM(
+                model=model,
+                api_base=CONFIG.LITELLM_BASE_URL,
+                api_key="sk-noop",
+                request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+                model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+            ),
+            model=model,
         )
     )
 
@@ -136,16 +143,21 @@ def _new_model_client() -> ModelClient:
 def _new_gate_model_client() -> ModelClient:
     """Build the scope gate's own client, falling back to the agent model."""
     module: object = importlib.import_module("langchain_litellm")
+    adopt_third_party_loggers("LiteLLM", "LiteLLM Proxy", "LiteLLM Router")
     if not isinstance(module, ChatModelModule):
         raise RuntimeDependencyError("Invalid chat model module")
     gate_model = CONFIG.AGENT_SCOPE_GATE_MODEL.strip() or CONFIG.AGENT_MODEL
+    model = "litellm_proxy/" + gate_model
     return OutboundReasoningFilter(
-        module.ChatLiteLLM(
-            model="litellm_proxy/" + gate_model,
-            api_base=CONFIG.LITELLM_BASE_URL,
-            api_key="sk-noop",
-            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
-            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        CorrelatedModelClient(
+            module.ChatLiteLLM(
+                model=model,
+                api_base=CONFIG.LITELLM_BASE_URL,
+                api_key="sk-noop",
+                request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+                model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+            ),
+            model=model,
         )
     )
 
