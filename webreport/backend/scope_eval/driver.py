@@ -37,7 +37,6 @@ class Turn:
     id: str
     message: str
     acceptable_verdicts: tuple[str, ...]
-    borderline: bool
 
 
 @dataclass(frozen=True)
@@ -125,10 +124,7 @@ def _load_turn(value: object, location: str) -> Turn:
     if len(set(verdicts)) != len(verdicts):
         raise EvalConfigError(f"{location}.acceptable_verdicts contains duplicates")
 
-    borderline = table.get("borderline", False)
-    if type(borderline) is not bool:
-        raise EvalConfigError(f"{location}.borderline must be a boolean")
-    return Turn(turn_id, message, verdicts, borderline)
+    return Turn(turn_id, message, verdicts)
 
 
 def load_case_set(path: Path) -> CaseSet:
