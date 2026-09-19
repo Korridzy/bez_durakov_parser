@@ -1,12 +1,11 @@
-from logging.config import fileConfig
-
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
 
+from bd_shared.config import DATABASE_URL, LOG_LEVEL, SQLALCHEMY_LOGGING
 from bd_shared.db import Base
-from bd_shared.config import DATABASE_URL
+from bd_shared.logging_setup import configure_logging
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -19,10 +18,14 @@ config.set_main_option("sqlalchemy.url", DATABASE_URL)
 # MySQL doesn't need batch mode
 render_as_batch = False
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+configure_logging(
+    "bd-alembic",
+    level=LOG_LEVEL,
+    logger_levels={
+        "alembic": "INFO",
+        **({"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else {}),
+    },
+)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

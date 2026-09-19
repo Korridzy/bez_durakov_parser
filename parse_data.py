@@ -27,6 +27,15 @@ def parse_xlsm(file_path):
 
 # Main code to get the list of files from the command line
 if __name__ == "__main__":
+    from bd_shared.config import LOG_LEVEL, SQLALCHEMY_LOGGING
+    from bd_shared.logging_setup import configure_logging
+
+    configure_logging(
+        "bd-parser-cli",
+        level=LOG_LEVEL,
+        logger_levels={"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else None,
+    )
+
     parser = argparse.ArgumentParser(description="Parse all XLSM files in a directory.")
     parser.add_argument('directory', type=str, help='Path to the directory containing XLSM files')
     parser.add_argument('--no-save', action='store_true', help='Do not save data to database')

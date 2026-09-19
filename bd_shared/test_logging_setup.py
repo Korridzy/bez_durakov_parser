@@ -6,7 +6,9 @@ import io
 import json
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 import uuid
 from decimal import Decimal
@@ -16,7 +18,9 @@ from unittest import mock
 
 import structlog
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from bd_shared import logging_setup  # noqa: E402
 
@@ -62,6 +66,53 @@ class TestLoggingSetup(unittest.TestCase):
     @staticmethod
     def parsed_lines(stream):
         return [json.loads(line) for line in stream.getvalue().splitlines()]
+
+    def test_importing_database_does_not_configure_root_logging(self):
+        environment = {**os.environ, "BD_CONFIG_FILE": "test_config.toml"}
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import bd_shared.db; import logging; "
+                "print(len(logging.root.handlers), logging.root.level)",
+            ],
+            cwd=PROJECT_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0 30")
+
+    def test_parse_data_empty_directory_exits_cleanly(self):
+        environment = {**os.environ, "BD_CONFIG_FILE": "test_config.toml"}
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "parse_data.py", directory, "--no-save"],
+                cwd=PROJECT_ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("No XLSM files found", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_alembic_offline_upgrade_uses_shared_logging(self):
+        environment = {**os.environ, "BD_CONFIG_FILE": "test_config.toml"}
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
+            cwd=PROJECT_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+        self.assertNotIn("fileConfig", result.stdout + result.stderr)
 
     def test_public_constants_and_configure_signature_are_exact(self):
         self.assertEqual(logging_setup.ENV_LEVEL, "BD_LOG_LEVEL")
