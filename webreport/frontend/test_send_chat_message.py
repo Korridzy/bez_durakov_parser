@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 import requests
@@ -10,6 +11,8 @@ import main
 
 
 class _InvalidJsonResponse:
+    status_code = 200
+
     def raise_for_status(self) -> None:
         return None
 
@@ -18,6 +21,8 @@ class _InvalidJsonResponse:
 
 
 class _ListJsonResponse:
+    status_code = 200
+
     def raise_for_status(self) -> None:
         return None
 
@@ -26,6 +31,8 @@ class _ListJsonResponse:
 
 
 class _UnavailableResponse:
+    status_code = 503
+
     def raise_for_status(self) -> None:
         raise requests.HTTPError(response=_ErrorPayload())
 
@@ -79,6 +86,7 @@ class SendChatMessageTest(unittest.TestCase):
             f"{main.API_BASE_URL}/api/chat",
             json={"message": "покажи все игры", "session_id": "test"},
             timeout=150,
+            headers={"X-Request-ID": unittest.mock.ANY},
         )
         self.assertEqual(
             {

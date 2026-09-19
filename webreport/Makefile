@@ -159,7 +159,7 @@ test-e2e-setup:
 
 test-e2e:
 	@echo "🎭 Running the offline stub-backed Playwright lane..."
-	cd frontend && poetry run pytest tests_e2e -x -q
+	cd frontend && PYTHONPATH="$(abspath ..)" poetry run pytest tests_e2e -x -q
 	@echo ""
 
 clean:

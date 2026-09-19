@@ -1,9 +1,13 @@
 import os
+import time
 import uuid
+from collections.abc import Callable
+from typing import cast
 
 import requests
 import streamlit as st
 
+from bd_shared.logging_setup import configure_logging, get_logger
 from chat_pane import process_pending_request, render_chat_pane
 from report_pane import render_report_pane
 from split_pane import render_split_pane_controller
@@ -11,6 +15,9 @@ from split_pane import render_split_pane_controller
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 CHAT_REQUEST_TIMEOUT_SECONDS = int(os.environ["CHAT_REQUEST_TIMEOUT_SECONDS"])
+
+configure_logging("webreport-frontend")
+logger = get_logger(__name__)
 
 st.set_page_config(
     page_title="Отчёты по данным",
@@ -93,9 +100,52 @@ def init_session_state() -> None:
             st.session_state[name] = value
 
 
+def _backend_call(
+    call: Callable[..., requests.Response],
+    method: str,
+    path: str,
+    **kwargs: object,
+) -> requests.Response:
+    request_id = uuid.uuid4().hex
+    headers = dict(cast(dict[str, str], kwargs.pop("headers", {})))
+    headers["X-Request-ID"] = request_id
+    kwargs["headers"] = headers
+    session_id = (
+        st.session_state.get("session_id")
+        if hasattr(st.session_state, "get")
+        else getattr(st.session_state, "session_id", None)
+    )
+    started_at = time.perf_counter()
+    try:
+        response = call(f"{API_BASE_URL}{path}", **kwargs)
+    except requests.RequestException:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.warning(
+            "backend_request_failed",
+            method=method,
+            path=path,
+            duration_ms=duration_ms,
+            request_id=request_id,
+            session_id=session_id,
+            exc_info=True,
+        )
+        raise
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "backend_request",
+        method=method,
+        path=path,
+        status=response.status_code,
+        duration_ms=duration_ms,
+        request_id=request_id,
+        session_id=session_id,
+    )
+    return response
+
+
 def check_api_health() -> bool:
     try:
-        response = requests.get(f"{API_BASE_URL}/health", timeout=2)
+        response = _backend_call(requests.get, "GET", "/health", timeout=2)
     except requests.RequestException:
         return False
     return response.status_code == 200
@@ -103,8 +153,10 @@ def check_api_health() -> bool:
 
 def send_chat_message(message: str) -> dict[str, object]:
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/api/chat",
+        response = _backend_call(
+            requests.post,
+            "POST",
+            "/api/chat",
             json={"message": message, "session_id": st.session_state.session_id},
             timeout=CHAT_REQUEST_TIMEOUT_SECONDS,
         )
@@ -150,8 +202,10 @@ def send_chat_message(message: str) -> dict[str, object]:
 
 def clear_conversation() -> None:
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/api/clear/{st.session_state.session_id}",
+        response = _backend_call(
+            requests.post,
+            "POST",
+            f"/api/clear/{st.session_state.session_id}",
             timeout=10,
         )
         response.raise_for_status()
