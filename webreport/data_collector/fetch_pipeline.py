@@ -4,16 +4,20 @@ Adapted from root xlsm_fetch.py for use as an importable module
 called by APScheduler. Exposes run_fetch() as the main entry point.
 """
 
-import logging
+import time
+import uuid
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
+
 from bd_shared.bd_game import BdGame
-from bd_shared.config import XLSM_FETCH_CONFIG
+from bd_shared.config import LOG_LEVEL, SQLALCHEMY_LOGGING, XLSM_FETCH_CONFIG
 from bd_shared.db_helpers import initialize_database, save_game_to_database
+from bd_shared.logging_setup import configure_logging, get_logger
 
 if TYPE_CHECKING:
     from .xlsm_fetch import SeleniumFetcher
@@ -23,7 +27,7 @@ else:
     ).SeleniumFetcher
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def create_fetcher(
@@ -63,20 +67,18 @@ def process_downloaded_files(files, download_dir):
         tuple: (successful_parses, successful_saves)
     """
     if not files:
-        logger.info("No files to process")
+        logger.info("no_files_to_process")
         return 0, 0
 
     if download_dir is None:
-        logger.error("Download directory is not configured")
+        logger.error("download_dir_missing")
         return 0, 0
 
     # Initialize database connection
     db = initialize_database()
     if not db:
-        logger.error("Failed to initialize database connection")
+        logger.error("database_unavailable")
         return 0, 0
-
-    logger.info("Processing downloaded files")
 
     successful_parses = 0
     successful_saves = 0
@@ -90,64 +92,50 @@ def process_downloaded_files(files, download_dir):
 
     for file_name in normalized_files:
         file_path = Path(download_dir) / file_name
-
-        logger.info("Processing downloaded file: %s", file_name)
+        parsed = False
+        saved = False
 
         if not file_path.exists():
-            logger.warning("Downloaded file not found locally: %s", file_path)
-            continue
-
-        game = BdGame()
-
-        if game.parse_from_file(str(file_path)):
-            successful_parses += 1
-            logger.info("Successfully parsed downloaded file: %s", file_name)
-
-            if save_game_to_database(game, db):
-                successful_saves += 1
-            else:
-                logger.warning(
-                    "Failed to save downloaded file to database: %s", file_name
-                )
+            logger.warning("downloaded_file_missing", file_name=file_name)
         else:
-            logger.error("Failed to parse downloaded file: %s", file_name)
+            game = BdGame()
+            parsed = bool(game.parse_from_file(str(file_path)))
+            if parsed:
+                successful_parses += 1
+                saved = bool(save_game_to_database(game, db))
+                if saved:
+                    successful_saves += 1
+
+        logger.info(
+            "downloaded_file_processed",
+            file_name=file_name,
+            parsed=parsed,
+            saved=saved,
+        )
 
     logger.info(
-        "Downloaded file processing completed: files=%d parsed=%d saved=%d",
-        len(normalized_files),
-        successful_parses,
-        successful_saves,
+        "downloaded_files_processed",
+        files=len(normalized_files),
+        parsed=successful_parses,
+        saved=successful_saves,
     )
 
     if successful_parses < len(normalized_files):
         logger.warning(
-            "Downloaded files failed to parse: %d",
-            len(normalized_files) - successful_parses,
+            "downloaded_files_parse_failures",
+            count=len(normalized_files) - successful_parses,
         )
 
     if successful_saves < successful_parses:
         logger.warning(
-            "Parsed files failed to save: %d",
-            successful_parses - successful_saves,
+            "downloaded_files_save_failures",
+            count=successful_parses - successful_saves,
         )
 
     return successful_parses, successful_saves
 
 
-def run_fetch() -> list[str]:
-    """Main entry point for the fetch pipeline.
-
-    Called by APScheduler to fetch XLSM files from Google Drive,
-    parse them, and save to database.
-
-    Returns:
-        list: List of downloaded files.
-
-    Raises:
-        ValueError: If google_drive_folder_url is missing from config.
-    """
-    logging.info(f"Fetch started at {datetime.now()}")
-
+def _run_fetch() -> list[str]:
     config = XLSM_FETCH_CONFIG
 
     if not config.get("google_drive_folder_url"):
@@ -165,40 +153,37 @@ def run_fetch() -> list[str]:
         modes_to_try = [str(mode) for mode in modes_config]
     else:
         raise TypeError("xlsm_fetch.modes must be a string or iterable of strings")
-    logger.info(
-        f"Using mode: {modes_to_try[0] if len(modes_to_try) == 1 else modes_to_try}"
-    )
+    logger.info("fetch_modes_selected", modes=modes_to_try)
 
     folder_url = config["google_drive_folder_url"]
-    logger.info(f"Folder URL: {folder_url}")
 
     files = []
     download_dir = None
     fetch_succeeded = False
 
     for mode in modes_to_try:
-        logger.info(f"Trying mode: {mode}")
+        logger.info("fetch_method_attempted", mode=mode)
 
         try:
             fetcher = create_fetcher(mode, folder_url, config, headless=headless)
             files = fetcher.fetch()
             download_dir = fetcher.download_dir
             fetch_succeeded = True
-            logger.info(f"Successfully fetched {len(files)} files using {mode}")
+            logger.info("files_fetched", count=len(files), mode=mode)
             break
 
-        except Exception as e:
-            logger.error(f"Error with {mode}: {e}")
+        except Exception:
+            logger.error("fetch_method_failed", mode=mode, exc_info=True)
             if len(modes_to_try) == 1:
                 raise
             continue
 
     if not fetch_succeeded:
-        logger.warning("All methods failed")
+        logger.warning("fetch_all_methods_failed")
         return []
 
     if not files:
-        logger.info("No new files found")
+        logger.info("no_new_files")
         return []
 
     _ = process_downloaded_files(files, download_dir)
@@ -206,8 +191,41 @@ def run_fetch() -> list[str]:
     return files
 
 
+def run_fetch() -> list[str]:
+    """Fetch XLSM files with a correlation id bound for the full job run."""
+    with structlog.contextvars.bound_contextvars(
+        job_id=uuid.uuid4().hex, job_name="xlsm_fetch"
+    ):
+        started = time.perf_counter()
+        logger.info(
+            "fetch_started",
+            marker="Fetch started at",
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+        try:
+            files = _run_fetch()
+        except Exception:
+            logger.error(
+                "fetch_failed",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                exc_info=True,
+            )
+            raise
+
+        logger.info(
+            "fetch_completed",
+            file_count=len(files),
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+        return files
+
+
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    configure_logging(
+        "webreport-data-collector",
+        level=LOG_LEVEL,
+        logger_levels={"sqlalchemy.engine": LOG_LEVEL}
+        if SQLALCHEMY_LOGGING
+        else None,
     )
     _ = run_fetch()
