@@ -14,7 +14,7 @@ import os
 import unittest
 from pathlib import Path
 from typing import Final, get_args
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
@@ -735,15 +735,18 @@ class ScopeGateDecisionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ScopeGateGraphTests(unittest.IsolatedAsyncioTestCase):
-    """One scripted turn per verdict, driven through the real runtime and graph.
+    """One scripted turn per verdict, plus the fail-open and no-knowledge paths,
+    driven through the real runtime and graph.
 
-    Both clients are `ScriptedModel`s, so "the agent never ran" is proven by the
-    script itself: an agent client seeded with no responses raises the moment it
-    is invoked, which fails louder than an invocation count read afterwards.
+    The agent client is always a `ScriptedModel`, so "the agent never ran" is
+    proven by the script itself: a client seeded with no responses raises the
+    moment it is invoked, which fails louder than an invocation count read
+    afterwards.
     """
 
     @classmethod
     def setUpClass(cls):
+        cls.httpx = importlib.import_module("httpx")
         cls.checkpoint = importlib.import_module("langgraph.checkpoint.sqlite.aio")
         cls.knowledge_module = importlib.import_module("agent.knowledge")
         cls.main = importlib.import_module("main")
@@ -981,6 +984,190 @@ class ScopeGateGraphTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def run_fail_open_turn(self, gate, thread_id, question, answer):
+        """Drive one turn whose gate fails, with an agent client that answers once."""
+        knowledge = self.load_fixture_knowledge()
+        agent_model = ScriptedModel([self.messages.AIMessage(content=answer)])
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_gated_system(
+                model=agent_model,
+                gate=gate,
+                saver=saver,
+                knowledge=knowledge,
+            )
+            with self.assertLogs("agent.scope_gate", level="WARNING") as captured:
+                response = await system.process_user_request(question, thread_id)
+            history = await self.history_entries(saver, thread_id)
+        return response, history, agent_model, service, captured, knowledge
+
+    def assert_failed_open_turn(
+        self,
+        turn,
+        *,
+        kind,
+        question,
+        answer,
+    ):
+        """The fail-open contract: the agent answers, one warning, no gate reply."""
+        response, history, agent_model, service, captured, knowledge = turn
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["verdict"], "gate_unavailable")
+        self.assertEqual(response["message"], answer)
+        self.assertNotIn("error", response)
+        self.assertEqual(response["query_info"], [])
+        self.assertEqual(service.calls, [])
+        # The agent ran, and under the prompt rules alone: a failed gate contributes
+        # no note, so the turn's system prompt is byte-identical to the ungated one.
+        self.assertEqual(agent_model.invocation_count, 1)
+        self.assertEqual(
+            agent_model.requests[0][0].content,
+            self.knowledge_module.compose_system_prompt(knowledge),
+        )
+        self.assertEqual(len(captured.records), 1)
+        log_message = captured.records[0].getMessage()
+        self.assertIn(f"kind={kind}", log_message)
+        self.assertIn("action=fail_open", log_message)
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": answer, "reasoning": None},
+            ],
+        )
+
+    async def test_a_raising_gate_client_fails_open_and_the_agent_answers(self):
+        """Given a gate client that raises, When the turn runs, Then the agent answers once."""
+        question = "Покажи команды"
+        answer = "Команды перечислены."
+        gate = StubGateClient(
+            error=self.httpx.TransportError("RESPONSE_SENTINEL"),
+        )
+
+        turn = await self.run_fail_open_turn(
+            gate, "gate-raising-thread", question, answer
+        )
+
+        self.assert_failed_open_turn(
+            turn,
+            kind="transport",
+            question=question,
+            answer=answer,
+        )
+        self.assertEqual(gate.invocation_count, 1)
+
+    async def test_an_unparsable_gate_response_fails_open_and_the_agent_answers(self):
+        """Given gate output that does not parse, When the turn runs, Then the agent answers once."""
+        question = "Покажи команды"
+        answer = "Команды перечислены."
+        gate = StubGateClient(
+            response=StubResponse(content="RESPONSE_SENTINEL is not a decision"),
+        )
+
+        turn = await self.run_fail_open_turn(
+            gate, "gate-unparsable-thread", question, answer
+        )
+
+        self.assert_failed_open_turn(
+            turn,
+            kind="validation",
+            question=question,
+            answer=answer,
+        )
+        self.assertEqual(gate.invocation_count, 1)
+
+    async def test_a_knowledge_free_turn_builds_no_gate_and_keeps_its_model_input(self):
+        """Given no knowledge, When a turn runs, Then no gate exists and the turn is unchanged."""
+        question = "покажи все игры"
+        answer = "Игры перечислены."
+        thread_id = "gate-no-knowledge-thread"
+        agent_model = ScriptedModel([self.messages.AIMessage(content=answer)])
+        gate_factory = Mock(
+            side_effect=AssertionError(
+                "a knowledge-free system must construct no gate client"
+            )
+        )
+        gate_builder = Mock(
+            side_effect=AssertionError(
+                "a knowledge-free system must build no gate node"
+            )
+        )
+
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            with (
+                patch.object(
+                    self.report_module, "_new_gate_model_client", gate_factory
+                ),
+                patch.object(self.report_module, "build_gate_node", gate_builder),
+            ):
+                service = self.support.StubService()
+                system = self.report_module.ReportAgentSystem(
+                    service=service,
+                    model_client=agent_model,
+                    checkpointer=saver,
+                    timeout_seconds=60,
+                )
+                response = await system.process_user_request(question, thread_id)
+            history = await self.history_entries(saver, thread_id)
+
+        gate_factory.assert_not_called()
+        gate_builder.assert_not_called()
+        self.assertTrue(response["success"])
+        self.assertIsNone(response["verdict"])
+        self.assertEqual(response["message"], answer)
+        self.assertEqual(response["query_info"], [])
+        self.assertIsNone(response["data"])
+        self.assertIsNone(response["reasoning"])
+        self.assertEqual(service.calls, [])
+        # Today's no-knowledge model input: the ungated system prompt and the question.
+        self.assertEqual(agent_model.invocation_count, 1)
+        model_input = agent_model.requests[0]
+        self.assertEqual(
+            [type(message).__name__ for message in model_input],
+            ["SystemMessage", "HumanMessage"],
+        )
+        self.assertEqual(
+            model_input[0].content,
+            self.knowledge_module.compose_system_prompt(None),
+        )
+        self.assertEqual(model_input[1].content, question)
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": answer, "reasoning": None},
+            ],
+        )
+
+    async def test_an_unexpected_gate_bug_surfaces_instead_of_failing_open(self):
+        """Given a KeyError inside the gate call, When the turn runs, Then it is not swallowed.
+
+        The mutation guard for the narrow exception taxonomy: widening `call_gate`'s
+        handlers to `except Exception` turns this bug into a silent `gate_unavailable`
+        turn, which this case rejects on every one of its assertions.
+        """
+        agent_model = ScriptedModel([self.messages.AIMessage(content="never reached")])
+        gate = StubGateClient(error=KeyError("GATE_BUG_SENTINEL"))
+
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_gated_system(
+                model=agent_model,
+                gate=gate,
+                saver=saver,
+                knowledge=self.load_fixture_knowledge(),
+            )
+            with self.assertNoLogs("agent.scope_gate", level="WARNING"):
+                response = await system.process_user_request(
+                    "Покажи команды", "gate-bug-thread"
+                )
+
+        self.assertFalse(response["success"])
+        self.assertIsNone(response["verdict"])
+        self.assertIn("GATE_BUG_SENTINEL", response["error"])
+        self.assertEqual(gate.invocation_count, 1)
+        self.assertEqual(agent_model.invocation_count, 0)
+        self.assertEqual(service.calls, [])
 
 
 if __name__ == "__main__":
