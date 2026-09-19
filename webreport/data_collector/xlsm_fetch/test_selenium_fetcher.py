@@ -1,5 +1,6 @@
 """Regression tests for Google Drive browser controls."""
 
+import logging
 import tempfile
 import unittest
 
@@ -73,6 +74,33 @@ class SeleniumFetcherTests(unittest.TestCase):
             self.assertTrue(clicked)
             self.assertEqual(driver.row.keys, (Keys.SHIFT, Keys.F10))
             self.assertTrue(driver.menu_item.clicked)
+
+    def test_log_redacts_folder_url_and_preserves_other_messages(self):
+        folder_url = "https://drive.google.com/drive/folders/TESTFOLDERID999"
+        with tempfile.TemporaryDirectory() as download_dir:
+            fetcher = SeleniumFetcher(folder_url, download_dir)
+
+            with self.assertLogs(
+                "webreport.data_collector.xlsm_fetch.base_fetcher",
+                level=logging.INFO,
+            ) as captured:
+                fetcher._log(
+                    f"Error: boom at {fetcher.folder_url}",
+                    level=logging.ERROR,
+                )
+                fetcher._log("A message without the folder URL")
+
+        output = "\n".join(captured.output)
+        self.assertNotIn(folder_url, output)
+        self.assertIn("[REDACTED_FOLDER_URL]", output)
+        self.assertEqual(
+            captured.records[0].getMessage(),
+            "Error: boom at [REDACTED_FOLDER_URL]",
+        )
+        self.assertEqual(
+            captured.records[1].getMessage(),
+            "A message without the folder URL",
+        )
 
 
 if __name__ == "__main__":

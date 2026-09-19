@@ -36,6 +36,17 @@ class SeleniumFetcher(BaseFetcher):
         super().__init__(folder_url, download_dir)
         self.headless = headless
 
+    def _log(
+        self,
+        msg: str,
+        *,
+        level: int = logging.INFO,
+        exc_info: bool = False,
+    ) -> None:
+        if self.folder_url and self.folder_url in msg:
+            msg = msg.replace(self.folder_url, "[REDACTED_FOLDER_URL]")
+        super()._log(msg, level=level, exc_info=exc_info)
+
     def fetch(self) -> List[str]:
         """Fetch list of .xlsm files from Google Drive folder.
 
