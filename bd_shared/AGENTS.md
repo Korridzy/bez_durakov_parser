@@ -13,6 +13,10 @@ Central library providing ORM models, database operations, configuration, and ga
 | `db_helpers.py` | High-level helpers: `initialize_database()`, `save_game_to_database()` |
 | `config.py` | TOML config loader. Includes `DATABASE_URL`, `DEFAULT_GAME_DATE` and `XLSM_FETCH_CONFIG`. `[webreport]` provides `agent_scope_gate_model` and `agent_scope_gate_history_turns` for the scope gate |
 | `config.toml` | Tracked base config. `config.local.toml` is an ignored server-local overlay; `BD_CONFIG_FILE` selects a complete alternate config |
+| `logging_setup.py` | Shared structlog and standard-library logging configuration |
+| `log_redaction.py` | Redaction of sensitive structured-log fields |
+| `test_logging_setup.py` | Tests for logging configuration and rendering |
+| `test_log_redaction.py` | Tests for sensitive-field redaction |
 | `test_config.toml` | Test DB config — used by `test_alembic_migration.py` |
 | `knowledge/` | Operator knowledge folders. Each manifest supplies dataset, persona and scope, with Markdown topics for `read_knowledge` |
 
@@ -39,6 +43,7 @@ Central library providing ORM models, database operations, configuration, and ga
 - `normalize_team_name()` MUST be called before any team name storage/comparison
 - `BdGame._game_data` dict is the canonical in-memory representation; use `get_data()` to access
 - Config loading is eager (module-level) — importing `config.py` loads `config.toml` and its optional `config.local.toml` overlay immediately
+- Entry points call `configure_logging`; libraries use `get_logger` and never call `basicConfig`
 - `db_helpers.py` re-exports `normalize_team_name` for backward compat
 
 ## ANTI-PATTERNS

@@ -41,6 +41,7 @@ parser/
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | FastAPI + Streamlit + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
+| Logging | `bd_shared/logging_setup.py` | Shared structlog and standard-library pipeline. Entry points configure it once per process |
 | Serve another dataset | `make webreport-start DATASET=<name>` | Reads `DATASET_DIR` (default `range/<name>`), merges its `config/config.local.toml` over the tracked config and mounts it at `/dataset` in the backend |
 | Analysis examples | `examples/four_buckets.py` | Shows ORM usage for custom analysis |
 
@@ -50,6 +51,7 @@ parser/
 - **Game data and the parser**: MySQL 8.0 only, connected via `pymysql`. The webreport backend is not restricted this way, since it serves whatever MySQL, PostgreSQL or SQLite database `[database]` and `[dataset]` name
 - **Agent checkpoints**: SQLite is allowed only for the backend-owned checkpoint store at `../vm/backend/checkpoints`; it is not a game-data store.
 - **Config**: TOML-based (`bd_shared/config.toml`). Test config: `bd_shared/test_config.toml`
+- **Logging**. Libraries never call `basicConfig`; entry points call `configure_logging`.
 - **Team names**: Always normalized via `normalize_team_name()` — NFC unicode, lowercase, whitespace-collapsed
 - **Game data**: All game data flows through `BdGame` dataclass. Never access raw XLSM directly after parsing
 - **Imports**: Use `from bd_shared.db import Database` not `from bd_shared import *`
@@ -66,6 +68,7 @@ parser/
 - **DO NOT** put dataset queries in the backend. They belong in the operator tool module named by `dataset.tools_module`, which receives the engine the backend built and made read-only.
 - `webreport/backend/agent/` and `webreport/backend/agents/` must never write dataset SQL of their own; they discover their tools from the operator module. The only sanctioned exception is the checkpoint saver’s own thread-recency enumeration query against its `checkpoints` table.
 - **DO NOT** hardcode a dataset persona or scope in agent code; put them in the knowledge manifest
+- **DO NOT** call `basicConfig` from a library. Process entry points own `configure_logging`.
 
 ## COMMANDS
 
@@ -95,6 +98,7 @@ cd webreport && make test-e2e                    # Offline Playwright reasoning-
 - `xlsm_archive/` stores 178+ XLSM files — all gitignored except `.gitkeep`
 - `range/` is entirely gitignored — contains ad-hoc analysis scripts and reports
 - Game rounds: Выбор (vybor), Числа (chisla), Преферанс (pref), Пары (pairs), Разоблачение (razobl), Аукцион (auction), Момент Истины (mot)
+- `BD_LOG_*` configures logging. `BD_ENVIRONMENT` and `BD_APP_VERSION` attach static fields. `X-Request-ID` follows each HTTP request through backend processing.
 - Default game date `02.03.2022` in config triggers a warning — means date was not set in the source file
 - The agent's persona and dataset scope come from the knowledge manifest, not from code. With dataset knowledge loaded, each chat turn passes the dataset scope gate before the ReAct agent runs.
 - `DATASET` selects a dataset directory that lives outside the repository. It supplies its own config overlay (`config/config.local.toml`, exported as `BD_CONFIG_LOCAL_FILE`), tool module, knowledge folder and an optional `webreport.compose.yml` that connects the backend to the network its database runs on. With `DATASET` set only LiteLLM, backend and frontend start, checkpoints move to `checkpoints-<name>.db`, and `upgrade-db`, `mysql-start`, `mysql-stop`, `fetch-data` and `fetch-data-log` refuse to run. With `DATASET` unset nothing changes. One dataset is served at a time: the Compose project is the same one, so `make webreport-stop` takes the whole stack down whichever dataset it was serving.

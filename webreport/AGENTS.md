@@ -10,8 +10,10 @@ SOA web system: Streamlit chat UI → FastAPI REST API → a dataset scope gate 
 webreport/
 ├── backend/
 │   ├── main.py                        # FastAPI app, endpoints, Pydantic models
+│   ├── request_context.py             # ASGI request ID middleware and request logs
 │   ├── agents/report_runtime.py       # LangGraph report agent over the discovered tools
 │   ├── agent/toolmodule.py            # Loads the operator module and discovers its tools
+│   ├── agent/correlation.py           # LiteLLM metadata and request header correlation
 │   ├── agent/engine.py                # Builds the one engine, read-only per dialect
 │   └── ../bd_shared/tools/bez_durakov.py  # The default operator module for this deployment
 ├── frontend/
@@ -19,6 +21,7 @@ webreport/
 ├── docker-compose.yml                 # MySQL + backend + frontend on webreport-network
 ├── Dockerfile.backend                 # Backend container (mounts bd_shared as /bd_shared)
 ├── Dockerfile.frontend                # Frontend container
+├── LOGGING.md                         # Logging, correlation, redaction, and collection guide
 ├── Makefile                           # start/stop/restart/logs/build/test/clean
 ├── generate_env.py                    # Writes Compose + per-service env files
 ├── backend/test_system.py             # unittest-based tests for services, agents, API
@@ -50,6 +53,7 @@ webreport/
 - **Checkpointing**: The backend persists LangGraph threads in its SQLite store at `../vm/backend/checkpoints`. The game data this deployment serves remains MySQL.
 - **Backend topology**: Run exactly one backend replica. Shared SQLite checkpoints do not support horizontal backend scaling.
 - **Config flow**: `bd_shared/config.toml` + optional `config.local.toml` → `bd_shared/config.py` → `generate_env.py` → Compose/per-service `.env*` files → `docker-compose.yml`
+- **ASGI wrapper**. Keep `application` as the outermost wrapper; start it with `uvicorn.run("main:application")`.
 - **Dataset switch**: `DATASET` moves the overlay out of the repository through `BD_CONFIG_LOCAL_FILE`, and the dataset directory supplies its own tool module, knowledge folder and optional `webreport.compose.yml` for database networking. Nothing dataset-specific belongs in this directory.
 - **CORS config**: backend reads allowed origins from the resolved `[webreport].allowed_origins`; use explicit frontend origins, never `*` with credentialed CORS
 - **Container networking**: with the bundled MySQL the backend connects at `mysql:3306` on the Docker network, not localhost
@@ -76,6 +80,8 @@ make rebuild    # down + build + up
 make test       # Run the backend suite plus both acceptance lanes (SQLite and PostgreSQL)
 make clean      # Remove __pycache__, .pyc files
 ```
+
+The `make test` chain includes `test_request_context.py` and `test_agent_correlation.py`.
 
 ## NOTES
 
