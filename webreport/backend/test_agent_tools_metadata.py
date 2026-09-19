@@ -25,6 +25,8 @@ class ToolMetadataTests(ToolsCaseBase):
                 "report_payload",
                 "rows_consumed",
                 "knowledge_bytes_consumed",
+                "scope_verdict",
+                "scope_note",
             },
         )
         self.assertIs(typing.get_origin(hints["messages"]), typing.Annotated)
@@ -39,6 +41,8 @@ class ToolMetadataTests(ToolsCaseBase):
                 "report_payload": None,
                 "rows_consumed": 0,
                 "knowledge_bytes_consumed": 0,
+                "scope_verdict": None,
+                "scope_note": None,
             }
         )
 
@@ -84,6 +88,7 @@ class ToolMetadataTests(ToolsCaseBase):
             max_topics=50,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
         knowledge = knowledge_module.load_knowledge(fixture_path, "bez_durakov", limits)
         built = self.tools_module.build_tools(self.registry, self.config, knowledge=knowledge)

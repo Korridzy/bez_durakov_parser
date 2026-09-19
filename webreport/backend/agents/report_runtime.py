@@ -25,6 +25,7 @@ from agent.graph import (
 from agent.knowledge import Knowledge, compose_system_prompt
 from agent.reasoning import OutboundReasoningFilter, current_turn_reasoning, extract_text
 from agent.registry import ToolRegistry
+from agent.scope_gate import GateNode, GateRouter, build_gate_node
 from agent.tools import ToolArgs, build_tools
 from .report_contracts import (
     ChatModelModule,
@@ -132,10 +133,29 @@ def _new_model_client() -> ModelClient:
     )
 
 
+def _new_gate_model_client() -> ModelClient:
+    """Build the scope gate's own client, falling back to the agent model."""
+    module: object = importlib.import_module("langchain_litellm")
+    if not isinstance(module, ChatModelModule):
+        raise RuntimeDependencyError("Invalid chat model module")
+    gate_model = CONFIG.AGENT_SCOPE_GATE_MODEL.strip() or CONFIG.AGENT_MODEL
+    return OutboundReasoningFilter(
+        module.ChatLiteLLM(
+            model="litellm_proxy/" + gate_model,
+            api_base=CONFIG.LITELLM_BASE_URL,
+            api_key="sk-noop",
+            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AgentExecution:
     graph: CompiledGraph
     timeout_seconds: float
+    # The gate node in front of the agent consumes one super-step of its own.
+    extra_steps: int = 0
 
 
 @final
@@ -147,6 +167,7 @@ class ReportAgentSystem:
         checkpointer: object | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         knowledge: Knowledge | None = None,
+        gate_model_client: ModelClient | None = None,
     ) -> None:
         # The backend owns the only engine and injects the service built over it, so this
         # runtime never constructs one of its own.
@@ -157,9 +178,25 @@ class ReportAgentSystem:
         self._saver: object = saver
         client = model_client if model_client is not None else _new_model_client()
         tools = build_tools(registry, CONFIG, knowledge=knowledge)
+        gate: tuple[GateNode, GateRouter] | None = None
+        if knowledge is not None:
+            gate_client = (
+                gate_model_client
+                if gate_model_client is not None
+                else _new_gate_model_client()
+            )
+            gate = build_gate_node(
+                gate_client,
+                knowledge,
+                tools,
+                CONFIG.AGENT_SCOPE_GATE_HISTORY_TURNS,
+            )
         self._execution = AgentExecution(
-            build_graph(client, tools, saver, compose_system_prompt(knowledge)),
+            build_graph(
+                client, tools, saver, compose_system_prompt(knowledge), gate=gate
+            ),
             timeout_seconds,
+            0 if gate is None else 1,
         )
 
     async def process_user_request(
@@ -168,7 +205,11 @@ class ReportAgentSystem:
         try:
             execution = self._execution
             return await self._process_agent(
-                user_message, session_id, execution.graph, execution.timeout_seconds
+                user_message,
+                session_id,
+                execution.graph,
+                execution.timeout_seconds,
+                execution.extra_steps,
             )
         except Exception as error:
             logger.exception("Report request failed")
@@ -196,20 +237,28 @@ class ReportAgentSystem:
         session_id: str,
         graph: CompiledGraph,
         timeout_seconds: float,
+        extra_steps: int,
     ) -> ReportResponse:
         try:
-            result = await wait_for(arun(graph, user_message, session_id), timeout_seconds)
+            result = await wait_for(
+                arun(graph, user_message, session_id, extra_steps=extra_steps),
+                timeout_seconds,
+            )
         except TimeoutError:
+            # No verdict is reported for an unfinished turn: the gate of this turn
+            # never produced one, and a checkpointed one belongs to an older turn.
             return failure(
                 "Время ожидания ответа агента истекло.",
                 "timeout",
                 reasoning=await self._partial_reasoning(session_id),
+                verdict=None,
             )
         if "error" in result:
             return failure(
                 "Агент превысил допустимое число шагов.",
                 RECURSION_LIMIT_MARKER,
                 reasoning=await self._partial_reasoning(session_id),
+                verdict=None,
             )
         turn_messages = current_turn_messages(result["messages"])
         query_trace = trace(turn_messages)
@@ -223,4 +272,5 @@ class ReportAgentSystem:
             query_trace,
             data,
             reasoning=current_turn_reasoning(result["messages"]),
+            verdict=result.get("scope_verdict"),
         )

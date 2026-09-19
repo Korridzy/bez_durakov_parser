@@ -17,6 +17,7 @@ class ReportResponse(TypedDict):
     timestamp: str
     message: str
     reasoning: str | None
+    verdict: str | None
     error: NotRequired[str]
 
 
@@ -68,6 +69,8 @@ class ConfigModule(AgentToolConfig, Protocol):
     AGENT_TIMEOUT_SECONDS: int
     LITELLM_BASE_URL: str
     AGENT_MODEL: str
+    AGENT_SCOPE_GATE_MODEL: str
+    AGENT_SCOPE_GATE_HISTORY_TURNS: int
     LLM_MAX_RETRIES: int
     LLM_REQUEST_TIMEOUT_SECONDS: int
 

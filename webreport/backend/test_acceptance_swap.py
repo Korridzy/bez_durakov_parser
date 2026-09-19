@@ -45,6 +45,9 @@ SCRIPTED_DATA_CALLS = (
     ("insert_reading", {"station": "north", "value": 99}),
 )
 
+# The chat turns the script drives, each of which passes through the scope gate first.
+SCRIPTED_TURNS = 3
+
 
 class _ProbeResponse:
     """A healthy LiteLLM probe response. Defined locally so test_system stays unimported."""
@@ -59,6 +62,27 @@ class _ProbeResponse:
 def setUpModule():
     """Offline lane: only loopback and the configured database host are reachable."""
     _net_guard.install()
+
+
+def _gate_script(turn_count):
+    """One in_scope decision per scripted turn, carried as the gate's schema tool call.
+
+    The gate client is injected for the same reason the agent client is: the acceptance
+    lane is offline, so a real ChatLiteLLM gate call must never be reachable from here.
+    """
+    return [
+        _messages.AIMessage(
+            content="",
+            tool_calls=[
+                tool_call(
+                    "GateDecision",
+                    {"verdict": "in_scope", "reply": None, "note": None},
+                    f"g{index}",
+                )
+            ],
+        )
+        for index in range(1, turn_count + 1)
+    ]
 
 
 def _script():
@@ -124,6 +148,7 @@ class AcceptanceSwapTests(unittest.TestCase):
         """Given a configured database, When the backend serves a turn, Then it answers from it."""
         main = self.main
         model = ScriptedModel(_script())
+        gate_model = ScriptedModel(_gate_script(SCRIPTED_TURNS))
         built_tools = []
         real_build_tools = self.runtime.build_tools
         real_system = main.ReportAgentSystem
@@ -134,7 +159,7 @@ class AcceptanceSwapTests(unittest.TestCase):
             return tools
 
         def scripted_system(**kwargs):
-            return real_system(model_client=model, **kwargs)
+            return real_system(model_client=model, gate_model_client=gate_model, **kwargs)
 
         async def run():
             with (
@@ -182,6 +207,20 @@ class AcceptanceSwapTests(unittest.TestCase):
         self.assertIsNotNone(main.knowledge)
         self.assertEqual(main.knowledge.manifest.dataset, "fixture")
         self.assertEqual(_config.DATABASE_NAME, "fixture")
+
+        # The dataset-switch criterion: this folder's own scope text is what both the gate
+        # and the agent work from, so swapping the folder swaps the conversation boundary
+        # with no code change. Asserted against the loaded text rather than a literal, so
+        # the assertion pins the wiring and not the operator's prose.
+        scope_text = main.knowledge.manifest.scope
+        self.assertTrue(scope_text)
+        self.assertEqual(gate_model.invocation_count, SCRIPTED_TURNS)
+        self.assertEqual(gate_model.bound_tool_names, ["GateDecision"])
+        gate_prompt = "\n".join(str(message.content) for message in gate_model.requests[0])
+        self.assertIn(scope_text, gate_prompt)
+        agent_system_message = model.requests[0][0]
+        self.assertIsInstance(agent_system_message, _messages.SystemMessage)
+        self.assertIn(scope_text, str(agent_system_message.content))
 
         # The refused write, twice, so the second attempt lands on a pooled connection that
         # has been returned and reset. This is the assertion that catches a mechanism which

@@ -32,6 +32,7 @@ knowledge_config_cases = importlib.import_module("test_agent_config")
 engine_cases = importlib.import_module("test_agent_engine")
 toolmodule_cases = importlib.import_module("test_agent_toolmodule")
 net_guard_cases = importlib.import_module("test_agent_net_guard")
+scope_gate_cases = importlib.import_module("test_agent_scope_gate")
 net_guard = importlib.import_module("test_net_guard")
 
 CHECKPOINT_PATH_ENV = "BD_CHECKPOINT_DB_PATH"
@@ -160,6 +161,10 @@ class TestKnowledgeConfig(knowledge_config_cases.KnowledgeConfigTests):
     pass
 
 
+class TestScopeGateConfig(knowledge_config_cases.ScopeGateConfigTests):
+    """The two scope gate keys and the startup validation that judges them."""
+
+
 class TestDatabaseNameDerivation(knowledge_config_cases.DatabaseNameDerivationTests):
     """DATABASE_NAME derivation for server and file-based URLs."""
 
@@ -214,6 +219,14 @@ class TestCheckpointer(checkpointer_cases.TestCheckpointerCases):
 
 class TestPrompt(checkpointer_cases.TestPromptCases):
     pass
+
+
+class TestScopeGateDecision(scope_gate_cases.ScopeGateDecisionTests):
+    """The gate verdict schema and the strict parser over a model response."""
+
+
+class TestScopeGateGraph(scope_gate_cases.ScopeGateGraphTests):
+    """Every scope verdict driven through the real graph with scripted clients."""
 
 if __name__ == "__main__":
     unittest.main()

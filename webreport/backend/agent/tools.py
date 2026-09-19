@@ -54,6 +54,7 @@ class AgentToolConfig(Protocol):
 
 class BuiltTool(Protocol):
     name: str
+    description: str
 
 
 class ToolMessageResult(Protocol):

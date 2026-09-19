@@ -26,6 +26,8 @@ checkpoint_ttl_seconds = 3600
 checkpoint_db_path = "/data/checkpoints.db"
 litellm_base_url = "http://litellm:4000"
 agent_model = "gpt-4o"
+agent_scope_gate_model = ""
+agent_scope_gate_history_turns = 1
 probe_retry_attempts = 5
 probe_retry_delay_seconds = 2
 probe_request_timeout_seconds = 10
@@ -40,6 +42,7 @@ knowledge_max_persona_chars = 2000
 knowledge_max_topics = 50
 knowledge_max_doc_bytes = 65536
 knowledge_max_bytes_per_turn = 131072
+knowledge_max_scope_chars = 2000
 
 [dataset]
 # Dotted import path of the Python module that exposes build_service(engine).

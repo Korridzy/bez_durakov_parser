@@ -38,8 +38,9 @@ endef
 endif
 
 COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
+CASE_FILE ?=
 
-.PHONY: help generate-env validate-knowledge validate-tools test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env validate-knowledge validate-tools test-live-scope-eval test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -107,6 +108,10 @@ validate-knowledge:
 validate-tools:
 	@echo "🔎 Validating the configured operator tool module..."
 	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.tools_cli
+
+test-live-scope-eval:
+	@echo "🔎 Running the live dataset scope evaluation..."
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m test_live_scope_eval.driver $(CASE_FILE)
 
 restart: generate-env validate-knowledge validate-tools
 	@echo "🔄 Recreating LiteLLM, backend, and frontend..."

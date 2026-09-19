@@ -1,5 +1,6 @@
 import importlib
 from typing import Annotated
+from typing_extensions import NotRequired
 
 add_messages = importlib.import_module("langgraph.graph.message").add_messages
 TypedDict = importlib.import_module("typing_extensions").TypedDict
@@ -12,5 +13,7 @@ GraphState = TypedDict(
         "report_payload": dict | None,
         "rows_consumed": int,
         "knowledge_bytes_consumed": int,
+        "scope_verdict": NotRequired[str | None],
+        "scope_note": NotRequired[str | None],
     },
 )

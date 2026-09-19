@@ -52,6 +52,10 @@ class TestChatResponseShape(api_cases.TestChatResponseShape):
     pass
 
 
+class TestChatResponseSchema(api_cases.TestChatResponseSchema):
+    pass
+
+
 class TestChatEndpointReasoning(api_cases.TestChatEndpointReasoning):
     pass
 

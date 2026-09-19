@@ -18,6 +18,8 @@ from sqlalchemy.exc import ArgumentError, NoSuchModuleError
 
 from bd_shared.config import (
     AGENT_MODEL,
+    AGENT_SCOPE_GATE_HISTORY_TURNS,
+    AGENT_SCOPE_GATE_MODEL,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
     DATABASE_NAME,
@@ -28,6 +30,7 @@ from bd_shared.config import (
     KNOWLEDGE_MAX_BYTES_PER_TURN,
     KNOWLEDGE_MAX_DOC_BYTES,
     KNOWLEDGE_MAX_PERSONA_CHARS,
+    KNOWLEDGE_MAX_SCOPE_CHARS,
     KNOWLEDGE_MAX_SUMMARY_CHARS,
     KNOWLEDGE_MAX_TITLE_CHARS,
     KNOWLEDGE_MAX_TOPICS,
@@ -79,6 +82,7 @@ class ChatResponse(BaseModel):
     timestamp: str
     error: Optional[str] = None
     reasoning: Optional[str] = None
+    scope_verdict: Optional[str] = None
 
 
 class ReportData(BaseModel):
@@ -261,15 +265,20 @@ def _classify_probe_response(status_code: Optional[int], body: Any) -> ProbeVerd
     return "transient"
 
 
-async def probe_once() -> tuple[ProbeVerdict, Optional[int], Any]:
-    """One probe request with the configured timeout and no retries."""
+async def probe_once(model: Optional[str] = None) -> tuple[ProbeVerdict, Optional[int], Any]:
+    """One probe request with the configured timeout and no retries.
+
+    `model` defaults to the agent's own model, resolved at call time so the default
+    follows the module global rather than freezing its import-time value.
+    """
+    probed_model = AGENT_MODEL if model is None else model
     status_code = None
     body = None
     try:
         response = await asyncio.to_thread(
             requests.get,
             f"{LITELLM_BASE_URL}/health",
-            params={"model": AGENT_MODEL},
+            params={"model": probed_model},
             timeout=PROBE_REQUEST_TIMEOUT_SECONDS,
         )
         status_code = response.status_code
@@ -283,14 +292,35 @@ async def probe_once() -> tuple[ProbeVerdict, Optional[int], Any]:
         return "transient", status_code, body
 
 
+def _probed_models() -> list[str]:
+    """Every model a served turn needs: the agent's, plus the gate's when it differs.
+
+    The gate runs in front of every turn, so an unreachable gate model refuses to serve
+    exactly like an unreachable agent model. An empty gate setting resolves to the agent
+    model, which leaves a single model to probe.
+    """
+    gate_model = _resolve_scope_gate_model(AGENT_SCOPE_GATE_MODEL)
+    if gate_model == AGENT_MODEL:
+        return [AGENT_MODEL]
+    return [AGENT_MODEL, gate_model]
+
+
 async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
+    """Retry-probe every required model; the first unhealthy one fails the whole check."""
+    for model in _probed_models():
+        if not await _probe_model(model, sleep=sleep):
+            return False
+    return True
+
+
+async def _probe_model(model: str, *, sleep) -> bool:
     status_code = None
     body = None
     verdict: ProbeVerdict = "transient"
     proxy_is_healthy = False
 
     for attempt in range(1, PROBE_RETRY_ATTEMPTS + 1):
-        verdict, status_code, body = await probe_once()
+        verdict, status_code, body = await probe_once(model)
 
         match verdict:
             case "healthy":
@@ -307,7 +337,8 @@ async def probe_llm_proxy(sleep=asyncio.sleep) -> bool:
                 assert_never(unreachable)
 
     logger.warning(
-        "LiteLLM probe classified verdict=%s status=%s exception_status=%s",
+        "LiteLLM probe classified model=%s verdict=%s status=%s exception_status=%s",
+        model,
         verdict,
         status_code,
         _probe_exception_status(body),
@@ -349,6 +380,46 @@ async def rebuild_session_index() -> None:
     await sessions.seed(retained_ids)
 
 
+class ScopeGateConfigError(RuntimeError):
+    """Raised when a scope gate configuration key carries an unusable value."""
+
+    def __init__(self, message, *, key, observed, permitted):
+        super().__init__(message)
+        self.key = key
+        self.observed = observed
+        self.permitted = permitted
+
+
+def _resolve_scope_gate_model(value: object) -> str:
+    """Resolve agent_scope_gate_model; an empty value means the agent's own model.
+
+    The value is never stringified: a boolean or a number is a configuration mistake, and
+    silently rendering it as text would send the gate at a model name nobody wrote.
+    """
+    if type(value) is not str:
+        raise ScopeGateConfigError(
+            f"Invalid scope gate setting agent_scope_gate_model: observed {value!r} "
+            f"({type(value).__name__}); must be a string, empty to fall back to agent_model",
+            key="agent_scope_gate_model",
+            observed=value,
+            permitted="string",
+        )
+    return value.strip() or AGENT_MODEL
+
+
+def _validate_scope_gate_history_turns(value: object) -> int:
+    """Accept only a real integer of zero or more, so a bool, a float or "1" aborts startup."""
+    if not (type(value) is int and value >= 0):
+        raise ScopeGateConfigError(
+            f"Invalid scope gate setting agent_scope_gate_history_turns: observed {value!r} "
+            f"({type(value).__name__}); must be an integer greater than or equal to 0",
+            key="agent_scope_gate_history_turns",
+            observed=value,
+            permitted=0,
+        )
+    return value
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
@@ -367,8 +438,18 @@ async def startup_event():
             max_topics=KNOWLEDGE_MAX_TOPICS,
             max_doc_bytes=KNOWLEDGE_MAX_DOC_BYTES,
             max_bytes_per_turn=KNOWLEDGE_MAX_BYTES_PER_TURN,
+            max_scope_chars=KNOWLEDGE_MAX_SCOPE_CHARS,
         )
         validate_limits(knowledge_limits)
+        scope_gate_model = _resolve_scope_gate_model(AGENT_SCOPE_GATE_MODEL)
+        scope_gate_history_turns = _validate_scope_gate_history_turns(
+            AGENT_SCOPE_GATE_HISTORY_TURNS
+        )
+        logger.info(
+            "Scope gate configured: model=%s, history_turns=%d",
+            scope_gate_model,
+            scope_gate_history_turns,
+        )
         if KNOWLEDGE_DIR is None:
             logger.warning(
                 "Knowledge folder is not configured (dataset.knowledge_dir is unset); the agent runs without dataset knowledge."
@@ -393,6 +474,9 @@ async def startup_event():
             )
     except KnowledgeError as error:
         logger.error("Knowledge folder is invalid: %s", error)
+        raise
+    except ScopeGateConfigError as error:
+        logger.error("Scope gate configuration is invalid: %s", error)
         raise
 
     # The discovered specs are logged by the helper and re-derived by ToolRegistry from the
@@ -462,7 +546,7 @@ async def health_check(response: Response) -> HealthResponse:
 
 
 async def _recover_agent_system() -> Optional[ReportAgentSystem]:
-    """Run the probe once and build the agent on a healthy verdict.
+    """Probe every required model once and build the agent when all are healthy.
 
     Serialised under probe_lock so two concurrent requests cannot build twice, and
     re-checked inside the lock so the loser of the race reuses what the winner built.
@@ -477,16 +561,18 @@ async def _recover_agent_system() -> Optional[ReportAgentSystem]:
         if agent_system is not None:
             return agent_system
 
-        verdict, status_code, body = await probe_once()
-        llm_proxy_healthy = verdict == "healthy"
-        if not llm_proxy_healthy:
-            logger.warning(
-                "LiteLLM re-probe classified verdict=%s status=%s exception_status=%s",
-                verdict,
-                status_code,
-                _probe_exception_status(body),
-            )
-            return None
+        for model in _probed_models():
+            verdict, status_code, body = await probe_once(model)
+            llm_proxy_healthy = verdict == "healthy"
+            if not llm_proxy_healthy:
+                logger.warning(
+                    "LiteLLM re-probe classified model=%s verdict=%s status=%s exception_status=%s",
+                    model,
+                    verdict,
+                    status_code,
+                    _probe_exception_status(body),
+                )
+                return None
 
         agent_system = _build_agent_system(saver)
         return agent_system
@@ -562,6 +648,7 @@ async def chat(message: ChatMessage, response: Response):
             timestamp=result["timestamp"],
             error=result.get("error"),
             reasoning=result.get("reasoning"),
+            scope_verdict=result.get("verdict"),
         )
     except HTTPException:
         raise

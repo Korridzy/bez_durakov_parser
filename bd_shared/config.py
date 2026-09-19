@@ -118,6 +118,12 @@ CHECKPOINT_TTL_SECONDS = int(config["webreport"].get("checkpoint_ttl_seconds", 3
 LITELLM_BASE_URL = config["webreport"].get("litellm_base_url", "http://litellm:4000")
 AGENT_MODEL = config["webreport"].get("agent_model", "gpt-4o")
 
+# Scope gate settings, left uncoerced so backend startup can reject a bad type instead of
+# hiding it behind str()/int(). An empty model falls back to AGENT_MODEL at client
+# construction time; the history window is the number of prior turns the gate may read.
+AGENT_SCOPE_GATE_MODEL = config["webreport"].get("agent_scope_gate_model", "")
+AGENT_SCOPE_GATE_HISTORY_TURNS = config["webreport"].get("agent_scope_gate_history_turns", 1)
+
 # Startup LiteLLM probe and LLM client retry policy
 PROBE_RETRY_ATTEMPTS = int(config["webreport"].get("probe_retry_attempts", 5))
 PROBE_RETRY_DELAY_SECONDS = int(config["webreport"].get("probe_retry_delay_seconds", 2))
@@ -131,6 +137,7 @@ KNOWLEDGE_MAX_PERSONA_CHARS = config["webreport"].get("knowledge_max_persona_cha
 KNOWLEDGE_MAX_TOPICS = config["webreport"].get("knowledge_max_topics", 50)
 KNOWLEDGE_MAX_DOC_BYTES = config["webreport"].get("knowledge_max_doc_bytes", 65536)
 KNOWLEDGE_MAX_BYTES_PER_TURN = config["webreport"].get("knowledge_max_bytes_per_turn", 131072)
+KNOWLEDGE_MAX_SCOPE_CHARS = config["webreport"].get("knowledge_max_scope_chars", 2000)
 
 
 def _dataset_config_error(

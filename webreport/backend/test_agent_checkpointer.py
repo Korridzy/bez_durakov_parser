@@ -82,7 +82,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(folder.cleanup)
         path = Path(folder.name)
         (path / "manifest.toml").write_text(
-            'dataset = "fixture"\npersona = "Fixture analyst."\n', encoding="utf-8"
+            'dataset = "fixture"\npersona = "Fixture analyst."\nscope = "Fixture readings."\n', encoding="utf-8"
         )
         text = f"# Rules\n\nFixture summary.\n\n{body}\n"
         (path / "rules.md").write_text(text, encoding="utf-8")
@@ -92,7 +92,7 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         return self.knowledge_module.load_knowledge(
             path,
             "fixture",
-            self.knowledge_module.KnowledgeLimits(80, 200, 2000, 50, 65536, 131072),
+            self.knowledge_module.KnowledgeLimits(80, 200, 2000, 50, 65536, 131072, 2000),
         )
 
     def _read_response(self, call_id="knowledge-1"):
@@ -246,9 +246,25 @@ class TestCheckpointerCases(unittest.IsolatedAsyncioTestCase):
         async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             service = self.support.StubService()
             service.results["get_all_teams"] = []
+            # Knowledge builds the scope gate, so script its client too: an unscripted
+            # gate would construct a real ChatLiteLLM inside this offline suite.
+            gate_model = self.graph_cases.ScriptedModel(
+                [
+                    self.messages.AIMessage(
+                        content="",
+                        tool_calls=[
+                            self.graph_cases.tool_call(
+                                "GateDecision",
+                                {"verdict": "in_scope", "reply": None, "note": None},
+                                "gate-recover",
+                            )
+                        ],
+                    )
+                ]
+            )
             agent = self.runtime.ReportAgentSystem(
                 service=service, model_client=model, checkpointer=saver,
-                knowledge=knowledge,
+                knowledge=knowledge, gate_model_client=gate_model,
             )
             if failure_mode == "timeout":
                 with patch.object(model, "ainvoke", side_effect=block_after_read), patch.object(
@@ -391,6 +407,7 @@ class TestPromptCases(unittest.TestCase):
             max_topics=50,
             max_doc_bytes=65536,
             max_bytes_per_turn=131072,
+            max_scope_chars=2000,
         )
 
     def test_system_prompt_without_knowledge_is_byte_exact(self):
@@ -419,7 +436,7 @@ class TestPromptCases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             folder_path = Path(temp_dir)
             (folder_path / "manifest.toml").write_text(
-                'dataset = "some_db"\npersona = "Some text."\n',
+                'dataset = "some_db"\npersona = "Some text."\nscope = "Some scope text."\n',
                 encoding="utf-8",
             )
             (folder_path / "rules.md").write_text(
@@ -431,7 +448,9 @@ class TestPromptCases(unittest.TestCase):
                 "some_db",
                 limits,
             )
-            expected_prompt = (
+            # The boundary-rule prose that follows the scope heading is deliberately not
+            # pinned here; agent/knowledge.py's own suite covers it by sentinel substring.
+            expected_prefix = (
                 "Some text.\n\n"
                 "- Get data ONLY through the tools.\n"
                 "- The tools return a summary, not the rows themselves. If you need rows, call read_rows.\n"
@@ -443,12 +462,14 @@ class TestPromptCases(unittest.TestCase):
                 "- Before answering a question covered by a listed topic, "
                 "call read_knowledge with that topic id.\n\n"
                 "## Knowledge topics\n\n"
-                "rules: Rules. Some summary paragraph text."
+                "rules: Rules. Some summary paragraph text.\n\n"
+                "## Dataset scope\n\nSome scope text.\n\n- "
             )
 
             actual_prompt = self.knowledge_module.compose_system_prompt(knowledge)
+            actual_prefix_bytes = actual_prompt.encode("utf-8")[: len(expected_prefix.encode("utf-8"))]
 
-            self.assertEqual(expected_prompt.encode("utf-8"), actual_prompt.encode("utf-8"))
+            self.assertEqual(expected_prefix.encode("utf-8"), actual_prefix_bytes)
 
 
 if __name__ == "__main__":

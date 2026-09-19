@@ -39,6 +39,7 @@ def success(
     data: object | None,
     *,
     reasoning: str | None,
+    verdict: str | None = None,
 ) -> ReportResponse:
     return {
         "success": True,
@@ -47,10 +48,17 @@ def success(
         "timestamp": datetime.now().isoformat(),
         "message": message,
         "reasoning": reasoning,
+        "verdict": verdict,
     }
 
 
-def failure(message: str, error: str, *, reasoning: str | None = None) -> ReportResponse:
+def failure(
+    message: str,
+    error: str,
+    *,
+    reasoning: str | None = None,
+    verdict: str | None = None,
+) -> ReportResponse:
     return {
         "success": False,
         "error": error,
@@ -59,4 +67,5 @@ def failure(message: str, error: str, *, reasoning: str | None = None) -> Report
         "query_info": [],
         "data": None,
         "reasoning": reasoning,
+        "verdict": verdict,
     }

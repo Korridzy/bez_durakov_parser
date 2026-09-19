@@ -135,6 +135,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
                 max_topics=50,
                 max_doc_bytes=65536,
                 max_bytes_per_turn=131072,
+                max_scope_chars=2000,
             ),
         )
 
@@ -459,6 +460,188 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         await self.graph_module.arun(graph, "Покажи команды", "prompt-tool-thread")
 
         self.assertEqual(model.requests[1][0].content, "SENTINEL-PROMPT-42")
+
+    async def test_gate_is_the_entry_node_and_can_end_before_the_agent(self) -> None:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
+        model = ScriptedModel([])
+        gate_calls = []
+
+        async def call_gate(state, config):
+            gate_calls.append(
+                (state["messages"][-1].content, config["configurable"]["thread_id"])
+            )
+            return {
+                "messages": [self.messages.AIMessage(content="Scope reply.")],
+                "scope_verdict": "unrelated",
+                "scope_note": None,
+            }
+
+        def route_after_gate(_state):
+            return self.graph_module.END
+
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+            gate=(call_gate, route_after_gate),
+        )
+
+        result = await self.graph_module.arun(
+            graph,
+            "Outside request",
+            "gated-terminal-thread",
+            extra_steps=1,
+        )
+
+        self.assertEqual(gate_calls, [("Outside request", "gated-terminal-thread")])
+        self.assertEqual(model.invocation_count, 0)
+        self.assertEqual(result["messages"][-1].content, "Scope reply.")
+        self.assertEqual(result["scope_verdict"], "unrelated")
+
+    async def test_scope_note_is_folded_into_the_only_system_message(self) -> None:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
+        model = ScriptedModel([self.messages.AIMessage(content="Scoped answer.")])
+        note = "Do not address the unrelated part."
+
+        async def call_gate(_state, config):
+            return {"scope_verdict": "mixed", "scope_note": note}
+
+        def route_after_gate(_state):
+            return "agent"
+
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+            gate=(call_gate, route_after_gate),
+        )
+
+        result = await self.graph_module.arun(
+            graph,
+            "Mixed request",
+            "mixed-note-thread",
+            extra_steps=1,
+        )
+
+        system_messages = [
+            message
+            for message in model.requests[0]
+            if isinstance(message, self.messages.SystemMessage)
+        ]
+        self.assertEqual(len(system_messages), 1)
+        self.assertEqual(
+            system_messages[0].content,
+            f"{DEFAULT_TEST_PROMPT}\n\n## Scope gate note\n\n{note}",
+        )
+        self.assertFalse(
+            any(isinstance(message, self.messages.SystemMessage) for message in result["messages"])
+        )
+        self.assertFalse(any(note in str(message.content) for message in result["messages"]))
+
+    async def test_scope_state_is_reset_before_each_gate_run(self) -> None:
+        service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(service)
+        tools: list[NamedTool] = self.tools_module.build_tools(registry, self.config)
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(content="First answer."),
+                self.messages.AIMessage(content="Second answer."),
+            ]
+        )
+        observed_scope_state = []
+
+        async def call_gate(state, config):
+            observed_scope_state.append(
+                (state.get("scope_verdict"), state.get("scope_note"))
+            )
+            return {"scope_verdict": "in_scope", "scope_note": None}
+
+        def route_after_gate(_state):
+            return "agent"
+
+        graph = self.graph_module.build_graph(
+            model,
+            tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+            gate=(call_gate, route_after_gate),
+        )
+
+        await self.graph_module.arun(
+            graph,
+            "First question",
+            "scope-reset-thread",
+            extra_steps=1,
+        )
+        await self.graph_module.arun(
+            graph,
+            "Second question",
+            "scope-reset-thread",
+            extra_steps=1,
+        )
+
+        self.assertEqual(observed_scope_state, [(None, None), (None, None)])
+
+    async def test_gate_step_preserves_the_ungated_agent_tool_loop_budget(self) -> None:
+        def repeat(invocation: int) -> AgentMessageView:
+            return self.messages.AIMessage(
+                content="",
+                tool_calls=[
+                    tool_call("get_all_teams", {}, f"budget-parity-{invocation}")
+                ],
+            )
+
+        ungated_model, ungated_service, _, ungated_graph = self.build_harness(
+            [], repeat_factory=repeat
+        )
+        ungated_service.results["get_all_teams"] = []
+
+        gated_service: ServiceView = StubService()
+        registry = self.registry_module.ToolRegistry(gated_service)
+        gated_tools: list[NamedTool] = self.tools_module.build_tools(
+            registry, self.config
+        )
+        gated_model = ScriptedModel([], repeat_factory=repeat)
+
+        async def call_gate(_state, config):
+            return {"scope_verdict": "in_scope", "scope_note": None}
+
+        def route_after_gate(_state):
+            return "agent"
+
+        gated_graph = self.graph_module.build_graph(
+            gated_model,
+            gated_tools,
+            self.memory.InMemorySaver(),
+            DEFAULT_TEST_PROMPT,
+            gate=(call_gate, route_after_gate),
+        )
+        gated_service.results["get_all_teams"] = []
+
+        ungated_result = await self.graph_module.arun(
+            ungated_graph, "Keep going", "ungated-budget-thread"
+        )
+        gated_result = await self.graph_module.arun(
+            gated_graph,
+            "Keep going",
+            "gated-budget-thread",
+            extra_steps=1,
+        )
+
+        self.assertEqual(ungated_result, {"error": "recursion_limit"})
+        self.assertEqual(gated_result, ungated_result)
+        self.assertEqual(
+            ungated_model.invocation_count,
+            self.config.AGENT_RECURSION_LIMIT + 1,
+        )
+        self.assertEqual(gated_model.invocation_count, ungated_model.invocation_count)
+        self.assertEqual(len(gated_service.calls), len(ungated_service.calls))
 
     async def test_data_call_mark_report_and_russian_answer_complete(self) -> None:
         handle: dict[str, JsonValue] = {"tool": "get_all_teams", "args": {}}

@@ -332,6 +332,41 @@ class TestChatResponseShape(_MainImports, unittest.TestCase):
 
         self.assertEqual(payload["reasoning"], "Шаг 1\n\nШаг 2")
 
+    def test_model_dump_json_carries_a_null_scope_verdict_when_absent(self):
+        """Given no verdict, When serialized, Then JSON carries an explicit null."""
+        payload = json.loads(self._response().model_dump_json())
+
+        self.assertIn("scope_verdict", payload)
+        self.assertIsNone(payload["scope_verdict"])
+
+    def test_scope_verdict_round_trips_when_present(self):
+        """Given a verdict, When serialized, Then the exact value survives."""
+        payload = json.loads(self._response(scope_verdict="unrelated").model_dump_json())
+
+        self.assertEqual(payload["scope_verdict"], "unrelated")
+
+
+class TestChatResponseSchema(_MainImports, unittest.TestCase):
+    """The published OpenAPI schema documents scope_verdict as an optional string."""
+
+    def _schema(self):
+        return self.main.app.openapi()["components"]["schemas"]["ChatResponse"]
+
+    def test_schema_lists_the_scope_verdict_property(self):
+        """Given the schema, When ChatResponse is read, Then scope_verdict is a property."""
+        self.assertIn("scope_verdict", self._schema()["properties"])
+
+    def test_scope_verdict_is_a_nullable_string(self):
+        """Given the schema, When the property is read, Then it allows a string or null."""
+        self.assertEqual(
+            self._schema()["properties"]["scope_verdict"]["anyOf"],
+            [{"type": "string"}, {"type": "null"}],
+        )
+
+    def test_scope_verdict_is_not_required(self):
+        """Given the schema, When required is read, Then scope_verdict is absent from it."""
+        self.assertNotIn("scope_verdict", self._schema().get("required", []))
+
 
 class TestChatEndpointReasoning(
     _MainImports, _EndpointHarness, unittest.IsolatedAsyncioTestCase
@@ -388,6 +423,22 @@ class TestChatEndpointReasoning(
         payload = json.loads(result.model_dump_json())
         self.assertIn("reasoning", payload)
         self.assertIsNone(payload["reasoning"])
+
+    async def test_chat_forwards_the_scope_verdict_to_the_response(self):
+        """Given an unrelated verdict, When chatting, Then the envelope carries it."""
+        result = await self._chat(_report_response(verdict="unrelated"))
+
+        self.assertEqual(result.scope_verdict, "unrelated")
+        payload = json.loads(result.model_dump_json())
+        self.assertEqual(payload["scope_verdict"], "unrelated")
+
+    async def test_chat_without_a_verdict_serializes_a_null_scope_verdict(self):
+        """Given a result without a verdict, When chatting, Then JSON holds null."""
+        result = await self._chat(_report_response())
+
+        payload = json.loads(result.model_dump_json())
+        self.assertIn("scope_verdict", payload)
+        self.assertIsNone(payload["scope_verdict"])
 
     async def test_failed_result_keeps_both_error_and_partial_reasoning(self):
         """Given a failure with a partial thought, When chatting, Then both survive."""

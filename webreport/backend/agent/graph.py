@@ -1,6 +1,15 @@
 import importlib
-from collections.abc import Mapping, Sequence
-from typing import cast, Final, Literal, Protocol, TypeAlias, TypedDict, TypeVar
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import (
+    cast,
+    Final,
+    Literal,
+    NotRequired,
+    Protocol,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+)
 
 from .state import GraphState
 
@@ -9,6 +18,7 @@ _errors = importlib.import_module("langgraph.errors")
 _graph = importlib.import_module("langgraph.graph")
 _messages = importlib.import_module("langchain_core.messages")
 _prebuilt = importlib.import_module("langgraph.prebuilt")
+_runnables = importlib.import_module("langchain_core.runnables")
 
 END = _graph.END
 GraphRecursionError = _errors.GraphRecursionError
@@ -18,6 +28,9 @@ SystemMessage = _messages.SystemMessage
 ToolMessage = _messages.ToolMessage
 StateGraph = _graph.StateGraph
 ToolNode = _prebuilt.ToolNode
+# LangGraph injects a node's run configuration only when the parameter carries this
+# exact annotation, so nodes in sibling modules take it from here.
+RunnableConfig = _runnables.RunnableConfig
 
 RECURSION_LIMIT_MARKER: Final = "recursion_limit"
 
@@ -43,6 +56,7 @@ class AgentMessageView(MessageView, Protocol):
 
 class NamedTool(Protocol):
     name: str
+    description: str
 
 
 class BoundModel(Protocol):
@@ -63,6 +77,8 @@ class ConversationState(TypedDict):
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
     knowledge_bytes_consumed: int
+    scope_verdict: NotRequired[str | None]
+    scope_note: NotRequired[str | None]
 
 
 class AgentState(TypedDict):
@@ -70,6 +86,8 @@ class AgentState(TypedDict):
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
     knowledge_bytes_consumed: int
+    scope_verdict: NotRequired[str | None]
+    scope_note: NotRequired[str | None]
 
 
 class StateUpdate(TypedDict, total=False):
@@ -77,6 +95,8 @@ class StateUpdate(TypedDict, total=False):
     report_payload: dict[str, JsonValue] | None
     rows_consumed: int
     knowledge_bytes_consumed: int
+    scope_verdict: str | None
+    scope_note: str | None
 
 
 class ThreadConfig(TypedDict):
@@ -86,6 +106,13 @@ class ThreadConfig(TypedDict):
 class RunConfig(TypedDict):
     configurable: ThreadConfig
     recursion_limit: int
+
+
+GateNode: TypeAlias = Callable[
+    [ConversationState, RunConfig],
+    Awaitable[Mapping[str, object]],
+]
+GateRouter: TypeAlias = Callable[[Mapping[str, object]], str]
 
 
 class RecursionLimitResult(TypedDict):
@@ -137,6 +164,8 @@ def build_graph(
     tools: Sequence[NamedTool],
     checkpointer: Checkpointer,
     system_prompt: str,
+    *,
+    gate: tuple[GateNode, GateRouter] | None = None,
 ) -> CompiledGraph:
     bound_model = model_client.bind_tools(tools, parallel_tool_calls=False)
     single_tool_builder = StateGraph(GraphState)
@@ -163,8 +192,14 @@ def build_graph(
         prior = state["messages"][:boundary + 1]
         current = state["messages"][boundary + 1:]
         replacements = _compact_knowledge(prior)
+        scope_note = state.get("scope_note")
+        turn_system_prompt = (
+            system_prompt
+            if scope_note is None
+            else f"{system_prompt}\n\n## Scope gate note\n\n{scope_note}"
+        )
         response = await bound_model.ainvoke(
-            [SystemMessage(system_prompt), *prior, *current]
+            [SystemMessage(turn_system_prompt), *prior, *current]
         )
         if not response.tool_calls:
             replacements.extend(_compact_knowledge(current))
@@ -204,7 +239,17 @@ def build_graph(
     builder = StateGraph(GraphState)
     builder.add_node("agent", call_model)
     builder.add_node("tools", call_tools_sequentially)
-    builder.set_entry_point("agent")
+    if gate is None:
+        builder.set_entry_point("agent")
+    else:
+        call_gate, route_after_gate = gate
+        builder.add_node("gate", call_gate)
+        builder.set_entry_point("gate")
+        builder.add_conditional_edges(
+            "gate",
+            route_after_gate,
+            {"agent": "agent", END: END},
+        )
     builder.add_conditional_edges(
         "agent",
         route_after_model,
@@ -218,6 +263,8 @@ async def arun(
     graph: CompiledGraph,
     user_message: str,
     thread_id: str,
+    *,
+    extra_steps: int = 0,
 ) -> GraphRunResult:
     try:
         return await graph.ainvoke(
@@ -226,10 +273,12 @@ async def arun(
                 "rows_consumed": 0,
                 "knowledge_bytes_consumed": 0,
                 "report_payload": None,
+                "scope_verdict": None,
+                "scope_note": None,
             },
             {
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 2 * _config.AGENT_RECURSION_LIMIT + 1,
+                "recursion_limit": 2 * _config.AGENT_RECURSION_LIMIT + 1 + extra_steps,
             },
         )
     except GraphRecursionError:
