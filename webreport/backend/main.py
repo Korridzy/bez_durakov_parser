@@ -9,6 +9,8 @@ import asyncio
 import importlib
 import logging
 import uuid
+
+import structlog
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -35,13 +37,15 @@ from bd_shared.config import (
     KNOWLEDGE_MAX_TITLE_CHARS,
     KNOWLEDGE_MAX_TOPICS,
     LITELLM_BASE_URL,
+    LOG_LEVEL,
     PROBE_REQUEST_TIMEOUT_SECONDS,
     PROBE_RETRY_ATTEMPTS,
     PROBE_RETRY_DELAY_SECONDS,
+    SQLALCHEMY_LOGGING,
     WEBREPORT_ALLOWED_ORIGINS,
     WEBREPORT_DEBUG,
 )
-
+from bd_shared.logging_setup import configure_logging
 
 from agent.knowledge import (
     Knowledge,
@@ -54,7 +58,10 @@ from agent.engine import build_read_only_engine
 from agent.reasoning import extract_reasoning, extract_text
 from agent.toolmodule import ToolSpec, load_tool_module
 from agents.report_runtime import ReportAgentSystem
+from request_context import RequestCorrelationMiddleware
 from session_store import MAX_SESSIONS, SessionIndex
+
+configure_logging("webreport-backend", level=LOG_LEVEL, logger_levels={"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else None)
 
 aiosqlite = importlib.import_module("aiosqlite")
 AsyncSqliteSaver = importlib.import_module(
@@ -120,6 +127,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# This is the outermost ASGI callable so Starlette's own 500 responses carry the id.
+# Keep app as the FastAPI instance for tests and direct route access.
+application = RequestCorrelationMiddleware(app)
 
 # Global instances
 agent_system: Optional[ReportAgentSystem] = None
@@ -196,10 +207,10 @@ async def initialize_tool_service_with_retry() -> tuple[Engine, object, tuple[To
         except Exception as exc:
             last_error = exc
             logger.warning(
-                "Database connection attempt %d/%d failed: %s",
+                "Database connection attempt %d/%d failed",
                 attempt,
                 STARTUP_RETRY_ATTEMPTS,
-                exc,
+                exc_info=True,
             )
             if attempt < STARTUP_RETRY_ATTEMPTS:
                 await startup_sleep(STARTUP_RETRY_DELAY_SECONDS)
@@ -590,6 +601,9 @@ async def chat(message: ChatMessage, response: Response):
     Returns:
         Chat response with report data
     """
+    session_id = message.session_id or uuid.uuid4().hex
+    structlog.contextvars.bind_contextvars(session_id=session_id)
+
     if tool_service is None:
         raise HTTPException(status_code=503, detail="Tool service not available")
 
@@ -602,7 +616,7 @@ async def chat(message: ChatMessage, response: Response):
         response.status_code = 503
         return ChatResponse(
             success=False,
-            session_id=message.session_id or uuid.uuid4().hex,
+            session_id=session_id,
             data=None,
             query_info=[],
             message=MODEL_UNAVAILABLE_MESSAGE,
@@ -610,7 +624,6 @@ async def chat(message: ChatMessage, response: Response):
             error="llm_proxy_unavailable",
         )
 
-    session_id = message.session_id or uuid.uuid4().hex
     pinned_added = False
     try:
         async with admission_lock:
@@ -725,6 +738,8 @@ async def get_history(session_id: str):
     Returns:
         Conversation history
     """
+    structlog.contextvars.bind_contextvars(session_id=session_id)
+
     saver = checkpoint_saver
     if saver is None:
         raise HTTPException(status_code=503, detail="Checkpoint store not available")
@@ -757,6 +772,8 @@ async def clear_history(session_id: str):
     Args:
         session_id: Session identifier
     """
+    structlog.contextvars.bind_contextvars(session_id=session_id)
+
     saver = checkpoint_saver
     if saver is None:
         raise HTTPException(status_code=503, detail="Checkpoint store not available")
