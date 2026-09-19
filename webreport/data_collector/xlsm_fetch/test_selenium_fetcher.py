@@ -1,9 +1,12 @@
 """Regression tests for Google Drive browser controls."""
 
+import io
+import json
 import logging
 import tempfile
 import unittest
 
+from bd_shared import logging_setup
 from selenium.webdriver.common.keys import Keys
 
 from .selenium_fetcher import SeleniumFetcher
@@ -101,6 +104,58 @@ class SeleniumFetcherTests(unittest.TestCase):
             captured.records[1].getMessage(),
             "A message without the folder URL",
         )
+
+    def test_log_redacts_exception_value_and_preserves_safe_exception(self):
+        folder_url = "https://drive.google.com/drive/folders/EXCEPTIONFOLDERID999"
+        with tempfile.TemporaryDirectory() as download_dir:
+            fetcher = SeleniumFetcher(folder_url, download_dir)
+            logging_setup._reset_for_tests()
+            stream = io.StringIO()
+            try:
+                logging_setup.configure_logging(
+                    "selenium-fetcher-test",
+                    log_format="json",
+                    stream=stream,
+                )
+
+                try:
+                    raise RuntimeError(f"navigation failed at {folder_url}")
+                except RuntimeError:
+                    fetcher._log(
+                        "navigation failed",
+                        level=logging.ERROR,
+                        exc_info=True,
+                    )
+
+                records = [
+                    json.loads(line)
+                    for line in stream.getvalue().splitlines()
+                    if line.strip()
+                ]
+                sanitized_value = records[0]["exception"][0]["exc_value"]
+                self.assertNotIn(folder_url, sanitized_value)
+                self.assertIn("[REDACTED_FOLDER_URL]", sanitized_value)
+
+                try:
+                    raise RuntimeError("safe failure")
+                except RuntimeError:
+                    fetcher._log(
+                        "safe failure",
+                        level=logging.ERROR,
+                        exc_info=True,
+                    )
+
+                records = [
+                    json.loads(line)
+                    for line in stream.getvalue().splitlines()
+                    if line.strip()
+                ]
+                self.assertEqual(
+                    records[1]["exception"][0]["exc_value"],
+                    "safe failure",
+                )
+            finally:
+                logging_setup._reset_for_tests()
 
 
 if __name__ == "__main__":

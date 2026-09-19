@@ -3,6 +3,7 @@
 import time
 import re
 import logging
+import sys
 from typing import List, Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -45,7 +46,23 @@ class SeleniumFetcher(BaseFetcher):
     ) -> None:
         if self.folder_url and self.folder_url in msg:
             msg = msg.replace(self.folder_url, "[REDACTED_FOLDER_URL]")
-        super()._log(msg, level=level, exc_info=exc_info)
+        resolved_exc_info = exc_info
+        if exc_info:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            if (
+                exc_value is not None
+                and self.folder_url
+                and self.folder_url in str(exc_value)
+            ):
+                sanitized_message = str(exc_value).replace(
+                    self.folder_url, "[REDACTED_FOLDER_URL]"
+                )
+                try:
+                    sanitized_exc = exc_type(sanitized_message)
+                except Exception:
+                    sanitized_exc = RuntimeError(sanitized_message)
+                resolved_exc_info = (type(sanitized_exc), sanitized_exc, exc_tb)
+        super()._log(msg, level=level, exc_info=resolved_exc_info)
 
     def fetch(self) -> List[str]:
         """Fetch list of .xlsm files from Google Drive folder.
