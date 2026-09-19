@@ -201,6 +201,17 @@ class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_context, [{"request_id": "outer"}])
         self.assertEqual(self.records("http_request"), [])
 
+    async def test_contextvars_are_cleared_after_async_transport_request(
+        self,
+    ) -> None:
+        transport = httpx.ASGITransport(app=self.wrapped)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://t"
+        ) as client:
+            response = await client.get("/ping")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(structlog.contextvars.get_contextvars(), {})
+
     async def test_concurrent_requests_keep_request_ids_isolated(self) -> None:
         transport = httpx.ASGITransport(app=self.wrapped)
         tasks: list[asyncio.Task[httpx.Response]] = []
