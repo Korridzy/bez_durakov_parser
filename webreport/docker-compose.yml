@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mysql:
     image: mysql:8.0
     container_name: webreport-mysql
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - path: .env.mysql
         required: false
@@ -36,6 +43,7 @@ services:
       retries: 12
       start_period: 120s
     restart: unless-stopped
+    logging: *default-logging
 
   backend:
     build:
@@ -61,6 +69,7 @@ services:
       litellm:
         condition: service_healthy
     restart: unless-stopped
+    logging: *default-logging
 
   data_collector:
     build:
@@ -82,6 +91,7 @@ services:
     networks:
       - webreport-network
     restart: unless-stopped
+    logging: *default-logging
 
   frontend:
     build:
@@ -103,6 +113,7 @@ services:
     networks:
       - webreport-network
     restart: unless-stopped
+    logging: *default-logging
 
 networks:
   webreport-network:
