@@ -100,6 +100,8 @@ test:
 	run poetry run python test_alembic_migration.py; \
 	run poetry run python bd_shared/test_db_engine.py; \
 	run poetry run python bd_shared/test_config_local_override.py; \
+	run poetry run python bd_shared/test_log_redaction.py; \
+	run poetry run python bd_shared/test_logging_setup.py; \
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
 	run $(MAKE) -C webreport test; \
 	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py'; \
