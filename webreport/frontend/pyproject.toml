@@ -13,6 +13,7 @@ requests = ">=2.31.0"
 pandas = ">=2.0.0"
 python-dotenv = ">=1.0.0"
 pydevd-pycharm = "~=252.27397.106"
+structlog = ">=25.1,<26"
 
 [tool.poetry.group.dev.dependencies]
 selenium = "^4.46.0"

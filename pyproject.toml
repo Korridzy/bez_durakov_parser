@@ -17,6 +17,7 @@ dependencies = [
     "pymysql[rsa] (>=1.1.1,<2.0.0)",
     "gdown (>=5.2.0,<6.0.0)",
     "selenium (>=4.35.0,<5.0.0)",
+    "structlog (>=25.1,<26)",
 ]
 
 [tool.poetry]
