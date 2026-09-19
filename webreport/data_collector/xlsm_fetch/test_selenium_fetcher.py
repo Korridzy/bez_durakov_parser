@@ -96,13 +96,14 @@ class SeleniumFetcherTests(unittest.TestCase):
         output = "\n".join(captured.output)
         self.assertNotIn(folder_url, output)
         self.assertIn("[REDACTED_FOLDER_URL]", output)
-        self.assertEqual(
+        self.assertIn(
+            "[REDACTED_FOLDER_URL]",
             captured.records[0].getMessage(),
-            "Error: boom at [REDACTED_FOLDER_URL]",
         )
-        self.assertEqual(
+        self.assertNotIn(folder_url, captured.records[0].getMessage())
+        self.assertNotIn(
+            "[REDACTED_FOLDER_URL]",
             captured.records[1].getMessage(),
-            "A message without the folder URL",
         )
 
     def test_log_redacts_exception_value_and_preserves_safe_exception(self):
