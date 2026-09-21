@@ -30,6 +30,9 @@ services:
         required: false
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
+      - ./litellm_settings.generated.yaml:/app/litellm_settings.generated.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - webreport-network
     healthcheck:

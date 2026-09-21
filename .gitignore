@@ -178,6 +178,7 @@ celerybeat.pid
 # Environments
 .env
 .env.*
+webreport/litellm_settings.generated.yaml
 .venv
 env/
 venv/
