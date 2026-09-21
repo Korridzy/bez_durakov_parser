@@ -19,7 +19,7 @@ parser/
 ├── migrations/         # Alembic DB migrations (MySQL)
 ├── range/              # Utility scripts for statistics/calendars (gitignored)
 ├── secret/             # Credentials (gitignored)
-├── vm/                 # MySQL data volume and backend checkpoints (gitignored)
+├── vm/                 # MySQL data volume, backend checkpoints and conversation archive (gitignored)
 ├── webreport/          # Web reporting: FastAPI + Streamlit + LangGraph (see webreport/AGENTS.md)
 ├── xlsm_archive/       # Fetched XLSM files storage (gitignored)
 ├── parse_data.py       # CLI entry point: parse XLSM → DB
@@ -41,6 +41,7 @@ parser/
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | FastAPI + Streamlit + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
+| Conversation archive | `webreport/backend/archive.py` + `archive_cli.py` | fail-open, independent of checkpoints, CLI-only deletion |
 | Logging | `bd_shared/logging_setup.py` | Shared structlog and standard-library pipeline. Entry points configure it once per process |
 | Serve another dataset | `make webreport-start DATASET=<name>` | Reads `DATASET_DIR` (default `range/<name>`), merges its `config/config.local.toml` over the tracked config and mounts it at `/dataset` in the backend |
 | Analysis examples | `examples/four_buckets.py` | Shows ORM usage for custom analysis |
@@ -49,7 +50,7 @@ parser/
 
 - **Language**: Python 3.11+ only. All deps via Poetry (`poetry install --no-root`)
 - **Game data and the parser**: MySQL 8.0 only, connected via `pymysql`. The webreport backend is not restricted this way, since it serves whatever MySQL, PostgreSQL or SQLite database `[database]` and `[dataset]` name
-- **Agent checkpoints**: SQLite is allowed only for the backend-owned checkpoint store at `../vm/backend/checkpoints`; it is not a game-data store.
+- **Agent checkpoints**. Backend-owned SQLite stores: the checkpoint store and the conversation archive at `../vm/backend/checkpoints`; neither is a game-data store.
 - **Config**: TOML-based (`bd_shared/config.toml`). Test config: `bd_shared/test_config.toml`
 - **Logging**. Libraries never call `basicConfig`; entry points call `configure_logging`.
 - **Team names**: Always normalized via `normalize_team_name()` — NFC unicode, lowercase, whitespace-collapsed
@@ -62,7 +63,7 @@ parser/
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
-- **DO NOT** add SQLite support for game data, which remains MySQL-only (see issue-61). SQLite is permitted for agent checkpoints at `../vm/backend/checkpoints` and for a webreport dataset an operator configures.
+- **DO NOT** add SQLite support for game data, which remains MySQL-only (see issue-61). Backend-owned SQLite stores: the checkpoint store and the conversation archive at `../vm/backend/checkpoints`; neither is a game-data store. An operator may configure a webreport dataset with SQLite.
 - **DO NOT** access the game database directly from this repository's own web components — go through `bd_shared/db.py` and `bd_shared/db_helpers.py`. An operator's own tool module reaches its database directly by design.
 - **DO NOT** bypass `normalize_team_name()` when storing/comparing team names
 - **DO NOT** put dataset queries in the backend. They belong in the operator tool module named by `dataset.tools_module`, which receives the engine the backend built and made read-only.
@@ -107,3 +108,5 @@ cd webreport && make test-e2e                    # Offline Playwright reasoning-
 - ChatLiteLLM (`langchain-litellm >=0.7,<0.8`) is the backend model client. Its LiteLLM SDK is deliberately installed in the backend image, reversing the prior SDK-out-of-image rule. The manifest keeps that version range with a dependency-level Python `<3.15` marker because the literal range was not lockable under the project Python bound; the shipped image uses Python 3.11.
 - Reasoning round-trip is always on: `OutboundReasoningFilter` echoes reasoning only within the current user turn, while checkpoints retain all turns. `ChatResponse.reasoning` and `/api/history` carry it to the collapsed frontend labels «Рассуждения» and, for recovered failed requests, «Рассуждения (неполные)». No reasoning means no block.
 - Anthropic-style thinking models are unsupported because `thinking_blocks` do not round-trip. There is no configuration switch for this. LiteLLM's `main-stable` image tag and the young community package `langchain-litellm` can change behavior; the minor-range pin and AC-1 echo tripwire are the mitigations.
+- The conversation archive has its own SQLite file. Checkpoint TTL, LRU eviction, `/api/history`, and `/api/clear` do not modify archive rows. `archive_retention_days` and `archive_reasoning_retention_days` set the archive and reasoning retention windows. `0` keeps the applicable data forever.
+- LiteLLM uses `langfuse_otel` only when `langfuse_host`, `langfuse_public_key`, and `langfuse_secret_key` are all non-empty. Correlation uses `traceparent` and metadata.

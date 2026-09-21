@@ -11,10 +11,10 @@ Central library providing ORM models, database operations, configuration, and ga
 | `db.py` | SQLAlchemy ORM models (10 tables) + `Database` class with all DB operations |
 | `bd_game.py` | `BdGame` dataclass — in-memory game representation, XLSM parser logic |
 | `db_helpers.py` | High-level helpers: `initialize_database()`, `save_game_to_database()` |
-| `config.py` | TOML config loader. Includes `DATABASE_URL`, `DEFAULT_GAME_DATE` and `XLSM_FETCH_CONFIG`. `[webreport]` provides `agent_scope_gate_model` and `agent_scope_gate_history_turns` for the scope gate |
+| `config.py` | TOML config loader. Includes `DATABASE_URL`, `DEFAULT_GAME_DATE` and `XLSM_FETCH_CONFIG`. `[webreport]` provides scope gate, archive, and Langfuse settings |
 | `config.toml` | Tracked base config. `config.local.toml` is an ignored server-local overlay; `BD_CONFIG_FILE` selects a complete alternate config |
 | `logging_setup.py` | Shared structlog and standard-library logging configuration |
-| `log_redaction.py` | Redaction of sensitive structured-log fields |
+| `log_redaction.py` | Redaction of sensitive structured-log fields, including `langfusesecretkey` and `langfusepublickey` |
 | `test_logging_setup.py` | Tests for logging configuration and rendering |
 | `test_log_redaction.py` | Tests for sensitive-field redaction |
 | `test_config.toml` | Test DB config — used by `test_alembic_migration.py` |
@@ -31,6 +31,7 @@ Central library providing ORM models, database operations, configuration, and ga
 | Game round structure | `bd_game.py` | `_initialize_team_structures()` — vybor, chisla, pref, pairs, razobl, auction, mot |
 | DB connection | `config.py` | `DATABASE_URL` from `config.toml` `[database]` section |
 | WebReport config | `config.py` | `WEBREPORT_BACKEND_PORT`, `WEBREPORT_FRONTEND_PORT`, `WEBREPORT_DEBUG`, `agent_scope_gate_model`, `agent_scope_gate_history_turns` |
+| Archive and Langfuse config | `config.py` | `archive_enabled`, `archive_db_path`, `archive_retention_days`, `archive_store_reasoning`, `archive_reasoning_retention_days`, `archive_sweep_interval_seconds`, `langfuse_host`, `langfuse_public_key`, `langfuse_secret_key` |
 | Knowledge config | `config.py` | `KNOWLEDGE_DIR`, `KNOWLEDGE_MAX_TITLE_CHARS`, `KNOWLEDGE_MAX_SUMMARY_CHARS`, `KNOWLEDGE_MAX_PERSONA_CHARS`, `KNOWLEDGE_MAX_TOPICS`, `KNOWLEDGE_MAX_DOC_BYTES`, `KNOWLEDGE_MAX_BYTES_PER_TURN`, `KNOWLEDGE_MAX_SCOPE_CHARS` |
 
 ## ORM TABLES
