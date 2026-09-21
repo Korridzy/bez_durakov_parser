@@ -58,13 +58,14 @@ def failure(
     *,
     reasoning: str | None = None,
     verdict: str | None = None,
+    query_info: list[QueryTrace] | None = None,
 ) -> ReportResponse:
     return {
         "success": False,
         "error": error,
         "message": message,
         "timestamp": datetime.now().isoformat(),
-        "query_info": [],
+        "query_info": query_info or [],
         "data": None,
         "reasoning": reasoning,
         "verdict": verdict,

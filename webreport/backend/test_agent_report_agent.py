@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import os
 import subprocess
@@ -5,6 +6,7 @@ import sys
 import unittest
 from asyncio import CancelledError, sleep
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 _graph_cases = importlib.import_module("test_agent_graph")
@@ -215,11 +217,11 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.make_system(self.memory.InMemorySaver())
         chat_litellm.assert_called_once_with(
-            model="litellm_proxy/gpt-4o",
-            api_base="http://litellm:4000",
+            model="litellm_proxy/" + self.runtime_module.CONFIG.AGENT_MODEL,
+            api_base=self.runtime_module.CONFIG.LITELLM_BASE_URL,
             api_key="sk-noop",
-            request_timeout=60,
-            model_kwargs={"num_retries": 0},
+            request_timeout=self.runtime_module.CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+            model_kwargs={"num_retries": self.runtime_module.CONFIG.LLM_MAX_RETRIES},
         )
         injected = graph_builder.call_args.args[0]
         self.assertIsInstance(injected, self.runtime_module.OutboundReasoningFilter)
@@ -427,6 +429,130 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["message"], "Сравнение готово.")
         self.assertIsNone(response["data"])
 
+    async def test_model_error_after_tool_call_keeps_partial_query_trace(self):
+        def fail_after_tool(_invocation):
+            raise ScriptedModelError("failure-after-tool")
+
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("get_all_teams", {}, "partial")],
+                )
+            ],
+            repeat_factory=fail_after_tool,
+        )
+        system, service = self.make_system(self.memory.InMemorySaver(), model=model)
+        service.results["get_all_teams"] = []
+
+        with self.assertLogs("agents.report_runtime", level="ERROR"):
+            response = await system.process_user_request(
+                "Покажи команды", "partial-error-thread"
+            )
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["error"], "failure-after-tool")
+        self.assertEqual(
+            response["query_info"], [{"tool": "get_all_teams", "args": {}}]
+        )
+        print(f"partial query_info: {response['query_info']}")
+
+    async def test_timeout_after_tool_call_keeps_partial_query_trace(self):
+        model_started = asyncio.Event()
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("get_all_teams", {}, "timeout-partial")],
+                )
+            ]
+        )
+        original_invoke = model.ainvoke
+
+        async def block_after_tool(messages):
+            if model.invocation_count == 1:
+                model.requests.append(messages)
+                model.invocation_count += 1
+                model_started.set()
+                await asyncio.Future()
+            return await original_invoke(messages)
+
+        async def timeout_after_model_started(awaitable, _timeout):
+            task = asyncio.create_task(awaitable)
+            try:
+                await asyncio.wait_for(model_started.wait(), timeout=5)
+            finally:
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=5)
+            raise TimeoutError
+
+        system, service = self.make_system(self.memory.InMemorySaver(), model=model)
+        service.results["get_all_teams"] = []
+        with (
+            patch.object(model, "ainvoke", side_effect=block_after_tool),
+            patch.object(
+                self.runtime_module,
+                "wait_for",
+                side_effect=timeout_after_model_started,
+            ),
+        ):
+            response = await system.process_user_request(
+                "Покажи команды", "partial-timeout-thread"
+            )
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["error"], "timeout")
+        self.assertEqual(
+            response["query_info"], [{"tool": "get_all_teams", "args": {}}]
+        )
+        self.assertEqual(service.calls, [("get_all_teams", {})])
+        print(f"timeout query_info: {response['query_info']}")
+
+    async def test_partial_trace_ignores_checkpoint_without_model_response(self):
+        checkpoint = SimpleNamespace(
+            checkpoint={
+                "channel_values": {
+                    "messages": [self.messages.HumanMessage(content="no response")]
+                }
+            }
+        )
+
+        class HumanOnlySaver:
+            async def aget_tuple(self, _config):
+                return checkpoint
+
+        system, _ = self.make_system(
+            self.memory.InMemorySaver(), model=FailingModel()
+        )
+        system._saver = HumanOnlySaver()
+        with self.assertLogs("agents.report_runtime", level="ERROR"):
+            response = await system.process_user_request(
+                "Не отвечай", "partial-empty-thread"
+            )
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["query_info"], [])
+        self.assertEqual(await system._partial_trace("partial-empty-thread"), [])
+
+    async def test_partial_trace_ignores_checkpoint_lookup_failure(self):
+        class BrokenSaver:
+            async def aget_tuple(self, _config):
+                raise RuntimeError("checkpoint unavailable")
+
+        system, _ = self.make_system(
+            self.memory.InMemorySaver(), model=FailingModel()
+        )
+        system._saver = BrokenSaver()
+        with self.assertLogs("agents.report_runtime", level="ERROR"):
+            response = await system.process_user_request(
+                "Не отвечай", "partial-broken-thread"
+            )
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["query_info"], [])
+        self.assertEqual(await system._partial_trace("partial-broken-thread"), [])
+
     async def test_timeout_cancels_the_agent_run_and_returns_a_controlled_failure(self):
         model = SlowModel()
         system, service = self.make_system(
@@ -463,7 +589,13 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         response = await system.process_user_request("Не останавливайся", "recursion-thread")
         self.assertFalse(response["success"])
         self.assertIsNone(response["verdict"])
-        self.assertEqual(response["query_info"], [])
+        self.assertTrue(response["query_info"])
+        self.assertTrue(
+            all(
+                item == {"tool": "get_all_teams", "args": {}}
+                for item in response["query_info"]
+            )
+        )
         self.assertRegex(response["message"], "[А-Яа-я]")
 
     async def test_each_agent_turn_resets_transient_graph_state(self):
