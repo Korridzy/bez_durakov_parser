@@ -22,6 +22,8 @@ from bd_shared.config import (
     AGENT_MODEL,
     AGENT_SCOPE_GATE_HISTORY_TURNS,
     AGENT_SCOPE_GATE_MODEL,
+    ARCHIVE_DB_PATH,
+    ARCHIVE_ENABLED,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
     DATABASE_NAME,
@@ -58,7 +60,18 @@ from agent.engine import build_read_only_engine
 from agent.reasoning import extract_reasoning, extract_text
 from agent.toolmodule import ToolSpec, load_tool_module
 from agents.report_runtime import ReportAgentSystem
-from request_context import RequestCorrelationMiddleware
+from agents.report_support import failure
+from archive import (
+    ArchiveConfigError,
+    ArchiveSettings,
+    ConversationArchive,
+    NullArchive,
+)
+from request_context import (
+    RequestCorrelationMiddleware,
+    derive_trace_id,
+    new_request_id,
+)
 from session_store import MAX_SESSIONS, SessionIndex
 
 configure_logging("webreport-backend", level=LOG_LEVEL, logger_levels={"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else None)
@@ -140,6 +153,8 @@ tool_engine: Engine | None = None
 tool_service: object | None = None
 knowledge: Knowledge | None = None
 llm_proxy_healthy: bool = False
+archive: ConversationArchive | NullArchive = NullArchive()
+BOOT_ID = uuid.uuid4().hex
 sessions: SessionIndex = SessionIndex(
     max_size=MAX_SESSIONS,
     ttl=CHECKPOINT_TTL_SECONDS,
@@ -434,7 +449,7 @@ def _validate_scope_gate_history_turns(value: object) -> int:
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global agent_system, checkpoint_connection, checkpoint_saver
+    global agent_system, archive, checkpoint_connection, checkpoint_saver
     global tool_engine, tool_service, knowledge, llm_proxy_healthy
 
     if DATASET_CONFIG_ERROR is not None:
@@ -503,6 +518,26 @@ async def startup_event():
         checkpoint_connection = connection
         checkpoint_saver = saver
 
+        try:
+            archive_settings = ArchiveSettings.from_config()
+        except ArchiveConfigError as error:
+            logger.error("Conversation archive configuration is invalid: %s", error)
+            raise
+
+        if ARCHIVE_ENABLED:
+            archive = ConversationArchive(ARCHIVE_DB_PATH, settings=archive_settings)
+            await archive.setup()
+            await archive.recover_interrupted(BOOT_ID)
+            await archive.sweep(datetime.now())
+            logger.info(
+                "Conversation archive opened: path=%s retention_days=%s reasoning_retention_days=%s",
+                ARCHIVE_DB_PATH,
+                archive_settings.retention_days,
+                archive_settings.reasoning_retention_days,
+            )
+        else:
+            archive = NullArchive()
+
         llm_proxy_healthy = await probe_llm_proxy(sleep=probe_sleep)
 
         await rebuild_session_index()
@@ -523,6 +558,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     global checkpoint_connection, checkpoint_saver, tool_engine
+
+    await archive.close()
 
     if checkpoint_connection is not None:
         await checkpoint_connection.close()
@@ -648,21 +685,42 @@ async def chat(message: ChatMessage, response: Response):
 
             await sessions.touch(session_id)
 
-        result = await system.process_user_request(
-            message.message,
+        context = structlog.contextvars.get_contextvars()
+        request_id = str(context.get("request_id") or new_request_id())
+        trace_id = str(context.get("trace_id") or derive_trace_id(request_id))
+        row_id = await archive.begin(
+            request_id=request_id,
+            trace_id=trace_id,
             session_id=session_id,
+            user_id=None,
+            model=AGENT_MODEL,
+            user_message=message.message,
         )
-        return ChatResponse(
-            success=result["success"],
-            session_id=session_id,
-            data=result.get("data"),
-            query_info=result["query_info"],
-            message=result["message"],
-            timestamp=result["timestamp"],
-            error=result.get("error"),
-            reasoning=result.get("reasoning"),
-            scope_verdict=result.get("verdict"),
-        )
+        result = None
+        try:
+            result = await system.process_user_request(
+                message.message,
+                session_id=session_id,
+            )
+            return ChatResponse(
+                success=result["success"],
+                session_id=session_id,
+                data=result.get("data"),
+                query_info=result["query_info"],
+                message=result["message"],
+                timestamp=result["timestamp"],
+                error=result.get("error"),
+                reasoning=result.get("reasoning"),
+                scope_verdict=result.get("verdict"),
+            )
+        except Exception as e:
+            result = failure(
+                "Внутренняя ошибка",
+                f"internal:{type(e).__name__}",
+            )
+            raise _internal_error(e)
+        finally:
+            await archive.complete(row_id, result)
     except HTTPException:
         raise
     except Exception as e:
