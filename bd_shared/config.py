@@ -185,3 +185,17 @@ KNOWLEDGE_DIR = _knowledge_dir_path
 CHECKPOINT_DB_PATH = os.environ.get("BD_CHECKPOINT_DB_PATH") or config["webreport"].get(
     "checkpoint_db_path", "/data/checkpoints.db"
 )
+
+# Archive settings stay uncoerced so startup validation can reject bad types, like the scope gate keys.
+ARCHIVE_ENABLED = config["webreport"].get("archive_enabled", True)
+ARCHIVE_DB_PATH = os.environ.get("BD_ARCHIVE_DB_PATH") or config["webreport"].get(
+    "archive_db_path", "/data/conversations.db"
+)
+ARCHIVE_RETENTION_DAYS = config["webreport"].get("archive_retention_days", 0)
+ARCHIVE_STORE_REASONING = config["webreport"].get("archive_store_reasoning", True)
+ARCHIVE_REASONING_RETENTION_DAYS = config["webreport"].get("archive_reasoning_retention_days", 30)
+ARCHIVE_SWEEP_INTERVAL_SECONDS = config["webreport"].get("archive_sweep_interval_seconds", 600)
+LANGFUSE_HOST = str(config["webreport"].get("langfuse_host", "")).strip()
+LANGFUSE_PUBLIC_KEY = str(config["webreport"].get("langfuse_public_key", "")).strip()
+LANGFUSE_SECRET_KEY = str(config["webreport"].get("langfuse_secret_key", "")).strip()
+LANGFUSE_ENABLED = bool(LANGFUSE_HOST and LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
