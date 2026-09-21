@@ -39,8 +39,9 @@ endif
 
 COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
 CASE_FILE ?=
+ARCHIVE_USER = $(if $(filter command line,$(origin USER)),$(strip $(USER)))
 
-.PHONY: help generate-env validate-knowledge validate-tools test-live-scope-eval test test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+.PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -60,10 +61,16 @@ help:
 	@echo "  make rebuild     - Validate, rebuild, and restart services"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test           - Run the offline backend suite (no running stack needed)"
-	@echo "  make test-postgres  - Run the acceptance lane against a throwaway PostgreSQL"
-	@echo "  make test-e2e-setup - One-time: install frontend dev deps and Chromium (needs network)"
-	@echo "  make test-e2e       - Run the offline stub-backed Playwright lane"
+	@echo "  make test                - Run the offline backend suite (no running stack needed)"
+	@echo "  make test-proxy-contract - Prove the LiteLLM Langfuse contract offline"
+	@echo "  make test-postgres       - Run the acceptance lane against a throwaway PostgreSQL"
+	@echo "  make test-e2e-setup      - One-time: install frontend dev deps and Chromium (needs network)"
+	@echo "  make test-e2e            - Run the offline stub-backed Playwright lane"
+	@echo ""
+	@echo "Conversation archive:"
+	@echo "  make archive-list [SESSION=<id>] [USER=<id>] [LIMIT=<n>]"
+	@echo "  make archive-show ID=<id>"
+	@echo "  make archive-delete SESSION=<id> | USER=<id> | BEFORE=<ISO-date-or-timestamp>"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean       - Clean temporary files"
@@ -109,6 +116,23 @@ validate-tools:
 	@echo "🔎 Validating the configured operator tool module..."
 	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m agent.tools_cli
 
+archive-list: generate-env
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m archive_cli list $(if $(strip $(SESSION)),--session "$(SESSION)") $(if $(ARCHIVE_USER),--user "$(ARCHIVE_USER)") $(if $(strip $(LIMIT)),--limit "$(LIMIT)")
+
+archive-show: generate-env
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m archive_cli show --id "$(ID)"
+
+archive-delete: generate-env
+	@selectors=0; \
+	if [ -n "$(strip $(SESSION))" ]; then selectors=$$((selectors + 1)); fi; \
+	if [ -n "$(ARCHIVE_USER)" ]; then selectors=$$((selectors + 1)); fi; \
+	if [ -n "$(strip $(BEFORE))" ]; then selectors=$$((selectors + 1)); fi; \
+	if [ "$$selectors" -ne 1 ]; then \
+		echo "Usage: make archive-delete SESSION=<id> | USER=<id> | BEFORE=<ISO-date-or-timestamp>" >&2; \
+		exit 2; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m archive_cli delete $(if $(strip $(SESSION)),--session "$(SESSION)") $(if $(ARCHIVE_USER),--user "$(ARCHIVE_USER)") $(if $(strip $(BEFORE)),--before "$(BEFORE)")
+
 test-live-scope-eval:
 	@echo "🔎 Running the live dataset scope evaluation..."
 	$(DOCKER_COMPOSE) run --rm --no-deps backend python -m test_live_scope_eval.driver $(CASE_FILE)
@@ -135,10 +159,15 @@ rebuild: generate-env validate-knowledge validate-tools
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_reasoning.py && python /app/test_knowledge_cli.py && python /app/test_tools_cli.py && python /app/test_request_context.py && python /app/test_agent_correlation.py"
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_reasoning.py && python /app/test_knowledge_cli.py && python /app/test_tools_cli.py && python /app/test_request_context.py && python /app/test_agent_correlation.py && python /app/test_archive_store.py && python /app/test_archive_api.py && python /app/test_archive_cli.py"
 	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CONFIG_FILE=test_config_sqlite.toml backend python /app/test_acceptance_swap.py
+	$(MAKE) test-proxy-contract
 	$(MAKE) test-postgres
 	@echo ""
+
+test-proxy-contract: generate-env
+	@echo "🔭 Proving the LiteLLM Langfuse correlation contract offline..."
+	$(DOCKER_COMPOSE) run --rm --no-deps --entrypoint python -e LITELLM_LOCAL_MODEL_COST_MAP=True -v "$(abspath backend/test_langfuse_proxy_contract.py):/app/test_langfuse_proxy_contract.py:ro" litellm /app/test_langfuse_proxy_contract.py
 
 test-postgres: generate-env
 	@echo "🐘 Running the PostgreSQL acceptance lane..."
