@@ -104,7 +104,9 @@ cd webreport
 - `[webreport]`:
   - Сеть и запуск: `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
   - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`
+  - Архив: `archive_enabled`, `archive_db_path`, `archive_retention_days`, `archive_store_reasoning`, `archive_reasoning_retention_days`, `archive_sweep_interval_seconds`
   - LiteLLM: `litellm_base_url`, `agent_model`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
+  - Langfuse: `langfuse_host`, `langfuse_public_key`, `langfuse_secret_key`
   - Ключи провайдеров: `openai_api_key`, `openrouter_api_key`, `opencode_api_key`
   - Пределы знаний:
     - `knowledge_max_title_chars = 80`
@@ -124,6 +126,11 @@ cd webreport
 
 Ключи `[application]` `log_level`, `log_format` и `environment` управляют уровнем, форматом и именем среды. Полное описание конвейера, полей и поиска записей находится в [LOGGING.md](LOGGING.md).
 
+### Документация
+
+- [LOGGING.md](LOGGING.md) описывает общий конвейер логов.
+- [ARCHIVE.md](ARCHIVE.md) описывает постоянный архив разговоров, CLI, срок хранения и Langfuse.
+
 ### Папка знаний
 
 По умолчанию `dataset.knowledge_dir = "knowledge/bez_durakov"` указывает на поставляемую папку `bd_shared/knowledge/bez_durakov`. Если указанная папка отсутствует, backend записывает предупреждение и продолжает запуск без знаний. Если папка существует, но недействительна, например `manifest.toml` не проходит проверку, backend прерывает запуск. Когда папка знаний загружена, агент выполняет поиск полного Markdown-документа по требованию инструментом `read_knowledge`, передавая ему точный идентификатор темы.
@@ -140,7 +147,7 @@ cd webreport
 | `.env.backend` | `BD_DOCKER` и debug/reload backend |
 | `.env.data_collector` | `BD_DOCKER` и timezone data collector |
 | `.env.frontend` | URL backend и debug/reload frontend |
-| `.env.litellm` | `OPENAI_API_KEY`, `OPENROUTER_API_KEY` и `OPENCODE_API_KEY` для LiteLLM |
+| `.env.litellm` | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` и `LANGFUSE_HOST` для LiteLLM |
 
 Не редактируйте сгенерированные `.env*` вручную. Для изменения серверных настроек обновите `../bd_shared/config.local.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
 
@@ -187,6 +194,8 @@ openai_api_key = "your-api-key-here"
 ```
 
 `generate_env.py` записывает ключ в `.env.litellm` с правами `0600`; Docker Compose передаёт этот файл только контейнеру LiteLLM. Не экспортируйте `OPENAI_API_KEY` в shell. `bd_shared/config.local.toml` игнорируется Git и предназначен для настоящих ключей.
+
+Три непустых ключа Langfuse включают callback proxy. Генератор передаёт их только LiteLLM. Правила архива и ограничения Langfuse описаны в [ARCHIVE.md](ARCHIVE.md).
 При запуске backend выполняет глубокую проверку LiteLLM. Если настроенная модель доступна, собирается агент LangGraph. Если модель недоступна, процесс остаётся запущенным, но отказывается отвечать, и `/health` вместе с `/api/chat` возвращают 503 с одним русским предложением. Каждая следующая попытка чата повторяет проверку ровно один раз, и первый успешный результат собирает агента и отвечает на этот же запрос.
 
 После изменения ключа перезапустите стек командой `make restart`.
@@ -215,7 +224,7 @@ agent_model = "opencode/big-pickle"
 
 Доступны: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free` и `opencode/nemotron-3-ultra-free`. OpenCode помечает эти модели как временно бесплатные, поэтому при изменении каталога обновите конфигурацию. После изменения ключа или модели выполните `make restart`.
 
-LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
+LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state и отдельный архив разговоров в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 
 ### Рассуждения модели
 
@@ -272,7 +281,7 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 - **LangGraph** - ReAct agent and checkpointed threads
 - **ChatLiteLLM** (`langchain-litellm`) - model client for the internal LiteLLM proxy
 - **LiteLLM** - internal model proxy at `litellm:4000`
-- **SQLite** - backend checkpoint store at `../vm/backend/checkpoints`
+- **SQLite**. Checkpoint state и отдельный архив разговоров находятся в `../vm/backend/checkpoints`
 - **SQLAlchemy** - ORM для работы с БД
 - **Pandas** - обработка данных
 - **Uvicorn** - ASGI сервер

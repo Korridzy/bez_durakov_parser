@@ -41,6 +41,11 @@ make build         # Сборка образов
 make rebuild       # Пересборка и запуск
 make test          # Тесты, включая обе приёмочные полосы
 make test-postgres # Приёмочная полоса против одноразового PostgreSQL
+make archive-list LIMIT=5 # Список архивных ходов
+make archive-show ID=1 # Полная строка архива
+make archive-delete SESSION=<id> # Удалить одну сессию
+make archive-delete USER=<id> # Удалить одного пользователя
+make archive-delete BEFORE=<ISO-date-or-timestamp> # Удалить старые строки
 make clean         # Очистка
 ```
 
@@ -239,6 +244,7 @@ docker compose up -d --build
 | ARCHITECTURE.md | Для разработчиков |
 | SUMMARY.md | Итоговая сводка |
 | QUICK_REFERENCE.md | Эта шпаргалка |
+| ARCHIVE.md | Архив разговоров, Langfuse и удаление |
 
 ## 💡 Советы
 

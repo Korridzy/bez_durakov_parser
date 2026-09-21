@@ -34,6 +34,11 @@
    - Поля и идентификаторы запроса
    - Сбор логов Docker
 
+6. **[ARCHIVE.md](ARCHIVE.md)** Архив разговоров
+   - Хранилище и схема
+   - Хранение и удаление
+   - Langfuse и конфиденциальность
+
 ## 📁 Структура файлов
 
 ### Основные компоненты
@@ -108,14 +113,14 @@ Backend (FastAPI, one replica)
     ↓
 LangGraph ReAct agent over discovered tools
     ↓                ↘
-LiteLLM `litellm:4000`   SQLite checkpoints
+LiteLLM `litellm:4000`   SQLite checkpoints и архив
     ↓                    `../vm/backend/checkpoints`
 operator tool module (dataset.tools_module)
     ↓
 MySQL, PostgreSQL or SQLite, read-only
 ```
 
-Backend performs the LiteLLM probe at startup. Without a reachable model it stays up and refuses to serve, answering 503 from `/health` and `/api/chat`, and each later chat attempt re-probes once. LangGraph thread state lives in `../vm/backend/checkpoints`. Run one backend replica only; horizontal backend scaling is not supported.
+Backend performs the LiteLLM probe at startup. Without a reachable model it stays up and refuses to serve, answering 503 from `/health` and `/api/chat`, and each later chat attempt re-probes once. LangGraph thread state и отдельный SQLite архив находятся в `../vm/backend/checkpoints`. Run one backend replica only; horizontal backend scaling is not supported.
 
 ## 🛠️ Технологии
 
@@ -126,6 +131,7 @@ Backend performs the LiteLLM probe at startup. Without a reachable model it stay
 | Agents | LangGraph ReAct |
 | Model proxy | LiteLLM at `litellm:4000` |
 | Agent state | SQLite checkpoints |
+| Архив разговоров | Отдельный SQLite архив рядом с checkpoints |
 | Services | Python + Pandas |
 | ORM | SQLAlchemy |
 | Database | MySQL |

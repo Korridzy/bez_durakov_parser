@@ -122,10 +122,12 @@ Anthropic-style thinking models пока не поддерживаются: back
 
 LiteLLM proxy использует moving tag `main-stable`, поэтому его поведение может меняться при обновлении образа. `langchain-litellm` также является молодым community-пакетом. Риск снижен minor-range pin и тестом AC-1, который фиксирует обязательный echo reasoning в tool loop.
 
-### 4. Checkpoint store
-Backend хранит состояние LangGraph по thread ID в service-local SQLite store: `../vm/backend/checkpoints`. Это отдельное состояние агентов, не замена MySQL для игровых данных.
+### 4. Checkpoint store и архив разговоров
+Backend хранит состояние LangGraph по thread ID в локальном SQLite хранилище `../vm/backend/checkpoints`. Это состояние агентов, а не замена MySQL для игровых данных.
 
-SQLite saver рассчитан на один backend replica. Горизонтальное масштабирование backend не поддерживается.
+Рядом находится отдельный SQLite архив `../vm/backend/checkpoints/conversations.db`. Он записывает допущенные ходы чата независимо от checkpoint store. TTL, LRU, `/api/clear` и перезапуск не удаляют завершённые строки архива.
+
+Оба SQLite хранилища рассчитаны на одну backend replica. Горизонтальное масштабирование backend не поддерживается. Подробности схемы и хранения находятся в [ARCHIVE.md](ARCHIVE.md).
 
 ### 5. Модуль инструментов оператора
 **Файл**: задаётся ключом `dataset.tools_module`. Для этого развёртывания —
@@ -166,7 +168,11 @@ SQLite saver рассчитан на один backend replica. Горизонт�
 
 Все процессы явно инициализируют общий конвейер `structlog` и `logging`. Он добавляет сведения о сервисе, среде и версии к структурированным записям.
 
-`X-Request-ID` связывает вызов фронтенда, обработку бэкенда и записи запроса. Вызовы модели и задания коллектора получают дополнительные идентификаторы контекста. Подробности находятся в [LOGGING.md](LOGGING.md).
+`X-Request-ID` связывает вызов фронтенда, обработку backend и записи запроса. Из него выводится `trace_id`. Идентификатор из 32 строчных шестнадцатеричных символов сохраняется, другой идентификатор получает первые 32 символа SHA-256 хеша.
+
+Каждый вызов модели получает `request_id`, `session_id`, `trace_metadata.request_id`, `generation_name` и теги в metadata. Заголовок `traceparent` несёт общий trace id запроса и отдельный span id вызова. Proxy передаёт эти данные в Langfuse как `session.id`, имя generation, теги и metadata trace. Текст сообщений в metadata не попадает.
+
+`role` показывает, вызвал ли модель агент или scope gate. Подробности записей находятся в [LOGGING.md](LOGGING.md). Полный контракт и ограничения Langfuse находятся в [ARCHIVE.md](ARCHIVE.md).
 
 ## Потоки данных
 
@@ -263,6 +269,8 @@ SQLite saver рассчитан на один backend replica. Горизонт�
 - CORS ограничен значениями из `[webreport].allowed_origins`
 - Без аутентификации
 - HTTP соединения
+
+Архив содержит пользовательскую и ассистентскую прозу, а при включённой настройке и reasoning. Файлы находятся в томе `/data` backend. Читать и удалять строки можно только через CLI, HTTP маршрутов для этого нет.
 
 ### Рекомендации для Production
 - Ограничить CORS только доверенными frontend origins

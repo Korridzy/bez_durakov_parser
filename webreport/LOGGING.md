@@ -62,13 +62,15 @@
 | `lineno` | Номер строки, создавшей запись |
 | `func_name` | Имя функции, создавшей запись |
 | `request_id` | Идентификатор HTTP запроса |
+| `trace_id` | Идентификатор trace, производный от `request_id` |
 | `session_id` | Идентификатор сессии чата |
 | `job_id` | Идентификатор запуска задания коллектора |
 | `job_name` | Имя задания коллектора |
 | `model` | Имя модели при вызове LiteLLM |
+| `role` | Роль вызова модели в `llm_call` и `llm_call_failed` |
 | `exception` | Структурированное исключение в `json` |
 
-Имена `trace_id`, `span_id` и `user_id` зарезервированы. Сейчас конвейер их не выдаёт.
+`trace_id` выдаётся вместе с `request_id`. Имена `span_id` и `user_id` остаются зарезервированными. Источник идентичности пользователя пока отсутствует.
 
 ## Корреляция
 
@@ -76,7 +78,11 @@
 
 Фронтенд создаёт один новый `X-Request-ID` для каждого вызова бэкенда. Бэкенд связывает `session_id` в `/api/chat`, `/api/history/{session_id}` и `/api/clear/{session_id}`.
 
-При вызове LiteLLM в `metadata` передаются `request_id` и `session_id`, то есть `metadata.request_id` и `metadata.session_id`, а в заголовке передаётся `X-Request-ID`. Поле `user` не отправляется, поэтому до внешнего провайдера не доходит атрибуция пользователя.
+Если `request_id` состоит из 32 строчных шестнадцатеричных символов, `trace_id` совпадает с ним. Иначе `trace_id` равен первым 32 символам SHA-256 от UTF-8 представления `request_id`.
+
+При вызове LiteLLM в `metadata` передаются `request_id`, `session_id`, `trace_metadata` с `request_id`, `generation_name` и теги `webreport` с именем среды. Связанный `user_id` добавляется только как `trace_user_id`. Поле `user` не отправляется.
+
+Заголовки вызова содержат `X-Request-ID` и `traceparent`. `traceparent` несёт общий trace id запроса и новый span id отдельного вызова модели.
 
 Коллектор связывает один запуск с `job_id` и `job_name`. Для задания загрузки значение `job_name` равно `xlsm_fetch`.
 
@@ -90,7 +96,7 @@ docker compose logs backend | grep <request_id>
 
 Перед сравнением ключ приводится к нижнему регистру, а символы `-`, `_` и пробелы удаляются. Следующий набор ключей маскируется значением `[REDACTED]`.
 
-`authorization`, `proxyauthorization`, `cookie`, `setcookie`, `apikey`, `xapikey`, `token`, `accesstoken`, `refreshtoken`, `secret`, `clientsecret`, `password`, `passwd`, `openaiapikey`, `openrouterapikey`, `opencodeapikey`, `databaseurl`, `dburl`
+`authorization`, `proxyauthorization`, `cookie`, `setcookie`, `apikey`, `xapikey`, `token`, `accesstoken`, `refreshtoken`, `secret`, `clientsecret`, `password`, `passwd`, `openaiapikey`, `openrouterapikey`, `opencodeapikey`, `langfusesecretkey`, `langfusepublickey`, `databaseurl`, `dburl`
 
 Следующий набор ключей заменяется значением `[OMITTED]`.
 
@@ -118,9 +124,9 @@ docker compose logs backend | grep <request_id>
 
 ## Связь с issue #108
 
-Общей точкой связи с issue #108 служат `request_id` и `session_id`. Они позволяют сопоставить запись операции с контекстом разговора без помещения текста разговора в общий лог.
+Issue #108 добавляет постоянный архив разговоров и корреляцию вызовов модели. Полное описание хранения, удаления, CLI и Langfuse находится в [ARCHIVE.md](ARCHIVE.md).
 
-Общие логи не содержат `message`, `messages`, `prompt`, `response`, `content`, `reasoning`, результаты запросов или данные запроса к модели. Правила хранения такого содержимого не входят в этот конвейер.
+Общие логи по-прежнему не содержат `message`, `messages`, `prompt`, `response`, `content`, `reasoning`, результаты запросов или данные запроса к модели. Для связи записей используйте `request_id`, `trace_id` и `session_id`.
 
 ## Тесты
 
@@ -130,7 +136,11 @@ docker compose logs backend | grep <request_id>
 | `bd_shared/test_log_redaction.py` | Корневой `make test` |
 | `webreport/backend/test_request_context.py` | `make -C webreport test` и корневой `make test` |
 | `webreport/backend/test_agent_correlation.py` | `make -C webreport test` и корневой `make test` |
+| `webreport/backend/test_archive_store.py` | `make -C webreport test` |
+| `webreport/backend/test_archive_api.py` | `make -C webreport test` |
+| `webreport/backend/test_archive_cli.py` | `make -C webreport test` |
+| `webreport/backend/test_langfuse_proxy_contract.py` | `make -C webreport test-proxy-contract` и `make -C webreport test` |
 | `webreport/data_collector/test_logging_jobs.py` | Корневой `make test` |
 | `webreport/frontend/test_frontend_logging.py` | Корневой `make test` |
 
-`make -C webreport test` запускает проверки бэкенда, включая `test_request_context.py` и `test_agent_correlation.py`. Корневой `make test` дополнительно запускает проверки общего кода, сборщика данных и фронтенда.
+`make -C webreport test` запускает проверки бэкенда, включая archive и correlation проверки. `make -C webreport test-proxy-contract` выполняет контрактную проверку внутри образа LiteLLM. Корневой `make test` дополнительно запускает проверки общего кода, сборщика данных и фронтенда.
