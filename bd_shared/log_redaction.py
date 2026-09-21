@@ -25,6 +25,8 @@ MASKED_KEYS = frozenset(
         "openaiapikey",
         "openrouterapikey",
         "opencodeapikey",
+        "langfusesecretkey",
+        "langfusepublickey",
         "databaseurl",
         "dburl",
     }

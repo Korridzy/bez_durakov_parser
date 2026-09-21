@@ -60,6 +60,9 @@ class TestLogRedaction(unittest.TestCase):
             "openai_api_key",
             "openrouter-api-key",
             "opencode api key",
+            "langfuse_secret_key",
+            "LANGFUSE-PUBLIC-KEY",
+            "langfusePublicKey",
             "database_url",
             "db-url",
         )
