@@ -1,6 +1,7 @@
 """Tests for request correlation and structured HTTP request logging."""
 
 import asyncio
+import hashlib
 import io
 import json
 import re
@@ -12,9 +13,31 @@ import structlog
 from fastapi.testclient import TestClient
 
 from bd_shared import logging_setup
-from request_context import RequestCorrelationMiddleware
+from request_context import RequestCorrelationMiddleware, derive_trace_id
 
 GENERATED_REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+class TraceIdTests(unittest.TestCase):
+    def test_lowercase_32_hex_request_id_is_used_as_trace_id(self) -> None:
+        request_id = "0123456789abcdef0123456789abcdef"
+
+        self.assertEqual(derive_trace_id(request_id), request_id)
+
+    def test_non_hex_request_id_is_hashed_to_32_hex_characters(self) -> None:
+        self.assertEqual(
+            derive_trace_id("req.A-1"),
+            hashlib.sha256(b"req.A-1").hexdigest()[:32],
+        )
+
+    def test_uppercase_hex_request_id_is_hashed_instead_of_reused(self) -> None:
+        request_id = "0123456789ABCDEF0123456789ABCDEF"
+
+        self.assertEqual(
+            derive_trace_id(request_id),
+            hashlib.sha256(request_id.encode()).hexdigest()[:32],
+        )
+        self.assertNotEqual(derive_trace_id(request_id), request_id)
 
 
 class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
@@ -90,6 +113,7 @@ class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(request_id, GENERATED_REQUEST_ID)
         [request_record] = self.records("http_request")
         self.assertEqual(request_record["request_id"], request_id)
+        self.assertEqual(request_record["trace_id"], derive_trace_id(request_id))
 
     def test_missing_header_generates_id_and_logs_request_fields(self) -> None:
         response = self.request("GET", "/ping")
@@ -98,6 +122,7 @@ class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(request_id, GENERATED_REQUEST_ID)
         [request_record] = self.records("http_request")
         self.assertEqual(request_record["request_id"], request_id)
+        self.assertEqual(request_record["trace_id"], derive_trace_id(request_id))
         self.assertEqual(request_record["method"], "GET")
         self.assertEqual(request_record["route"], "/ping")
         self.assertEqual(request_record["status"], 200)
@@ -111,6 +136,13 @@ class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["x-request-id"], "abc.DEF-123_x")
         [inside_record] = self.records("inside")
         self.assertEqual(inside_record["request_id"], "abc.DEF-123_x")
+        self.assertEqual(
+            inside_record["trace_id"], derive_trace_id("abc.DEF-123_x")
+        )
+        [request_record] = self.records("http_request")
+        self.assertEqual(
+            request_record["trace_id"], derive_trace_id("abc.DEF-123_x")
+        )
 
     def test_empty_header_is_replaced(self) -> None:
         self.assert_invalid_id_is_replaced([(b"x-request-id", b"")])
@@ -260,4 +292,4 @@ class RequestCorrelationMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)

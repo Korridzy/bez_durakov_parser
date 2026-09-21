@@ -1,5 +1,6 @@
 """ASGI middleware for request IDs and structured HTTP request logs."""
 
+import hashlib
 import re
 import sys
 import time
@@ -11,6 +12,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 REQUEST_ID_HEADER = "X-Request-ID"
 REQUEST_ID_PATTERN = re.compile(rb"[A-Za-z0-9._-]{1,128}")
+TRACE_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+
+
+def derive_trace_id(request_id: str) -> str:
+    if TRACE_ID_PATTERN.fullmatch(request_id) is not None:
+        return request_id
+    return hashlib.sha256(request_id.encode()).hexdigest()[:32]
 
 
 def new_request_id() -> str:
@@ -42,7 +50,10 @@ class RequestCorrelationMiddleware:
             request_id = new_request_id()
 
         structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(request_id=request_id)
+        structlog.contextvars.bind_contextvars(
+            request_id=request_id,
+            trace_id=derive_trace_id(request_id),
+        )
         started = time.perf_counter()
         status: int | None = None
         error_info = None

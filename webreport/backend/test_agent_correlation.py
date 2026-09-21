@@ -16,11 +16,13 @@ from unittest.mock import AsyncMock, patch
 import structlog
 
 from bd_shared import logging_setup
+from bd_shared.config import ENVIRONMENT
 
 correlation = importlib.import_module("agent.correlation")
 CorrelatedModelClient = correlation.CorrelatedModelClient
 
 MODEL = "litellm_proxy/gpt-4o"
+TRACE_ID = "0123456789abcdef0123456789abcdef"
 BACKEND_ROOT = Path(__file__).resolve().parent
 
 
@@ -142,21 +144,29 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def wrap(bound: BoundInvoker) -> tuple[RecordingClient, BoundInvoker]:
         client = RecordingClient(bound)
-        wrapped = CorrelatedModelClient(client, model=MODEL)
+        wrapped = CorrelatedModelClient(client, model=MODEL, role="agent")
         return client, cast(
             BoundInvoker,
             wrapped.bind_tools([StubTool()], parallel_tool_calls=False),
         )
 
-    async def test_both_ids_reach_exact_kwargs_and_response_is_unchanged(self):
+    async def test_correlation_contract_reaches_exact_kwargs(self):
         response = StubResponse("ok")
         recorder = RecordingBoundModel(response)
         client, bound = self.wrap(recorder)
         messages = [StubMessage("hello")]
 
-        with structlog.contextvars.bound_contextvars(
-            request_id="r1",
-            session_id="s1",
+        with (
+            patch.object(
+                correlation.secrets,
+                "token_hex",
+                return_value="fedcba9876543210",
+            ),
+            structlog.contextvars.bound_contextvars(
+                request_id="r1",
+                trace_id=TRACE_ID,
+                session_id="s1",
+            ),
         ):
             returned = await bound.ainvoke(messages)
 
@@ -165,18 +175,93 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(client.parallel_tool_calls, False)
         self.assertIs(returned, response)
         self.assertIs(recorder.requests[0][0], messages)
+        kwargs = recorder.requests[0][1]
+        self.assertEqual(
+            kwargs,
+            {
+                "extra_body": {
+                    "metadata": {
+                        "request_id": "r1",
+                        "session_id": "s1",
+                        "trace_metadata": {"request_id": "r1"},
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
+                    }
+                },
+                "extra_headers": {
+                    "X-Request-ID": "r1",
+                    "traceparent": f"00-{TRACE_ID}-fedcba9876543210-01",
+                },
+            },
+        )
+        extra_headers = cast(dict[str, str], kwargs["extra_headers"])
+        traceparent = extra_headers["traceparent"]
+        self.assertRegex(
+            traceparent,
+            r"^00-[0-9a-f]{32}-[0-9a-f]{16}-01$",
+        )
+        self.assertEqual(traceparent.split("-")[1], TRACE_ID)
+        self.assertNotIn("user", kwargs)
+        extra_body = cast(dict[str, object], kwargs["extra_body"])
+        metadata = cast(dict[str, object], extra_body["metadata"])
+        self.assertTrue(
+            {"trace_id", "existing_trace_id", "generation_id"}.isdisjoint(
+                metadata
+            )
+        )
+
+    async def test_two_calls_in_one_context_get_distinct_span_ids(self):
+        recorder = RecordingBoundModel(StubResponse("ok"))
+        _, bound = self.wrap(recorder)
+
+        with (
+            patch.object(
+                correlation.secrets,
+                "token_hex",
+                side_effect=["1" * 16, "2" * 16],
+            ),
+            structlog.contextvars.bound_contextvars(
+                request_id="r1",
+                trace_id=TRACE_ID,
+            ),
+        ):
+            await bound.ainvoke([StubMessage("first")])
+            await bound.ainvoke([StubMessage("second")])
+
+        traceparents = [
+            cast(dict[str, str], request[1]["extra_headers"])["traceparent"]
+            for request in recorder.requests
+        ]
+        self.assertEqual(
+            traceparents,
+            [
+                f"00-{TRACE_ID}-{'1' * 16}-01",
+                f"00-{TRACE_ID}-{'2' * 16}-01",
+            ],
+        )
+        self.assertNotEqual(traceparents[0], traceparents[1])
+
+    async def test_user_id_adds_trace_user_id_metadata(self):
+        recorder = RecordingBoundModel(StubResponse("ok"))
+        _, bound = self.wrap(recorder)
+
+        with structlog.contextvars.bound_contextvars(user_id="u1"):
+            await bound.ainvoke([StubMessage("hello")])
+
         self.assertEqual(
             recorder.requests[0][1],
             {
                 "extra_body": {
-                    "metadata": {"request_id": "r1", "session_id": "s1"}
-                },
-                "extra_headers": {"X-Request-ID": "r1"},
+                    "metadata": {
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
+                        "trace_user_id": "u1",
+                    }
+                }
             },
         )
-        self.assertNotIn("user", recorder.requests[0][1])
 
-    async def test_request_id_alone_builds_one_metadata_key_and_header(self):
+    async def test_request_id_alone_builds_metadata_and_header(self):
         recorder = RecordingBoundModel(StubResponse("ok"))
         _, bound = self.wrap(recorder)
 
@@ -186,7 +271,14 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             recorder.requests[0][1],
             {
-                "extra_body": {"metadata": {"request_id": "r1"}},
+                "extra_body": {
+                    "metadata": {
+                        "request_id": "r1",
+                        "trace_metadata": {"request_id": "r1"},
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
+                    }
+                },
                 "extra_headers": {"X-Request-ID": "r1"},
             },
         )
@@ -200,7 +292,15 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             recorder.requests[0][1],
-            {"extra_body": {"metadata": {"session_id": "s1"}}},
+            {
+                "extra_body": {
+                    "metadata": {
+                        "session_id": "s1",
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
+                    }
+                }
+            },
         )
         self.assertNotIn("extra_headers", recorder.requests[0][1])
 
@@ -232,6 +332,7 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
 
         [record] = [item for item in self.records() if item["event"] == "llm_call"]
         self.assertEqual(record["model"], MODEL)
+        self.assertEqual(record["role"], "agent")
         self.assertIsInstance(record["duration_ms"], (int, float))
         self.assertEqual(record["request_id"], "r1")
         self.assertNotIn("messages", record)
@@ -252,6 +353,7 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(record["level"], "error")
         self.assertEqual(record["model"], MODEL)
+        self.assertEqual(record["role"], "agent")
         self.assertIsInstance(record["duration_ms"], (int, float))
         self.assertEqual(record["request_id"], "r1")
         self.assertIn("exception", record)
@@ -262,30 +364,52 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
         recorder = InterleavingBoundModel(entered, release)
         _, bound = self.wrap(recorder)
 
-        async def invoke(name: str, request_id: str, session_id: str) -> object:
+        async def invoke(
+            name: str,
+            request_id: str,
+            trace_id: str,
+            session_id: str,
+        ) -> object:
             with structlog.contextvars.bound_contextvars(
                 request_id=request_id,
+                trace_id=trace_id,
                 session_id=session_id,
             ):
                 return await bound.ainvoke([StubMessage(name)])
 
-        tasks = [
-            asyncio.create_task(invoke("a", "request-a", "session-a")),
-            asyncio.create_task(invoke("b", "request-b", "session-b")),
-        ]
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(entered["a"].wait(), entered["b"].wait()),
-                5,
-            )
-            release.set()
-            await asyncio.wait_for(asyncio.gather(*tasks), 5)
-        finally:
-            release.set()
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        def span_for_context(nbytes: int) -> str:
+            self.assertEqual(nbytes, 8)
+            request_id = structlog.contextvars.get_contextvars()["request_id"]
+            return {"request-a": "1" * 16, "request-b": "2" * 16}[
+                request_id
+            ]
+
+        with patch.object(
+            correlation.secrets,
+            "token_hex",
+            side_effect=span_for_context,
+        ):
+            tasks = [
+                asyncio.create_task(
+                    invoke("a", "request-a", "a" * 32, "session-a")
+                ),
+                asyncio.create_task(
+                    invoke("b", "request-b", "b" * 32, "session-b")
+                ),
+            ]
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(entered["a"].wait(), entered["b"].wait()),
+                    5,
+                )
+                release.set()
+                await asyncio.wait_for(asyncio.gather(*tasks), 5)
+            finally:
+                release.set()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         recorded = dict(recorder.requests)
         self.assertEqual(
@@ -295,9 +419,15 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
                     "metadata": {
                         "request_id": "request-a",
                         "session_id": "session-a",
+                        "trace_metadata": {"request_id": "request-a"},
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
                     }
                 },
-                "extra_headers": {"X-Request-ID": "request-a"},
+                "extra_headers": {
+                    "X-Request-ID": "request-a",
+                    "traceparent": f"00-{'a' * 32}-{'1' * 16}-01",
+                },
             },
         )
         self.assertEqual(
@@ -307,9 +437,15 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
                     "metadata": {
                         "request_id": "request-b",
                         "session_id": "session-b",
+                        "trace_metadata": {"request_id": "request-b"},
+                        "generation_name": "agent",
+                        "tags": ["webreport", ENVIRONMENT],
                     }
                 },
-                "extra_headers": {"X-Request-ID": "request-b"},
+                "extra_headers": {
+                    "X-Request-ID": "request-b",
+                    "traceparent": f"00-{'b' * 32}-{'2' * 16}-01",
+                },
             },
         )
 
@@ -343,12 +479,22 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
                 api_base="http://litellm:4000",
                 api_key="sk-noop",
             )
-            wrapped = CorrelatedModelClient(client, model=MODEL)
+            wrapped = CorrelatedModelClient(
+                client,
+                model=MODEL,
+                role="agent",
+            )
             bound = wrapped.bind_tools([trivial_tool], parallel_tool_calls=False)
             with (
                 patch.object(client.client, "acompletion", completion),
+                patch.object(
+                    correlation.secrets,
+                    "token_hex",
+                    return_value="fedcba9876543210",
+                ),
                 structlog.contextvars.bound_contextvars(
                     request_id="r1",
+                    trace_id=TRACE_ID,
                     session_id="s1",
                 ),
             ):
@@ -364,9 +510,23 @@ class CorrelatedModelClientTests(unittest.IsolatedAsyncioTestCase):
         sdk_kwargs = await_args.kwargs
         self.assertEqual(
             sdk_kwargs["extra_body"],
-            {"metadata": {"request_id": "r1", "session_id": "s1"}},
+            {
+                "metadata": {
+                    "request_id": "r1",
+                    "session_id": "s1",
+                    "trace_metadata": {"request_id": "r1"},
+                    "generation_name": "agent",
+                    "tags": ["webreport", ENVIRONMENT],
+                }
+            },
         )
-        self.assertEqual(sdk_kwargs["extra_headers"], {"X-Request-ID": "r1"})
+        self.assertEqual(
+            sdk_kwargs["extra_headers"],
+            {
+                "X-Request-ID": "r1",
+                "traceparent": f"00-{TRACE_ID}-fedcba9876543210-01",
+            },
+        )
         self.assertNotIn("user", sdk_kwargs)
 
 
