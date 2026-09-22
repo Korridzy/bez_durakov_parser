@@ -26,6 +26,8 @@
 | `log_level` | Уровень записей |
 | `log_format` | Формат `json` или `console` |
 | `environment` | Имя среды |
+| `log_rotation_max_size` | Максимальный размер одного файла Docker log |
+| `log_rotation_max_files` | Максимальное число файлов Docker log для контейнера |
 
 `generate_env.py` создаёт для бэкенда, фронтенда и сборщика данных переменные: `BD_LOG_LEVEL`, `BD_LOG_FORMAT`, `BD_ENVIRONMENT`, `BD_APP_VERSION`.
 
@@ -108,9 +110,9 @@ docker compose logs backend | grep <request_id>
 
 ## Docker
 
-Якорь `x-logging` в `docker-compose.yml` задаёт драйвер `json-file` с `max-size` равным `10m` и `max-file` равным `3`. Просмотр доступен командой `docker compose logs`.
+Якорь `x-logging` в `docker-compose.yml` задаёт драйвер `json-file`. Параметры `application.log_rotation_max_size` и `application.log_rotation_max_files` попадают через сгенерированный `.env` в `max-size` и `max-file`. Значения по умолчанию равны `10m` и `3`. Просмотр доступен командой `docker compose logs`.
 
-Приложение пишет только в `stderr`. Предел ротации одновременно ограничивает хранение, Docker оставляет не более трёх файлов по `10m` для контейнера.
+Приложение пишет только в `stderr`. Предел ротации одновременно ограничивает хранение. После изменения параметров выполните `make restart`, чтобы заново создать `.env` и контейнеры.
 
 По замыслу логи не содержат личных данных. `session_id` создаётся случайным вызовом `uuid.uuid4()`, а идентичность пользователя в приложении отсутствует.
 

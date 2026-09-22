@@ -117,6 +117,12 @@ env_files: dict[str, dict[str, str]] = {
         "WEBREPORT_FRONTEND_PORT": str(
             cast(int, webreport_config.get("frontend_port", 28501))
         ),
+        "BD_LOG_ROTATION_MAX_SIZE": str(
+            application_config.get("log_rotation_max_size", "10m")
+        ),
+        "BD_LOG_ROTATION_MAX_FILES": str(
+            cast(int, application_config.get("log_rotation_max_files", 3))
+        ),
     },
     ".env.mysql": {
         "MYSQL_DATABASE": dotenv_quote(database_name),

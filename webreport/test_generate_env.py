@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
+from copy import deepcopy
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -109,20 +111,35 @@ class GenerateEnvTests(unittest.TestCase):
         *,
         result: subprocess.CompletedProcess[str] | None = None,
         error: BaseException | None = None,
+        application_overrides: dict[str, str | int] | None = None,
     ) -> dict[str, dict[str, str]]:
         source_script = Path(__file__).with_name("generate_env.py")
         with tempfile.TemporaryDirectory() as temp_directory:
             script = Path(temp_directory) / source_script.name
             _ = shutil.copyfile(source_script, script)
             sys.path.insert(0, str(Path(__file__).parent.parent))
+            config_patch = nullcontext()
+            if application_overrides is not None:
+                from bd_shared.config import get_config
+
+                config = deepcopy(get_config())
+                config["application"] = {
+                    **config["application"],
+                    **application_overrides,
+                }
+                config_patch = patch(
+                    "bd_shared.config.get_config",
+                    return_value=config,
+                )
             try:
-                if error is not None:
-                    with patch("subprocess.run", side_effect=error):
-                        _ = runpy.run_path(str(script), run_name="__main__")
-                else:
-                    assert result is not None
-                    with patch("subprocess.run", return_value=result):
-                        _ = runpy.run_path(str(script), run_name="__main__")
+                with config_patch:
+                    if error is not None:
+                        with patch("subprocess.run", side_effect=error):
+                            _ = runpy.run_path(str(script), run_name="__main__")
+                    else:
+                        assert result is not None
+                        with patch("subprocess.run", return_value=result):
+                            _ = runpy.run_path(str(script), run_name="__main__")
             finally:
                 _ = sys.path.pop(0)
 
@@ -158,6 +175,28 @@ class GenerateEnvTests(unittest.TestCase):
             with self.subTest(file_name=file_name):
                 for key in expected:
                     self.assertNotIn(key, generated[file_name])
+
+    def test_generates_docker_log_rotation_environment(self) -> None:
+        # Given: non-default Docker log rotation settings in application config.
+        completed = subprocess.CompletedProcess(
+            ["git", "rev-parse", "--short", "HEAD"],
+            0,
+            stdout="abc1234\n",
+            stderr="",
+        )
+
+        # When: environment generation runs.
+        generated = self._generate_with_patched_git(
+            result=completed,
+            application_overrides={
+                "log_rotation_max_size": "42m",
+                "log_rotation_max_files": 7,
+            },
+        )
+
+        # Then: Compose receives both settings through its root environment file.
+        self.assertEqual(generated[".env"]["BD_LOG_ROTATION_MAX_SIZE"], "42m")
+        self.assertEqual(generated[".env"]["BD_LOG_ROTATION_MAX_FILES"], "7")
 
     def test_uses_unknown_app_version_when_git_is_missing(self) -> None:
         # Given: git cannot be started.

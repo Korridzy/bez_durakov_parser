@@ -9,6 +9,8 @@ debug = true
 log_level = "INFO"
 environment = "development"
 log_format = "console"
+log_rotation_max_size = "10m"
+log_rotation_max_files = 3
 default_game_date = "02.03.2022"
 
 [webreport]
