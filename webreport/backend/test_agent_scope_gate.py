@@ -436,8 +436,10 @@ class ScopeGateDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompt[1].content.splitlines().count(heading), 1)
         self.assertEqual(
             message_json,
-            json.dumps(malicious, ensure_ascii=True, separators=(",", ":")),
+            json.dumps(malicious, ensure_ascii=False, separators=(",", ":")),
         )
+        self.assertIn("Привет", message_json)
+        self.assertNotIn("\\u041f", message_json)
 
     def test_system_prompt_has_ordered_sections_verbatim_context_and_described_tools(self):
         """Given knowledge and tools, When assembled, Then the fixed sections carry trusted context."""

@@ -186,12 +186,12 @@ def build_gate_prompt(
     )
     history_json = json.dumps(
         recent_turns(prior_messages, history_turns),
-        ensure_ascii=True,
+        ensure_ascii=False,
         separators=(",", ":"),
     )
     message_json = json.dumps(
         new_user_message,
-        ensure_ascii=True,
+        ensure_ascii=False,
         separators=(",", ":"),
     )
     conversation_data = (
