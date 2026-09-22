@@ -1,3 +1,8 @@
+[application]
+# Production servers set environment = "production" and log_format = "json".
+# environment = "development"
+# log_format = "console"
+
 [webreport]
 openai_api_key = ""
 openrouter_api_key = ""
@@ -8,6 +13,24 @@ opencode_api_key = ""
 # knowledge_max_topics = 50
 # knowledge_max_doc_bytes = 65536
 # knowledge_max_bytes_per_turn = 131072
+# Whether durable conversation and LLM-call archiving is enabled.
+# archive_enabled = true
+# SQLite database path for durable conversation and LLM-call archives.
+# archive_db_path = "/data/conversations.db"
+# Archived conversation retention in days; 0 = keep forever.
+# archive_retention_days = 0
+# Whether to persist reasoning; false never writes the reasoning column.
+# archive_store_reasoning = true
+# Archived reasoning retention in days; 0 = keep forever.
+# archive_reasoning_retention_days = 30
+# Interval in seconds between archive retention sweeps.
+# archive_sweep_interval_seconds = 600
+# Langfuse host; all three Langfuse settings must be non-empty to enable it.
+# langfuse_host = ""
+# Langfuse public key; all three Langfuse settings must be non-empty to enable it.
+# langfuse_public_key = ""
+# Langfuse secret key; all three Langfuse settings must be non-empty to enable it.
+# langfuse_secret_key = ""
 
 [dataset]
 # tools_module = "bd_shared.tools.bez_durakov"

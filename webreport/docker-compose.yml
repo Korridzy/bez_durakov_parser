@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "${BD_LOG_ROTATION_MAX_SIZE:-10m}"
+    max-file: "${BD_LOG_ROTATION_MAX_FILES:-3}"
+
 services:
   mysql:
     image: mysql:8.0
     container_name: webreport-mysql
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - path: .env.mysql
         required: false
@@ -23,6 +30,9 @@ services:
         required: false
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
+      - ./litellm_settings.generated.yaml:/app/litellm_settings.generated.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - webreport-network
     healthcheck:
@@ -36,6 +46,7 @@ services:
       retries: 12
       start_period: 120s
     restart: unless-stopped
+    logging: *default-logging
 
   backend:
     build:
@@ -61,6 +72,7 @@ services:
       litellm:
         condition: service_healthy
     restart: unless-stopped
+    logging: *default-logging
 
   data_collector:
     build:
@@ -82,6 +94,7 @@ services:
     networks:
       - webreport-network
     restart: unless-stopped
+    logging: *default-logging
 
   frontend:
     build:
@@ -95,6 +108,7 @@ services:
         required: false
     volumes:
       - ./frontend:/app
+      - ../bd_shared:/bd_shared:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -102,6 +116,7 @@ services:
     networks:
       - webreport-network
     restart: unless-stopped
+    logging: *default-logging
 
 networks:
   webreport-network:

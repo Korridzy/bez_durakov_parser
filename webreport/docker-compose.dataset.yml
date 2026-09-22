@@ -12,6 +12,7 @@ services:
     environment:
       BD_CONFIG_LOCAL_FILE: /dataset/config/config.local.toml
       BD_CHECKPOINT_DB_PATH: /data/checkpoints-${DATASET}.db
+      BD_ARCHIVE_DB_PATH: /data/conversations-${DATASET}.db
       PYTHONPATH: /:/dataset
     depends_on: !override
       litellm:

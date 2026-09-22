@@ -94,5 +94,5 @@ router_settings:
     RateLimitErrorRetries: 3
     InternalServerErrorRetries: 2
 
-litellm_settings:
-  num_retries: 2
+include:
+  - litellm_settings.generated.yaml

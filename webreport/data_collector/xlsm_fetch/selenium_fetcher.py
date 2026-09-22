@@ -3,7 +3,8 @@
 import time
 import re
 import logging
-from typing import List, Optional
+import sys
+from typing import List, Optional, cast
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
@@ -18,6 +19,219 @@ from pathlib import Path
 import zipfile
 import tempfile
 import hashlib
+
+
+_REDACTED_FOLDER_URL = "[REDACTED_FOLDER_URL]"
+
+
+def _sanitize_exception_tree(
+    exc: BaseException,
+    needle: str,
+    replacement: str,
+    seen: set[int] | None = None,
+) -> BaseException:
+    """Return a logging-only copy when an exception tree contains ``needle``."""
+    if not needle:
+        return exc
+
+    visited: set[int] = set() if seen is None else seen
+    nodes: dict[int, BaseException] = {}
+    edges: dict[int, tuple[BaseException, ...]] = {}
+
+    def collect(current: BaseException) -> None:
+        identity = id(current)
+        if identity in visited:
+            return
+        visited.add(identity)
+        nodes[identity] = current
+
+        linked: list[BaseException] = []
+        if isinstance(current, BaseExceptionGroup):
+            linked.extend(current.exceptions)
+        if current.__cause__ is not None:
+            linked.append(current.__cause__)
+        if current.__context__ is not None:
+            linked.append(current.__context__)
+        edges[identity] = tuple(linked)
+
+        for nested in linked:
+            collect(nested)
+
+    collect(exc)
+    if id(exc) not in nodes:
+        return exc
+
+    def contains_sensitive_text(current: BaseException) -> bool:
+        if needle in str(current) or any(
+            needle in str(note) for note in (getattr(current, "__notes__", ()) or ())
+        ):
+            return True
+        if isinstance(current, SyntaxError):
+            return any(
+                needle in value
+                for value in (
+                    current.msg,
+                    current.filename or "",
+                    current.text or "",
+                )
+            )
+        return False
+
+    affected = {
+        identity
+        for identity, current in nodes.items()
+        if contains_sensitive_text(current)
+    }
+
+    changed = True
+    while changed:
+        changed = False
+        for identity, linked in edges.items():
+            if identity not in affected and any(
+                id(nested) in affected for nested in linked
+            ):
+                affected.add(identity)
+                changed = True
+
+    if id(exc) not in affected:
+        return exc
+
+    clones: dict[int, BaseException] = {}
+
+    def clone_body(current: BaseException) -> BaseException:
+        identity = id(current)
+        if identity not in affected:
+            return current
+        if identity in clones:
+            return clones[identity]
+
+        sanitized_message = str(current).replace(needle, replacement)
+        if isinstance(current, BaseExceptionGroup):
+            sanitized_children = tuple(
+                clone_body(child) for child in current.exceptions
+            )
+            sanitized: BaseException = current.derive(sanitized_children)
+            if needle in str(sanitized):
+                # A group's message is read-only and derive() intentionally keeps it.
+                sanitized = RuntimeError(sanitized_message)
+        elif isinstance(current, SyntaxError):
+            try:
+                sanitized = type(current)(
+                    current.msg.replace(needle, replacement),
+                    (
+                        current.filename.replace(needle, replacement)
+                        if current.filename is not None
+                        else None,
+                        current.lineno,
+                        current.offset,
+                        current.text.replace(needle, replacement)
+                        if current.text is not None
+                        else None,
+                        current.end_lineno,
+                        current.end_offset,
+                    ),
+                )
+            except Exception:
+                sanitized = RuntimeError(sanitized_message)
+        else:
+            try:
+                sanitized = type(current)(sanitized_message)
+            except Exception:
+                sanitized = RuntimeError(sanitized_message)
+
+        clones[identity] = sanitized
+        sanitized.__traceback__ = current.__traceback__
+        notes = getattr(current, "__notes__", None)
+        if notes is not None:
+            sanitized.__notes__ = [
+                str(note).replace(needle, replacement) for note in notes
+            ]
+        return sanitized
+
+    for identity in affected:
+        _ = clone_body(nodes[identity])
+
+    for identity in affected:
+        current = nodes[identity]
+        sanitized = clones[identity]
+        cause = current.__cause__
+        context = current.__context__
+        sanitized.__cause__ = (
+            clones[id(cause)] if cause is not None and id(cause) in affected else cause
+        )
+        sanitized.__context__ = (
+            clones[id(context)]
+            if context is not None and id(context) in affected
+            else context
+        )
+        sanitized.__suppress_context__ = current.__suppress_context__
+
+    return clones[id(exc)]
+
+
+class _ExceptionTreeSanitizingFilter(logging.Filter):
+    """Sanitize matching exception trees before a handler formats a record."""
+
+    def __init__(self, needle: str, replacement: str) -> None:
+        super().__init__()
+        self.needle = needle
+        self.replacement = replacement
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info is not None:
+            _, exc_value, exc_tb = record.exc_info
+            if exc_value is not None:
+                sanitized = _sanitize_exception_tree(
+                    exc_value,
+                    self.needle,
+                    self.replacement,
+                )
+                if sanitized is not exc_value:
+                    record.exc_info = (type(sanitized), sanitized, exc_tb)
+                    record.exc_text = None
+
+        if isinstance(record.msg, dict) and record.msg.get("exc_info"):
+            structured_exc_info = record.msg["exc_info"]
+            if (
+                isinstance(structured_exc_info, tuple)
+                and len(structured_exc_info) == 3
+                and isinstance(structured_exc_info[1], BaseException)
+            ):
+                exc_value = structured_exc_info[1]
+                exc_tb = structured_exc_info[2]
+            elif isinstance(structured_exc_info, BaseException):
+                exc_value = structured_exc_info
+                exc_tb = structured_exc_info.__traceback__
+            else:
+                _, exc_value, exc_tb = sys.exc_info()
+
+            if exc_value is not None:
+                sanitized = _sanitize_exception_tree(
+                    exc_value,
+                    self.needle,
+                    self.replacement,
+                )
+                if sanitized is not exc_value:
+                    event_dict = record.msg.copy()
+                    event_dict["exc_info"] = (
+                        type(sanitized),
+                        sanitized,
+                        exc_tb,
+                    )
+                    record.msg = event_dict
+        return True
+
+
+def _install_exception_tree_filter(needle: str, replacement: str) -> None:
+    for handler in logging.getLogger().handlers:
+        if any(
+            isinstance(existing, _ExceptionTreeSanitizingFilter)
+            and existing.needle == needle
+            and existing.replacement == replacement
+            for existing in handler.filters
+        ):
+            continue
+        handler.addFilter(_ExceptionTreeSanitizingFilter(needle, replacement))
 
 
 class SeleniumFetcher(BaseFetcher):
@@ -36,13 +250,47 @@ class SeleniumFetcher(BaseFetcher):
         super().__init__(folder_url, download_dir)
         self.headless = headless
 
+    def _log(
+        self,
+        msg: str,
+        *,
+        level: int = logging.INFO,
+        exc_info: bool = False,
+    ) -> None:
+        if self.folder_url and self.folder_url in msg:
+            msg = msg.replace(self.folder_url, _REDACTED_FOLDER_URL)
+        resolved_exc_info = exc_info
+        if exc_info:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            if exc_type is not None and exc_value is not None and self.folder_url:
+                sanitized_exc = _sanitize_exception_tree(
+                    exc_value,
+                    self.folder_url,
+                    _REDACTED_FOLDER_URL,
+                )
+                if sanitized_exc is not exc_value:
+                    _install_exception_tree_filter(
+                        self.folder_url,
+                        _REDACTED_FOLDER_URL,
+                    )
+                    resolved_exc_info = (
+                        type(sanitized_exc),
+                        sanitized_exc,
+                        exc_tb,
+                    )
+        super()._log(
+            msg,
+            level=level,
+            exc_info=cast(bool, resolved_exc_info),  # type: ignore[arg-type]
+        )
+
     def fetch(self) -> List[str]:
         """Fetch list of .xlsm files from Google Drive folder.
 
         Returns:
             List of file names (strings) that were downloaded and added
         """
-        self._log(f"Starting Selenium fetch from: {self.folder_url}")
+        self._log("Starting Selenium fetch")
 
         # Use download directory from base class (with fallback logic)
         target_download_dir = self.download_dir

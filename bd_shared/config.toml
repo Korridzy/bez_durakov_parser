@@ -7,6 +7,10 @@ sqlalchemy_logging = false
 [application]
 debug = true
 log_level = "INFO"
+environment = "development"
+log_format = "console"
+log_rotation_max_size = "10m"
+log_rotation_max_files = 3
 default_game_date = "02.03.2022"
 
 [webreport]
@@ -43,6 +47,24 @@ knowledge_max_topics = 50
 knowledge_max_doc_bytes = 65536
 knowledge_max_bytes_per_turn = 131072
 knowledge_max_scope_chars = 2000
+# Whether durable conversation and LLM-call archiving is enabled.
+archive_enabled = false
+# SQLite database path for durable conversation and LLM-call archives.
+archive_db_path = "/data/conversations.db"
+# Archived conversation retention in days; 0 = keep forever.
+archive_retention_days = 0
+# Whether to persist reasoning; false never writes the reasoning column.
+archive_store_reasoning = true
+# Archived reasoning retention in days; 0 = keep forever.
+archive_reasoning_retention_days = 30
+# Interval in seconds between archive retention sweeps.
+archive_sweep_interval_seconds = 600
+# Langfuse host; all three Langfuse settings must be non-empty to enable it.
+langfuse_host = ""
+# Langfuse public key; all three Langfuse settings must be non-empty to enable it.
+langfuse_public_key = ""
+# Langfuse secret key; all three Langfuse settings must be non-empty to enable it.
+langfuse_secret_key = ""
 
 [dataset]
 # Dotted import path of the Python module that exposes build_service(engine).

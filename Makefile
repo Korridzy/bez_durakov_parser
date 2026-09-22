@@ -100,10 +100,12 @@ test:
 	run poetry run python test_alembic_migration.py; \
 	run poetry run python bd_shared/test_db_engine.py; \
 	run poetry run python bd_shared/test_config_local_override.py; \
+	run poetry run python bd_shared/test_log_redaction.py; \
+	run poetry run python bd_shared/test_logging_setup.py; \
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
 	run $(MAKE) -C webreport test; \
-	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py'; \
-	run bash -c 'set -e; set -a; source webreport/.env; source webreport/.env.frontend; set +a; export WEBREPORT_FRONTEND_URL="http://127.0.0.1:$$WEBREPORT_FRONTEND_PORT"; cd webreport/frontend; poetry run python -m unittest discover -s . -p "test_*.py"'; \
+	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py && poetry run python test_logging_jobs.py'; \
+	run bash -c 'set -e; set -a; source webreport/.env; source webreport/.env.frontend; set +a; export WEBREPORT_FRONTEND_URL="http://127.0.0.1:$$WEBREPORT_FRONTEND_PORT"; cd webreport/frontend; PYTHONPATH="$(CURDIR)" poetry run python -m unittest discover -s . -p "test_*.py"'; \
 	run $(MAKE) -C webreport test-e2e; \
 	if [ $$status -eq 0 ]; then \
 		echo ""; \

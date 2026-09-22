@@ -1,7 +1,11 @@
-import logging
+import importlib
 import signal
 from datetime import datetime
-import importlib
+
+from bd_shared.logging_setup import configure_logging, get_logger
+
+
+logger = get_logger(__name__)
 
 
 def _parse_start_time(value):
@@ -19,9 +23,14 @@ def _parse_start_time(value):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+    from bd_shared.config import LOG_LEVEL, SQLALCHEMY_LOGGING
+
+    configure_logging(
+        "webreport-data-collector",
+        level=LOG_LEVEL,
+        logger_levels={"sqlalchemy.engine": LOG_LEVEL}
+        if SQLALCHEMY_LOGGING
+        else None,
     )
 
     ZoneInfo = __import__("zoneinfo").ZoneInfo
@@ -54,10 +63,22 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone=tz)
 
     def job_executed_listener(event):
-        logging.info("Job executed successfully at %s", datetime.now(tz=tz))
+        logger.info("scheduler_job_executed", scheduler_job_id=event.job_id)
 
     def job_error_listener(event):
-        logging.error("Job failed: %s", event.exception)
+        if event.traceback is not None and not isinstance(event.traceback, str):
+            logger.error(
+                "scheduler_job_failed",
+                scheduler_job_id=event.job_id,
+                exc_info=(type(event.exception), event.exception, event.traceback),
+            )
+        else:
+            logger.error(
+                "scheduler_job_failed",
+                scheduler_job_id=event.job_id,
+                traceback=event.traceback,
+                exc_info=False,
+            )
 
     scheduler.add_listener(job_executed_listener, EVENT_JOB_EXECUTED)
     scheduler.add_listener(job_error_listener, EVENT_JOB_ERROR)
@@ -82,10 +103,10 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda sig, frame: scheduler.shutdown(wait=True))
     signal.signal(signal.SIGINT, lambda sig, frame: scheduler.shutdown(wait=True))
 
-    logging.info(
-        "Scheduler starting. Next fetch at ~%s, interval=%sh",
-        start_date,
-        XLSM_FETCH_INTERVAL_HOURS,
+    logger.info(
+        "scheduler_starting",
+        next_fetch_at=start_date.isoformat(),
+        interval_hours=XLSM_FETCH_INTERVAL_HOURS,
     )
 
     try:

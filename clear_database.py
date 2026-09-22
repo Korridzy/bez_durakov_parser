@@ -73,6 +73,15 @@ def clear_database(clear_teams=False):
 
 
 if __name__ == "__main__":
+    from bd_shared.config import LOG_LEVEL, SQLALCHEMY_LOGGING
+    from bd_shared.logging_setup import configure_logging
+
+    configure_logging(
+        "bd-clear-database",
+        level=LOG_LEVEL,
+        logger_levels={"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else None,
+    )
+
     parser = argparse.ArgumentParser(
         description="Очистка базы данных игр и (опционально) команд.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

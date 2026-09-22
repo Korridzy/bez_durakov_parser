@@ -14,6 +14,8 @@ from typing import (
     runtime_checkable,
 )
 
+from bd_shared.logging_setup import adopt_third_party_loggers
+from agent.correlation import CorrelatedModelClient
 from agent.graph import (
     CompiledGraph,
     ModelClient,
@@ -31,6 +33,7 @@ from .report_contracts import (
     ChatModelModule,
     ConfigModule,
     MemoryModule,
+    QueryTrace,
     ReportResponse,
     ResponseRegistry,
     RuntimeDependencyError,
@@ -119,16 +122,22 @@ def _parse_handle(payload: object) -> tuple[str, ToolArgs]:
 
 def _new_model_client() -> ModelClient:
     module: object = importlib.import_module("langchain_litellm")
+    adopt_third_party_loggers("LiteLLM", "LiteLLM Proxy", "LiteLLM Router")
     if not isinstance(module, ChatModelModule):
         raise RuntimeDependencyError("Invalid chat model module")
+    model = "litellm_proxy/" + CONFIG.AGENT_MODEL
     # Anthropic-style thinking models are unsupported because thinking_blocks do not round-trip.
     return OutboundReasoningFilter(
-        module.ChatLiteLLM(
-            model="litellm_proxy/" + CONFIG.AGENT_MODEL,
-            api_base=CONFIG.LITELLM_BASE_URL,
-            api_key="sk-noop",
-            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
-            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        CorrelatedModelClient(
+            module.ChatLiteLLM(
+                model=model,
+                api_base=CONFIG.LITELLM_BASE_URL,
+                api_key="sk-noop",
+                request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+                model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+            ),
+            model=model,
+            role="agent",
         )
     )
 
@@ -136,16 +145,22 @@ def _new_model_client() -> ModelClient:
 def _new_gate_model_client() -> ModelClient:
     """Build the scope gate's own client, falling back to the agent model."""
     module: object = importlib.import_module("langchain_litellm")
+    adopt_third_party_loggers("LiteLLM", "LiteLLM Proxy", "LiteLLM Router")
     if not isinstance(module, ChatModelModule):
         raise RuntimeDependencyError("Invalid chat model module")
     gate_model = CONFIG.AGENT_SCOPE_GATE_MODEL.strip() or CONFIG.AGENT_MODEL
+    model = "litellm_proxy/" + gate_model
     return OutboundReasoningFilter(
-        module.ChatLiteLLM(
-            model="litellm_proxy/" + gate_model,
-            api_base=CONFIG.LITELLM_BASE_URL,
-            api_key="sk-noop",
-            request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
-            model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+        CorrelatedModelClient(
+            module.ChatLiteLLM(
+                model=model,
+                api_base=CONFIG.LITELLM_BASE_URL,
+                api_key="sk-noop",
+                request_timeout=CONFIG.LLM_REQUEST_TIMEOUT_SECONDS,
+                model_kwargs={"num_retries": CONFIG.LLM_MAX_RETRIES},
+            ),
+            model=model,
+            role="scope_gate",
         )
     )
 
@@ -217,6 +232,7 @@ class ReportAgentSystem:
                 "Не удалось сформировать отчёт с помощью агента.",
                 str(error),
                 reasoning=await self._partial_reasoning(session_id),
+                query_info=await self._partial_trace(session_id),
             )
 
     async def _partial_reasoning(self, session_id: str) -> str | None:
@@ -230,6 +246,23 @@ class ReportAgentSystem:
             return None
         messages = _checkpoint_messages(checkpoint_tuple)
         return current_turn_reasoning(messages) if messages is not None else None
+
+    async def _partial_trace(self, session_id: str) -> list[QueryTrace]:
+        if not _is_checkpoint_saver(self._saver):
+            return []
+        try:
+            checkpoint_tuple = await self._saver.aget_tuple(
+                {"configurable": {"thread_id": session_id}}
+            )
+        except Exception:
+            return []
+        messages = _checkpoint_messages(checkpoint_tuple)
+        if messages is None:
+            return []
+        try:
+            return trace(current_turn_messages(messages))
+        except RuntimeDependencyError:
+            return []
 
     async def _process_agent(
         self,
@@ -252,6 +285,7 @@ class ReportAgentSystem:
                 "timeout",
                 reasoning=await self._partial_reasoning(session_id),
                 verdict=None,
+                query_info=await self._partial_trace(session_id),
             )
         if "error" in result:
             return failure(
@@ -259,6 +293,7 @@ class ReportAgentSystem:
                 RECURSION_LIMIT_MARKER,
                 reasoning=await self._partial_reasoning(session_id),
                 verdict=None,
+                query_info=await self._partial_trace(session_id),
             )
         turn_messages = current_turn_messages(result["messages"])
         query_trace = trace(turn_messages)

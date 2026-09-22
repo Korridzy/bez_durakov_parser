@@ -41,6 +41,11 @@ make build         # Сборка образов
 make rebuild       # Пересборка и запуск
 make test          # Тесты, включая обе приёмочные полосы
 make test-postgres # Приёмочная полоса против одноразового PostgreSQL
+make archive-list LIMIT=5 # Список архивных ходов
+make archive-show ID=1 # Полная строка архива
+make archive-delete SESSION=<id> # Удалить одну сессию
+make archive-delete USER=<id> # Удалить одного пользователя
+make archive-delete BEFORE=<ISO-date-or-timestamp> # Удалить старые строки
 make clean         # Очистка
 ```
 
@@ -84,6 +89,21 @@ docker compose ps
 python3 validate_setup.py  # Проверка файлов
 make test                  # Запуск тестов
 ```
+
+Для поиска записей одного запроса используйте его `request_id`.
+
+```bash
+docker compose logs backend | grep <request_id>
+```
+
+Чтобы включить JSON формат, задайте в `../bd_shared/config.local.toml` значение `log_format` и выполните `make restart`.
+
+```toml
+[application]
+log_format = "json"
+```
+
+Ротация находится в `docker-compose.yml` в якоре `x-logging`. Параметры `max-size` и `max-file` ограничивают вывод контейнеров значениями `10m` и `3`.
 
 ## 🔄 Остановка системы
 
@@ -188,6 +208,14 @@ make test
 python3 validate_setup.py
 ```
 
+Корневой `make test` запускает полный набор. `make -C webreport test` запускает проверки бэкенда, а корневая команда дополнительно запускает проверки сборщика данных.
+
+Новые проверки корреляции и заданий находятся в следующих файлах.
+
+- `backend/test_request_context.py`
+- `backend/test_agent_correlation.py`
+- `data_collector/test_logging_jobs.py`
+
 ## 🐳 Docker
 
 ```bash
@@ -216,6 +244,7 @@ docker compose up -d --build
 | ARCHITECTURE.md | Для разработчиков |
 | SUMMARY.md | Итоговая сводка |
 | QUICK_REFERENCE.md | Эта шпаргалка |
+| ARCHIVE.md | Архив разговоров, Langfuse и удаление |
 
 ## 💡 Советы
 

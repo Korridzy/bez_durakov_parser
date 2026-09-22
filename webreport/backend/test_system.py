@@ -7,6 +7,7 @@ import asyncio
 import importlib
 import json as json_module
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ import unittest
 from unittest.mock import AsyncMock, call, patch
 
 import fastapi
+import structlog
 
 _test_agent_support = importlib.import_module("test_agent_support")
 _test_agent_graph = importlib.import_module("test_agent_graph")
@@ -641,6 +643,179 @@ class TestReportAgentSystem(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn("not found", response.get("error", "").lower())
         print("✅ Agent team statistics: missing team returns error response")
+
+
+class TestBackendApplication(unittest.TestCase):
+    """Backend process initialization and outer ASGI wiring."""
+
+    def test_application_is_the_request_correlation_wrapper(self):
+        main_module = importlib.import_module("main")
+        middleware_class = importlib.import_module(
+            "request_context"
+        ).RequestCorrelationMiddleware
+
+        self.assertIsInstance(main_module.application, middleware_class)
+        self.assertIs(main_module.application.app, main_module.app)
+
+    def test_import_initializes_one_root_handler_and_the_outer_application(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import main; import logging; "
+                    "print(len(logging.root.handlers), "
+                    "main.application.__class__.__name__)"
+                ),
+            ],
+            cwd=Path(__file__).parent,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    (str(Path(__file__).parent), os.environ.get("PYTHONPATH", ""))
+                ),
+            },
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.strip(), "1 RequestCorrelationMiddleware")
+
+
+class TestSessionLogCorrelation(unittest.IsolatedAsyncioTestCase):
+    """Direct route calls bind their session before reaching dependencies."""
+
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+        self.main: Any = None
+        self.previous: dict[str, Any] = {}
+
+    def setUp(self):
+        self.main = importlib.import_module("main")
+        session_store = importlib.import_module("session_store")
+        self.previous = {
+            name: getattr(self.main, name)
+            for name in (
+                "admission_lock",
+                "agent_system",
+                "checkpoint_saver",
+                "pinned",
+                "sessions",
+                "tool_service",
+            )
+        }
+        self.main.admission_lock = asyncio.Lock()
+        self.main.pinned = {}
+        self.main.sessions = session_store.SessionIndex(max_size=4, ttl=60)
+        structlog.contextvars.clear_contextvars()
+
+    def tearDown(self):
+        for name, value in self.previous.items():
+            setattr(self.main, name, value)
+        structlog.contextvars.clear_contextvars()
+
+    async def test_chat_binds_explicit_and_generated_session_ids(self):
+        observed_session_ids = []
+
+        async def process_user_request(_message, session_id):
+            observed_session_ids.append(
+                structlog.contextvars.get_contextvars().get("session_id")
+            )
+            return {
+                "success": True,
+                "data": None,
+                "message": "ok",
+                "query_info": [],
+                "timestamp": "t",
+            }
+
+        agent = AsyncMock()
+        agent.process_user_request = AsyncMock(side_effect=process_user_request)
+        saver = AsyncMock()
+        saver.adelete_thread = AsyncMock()
+
+        with (
+            patch.object(self.main, "tool_service", object()),
+            patch.object(self.main, "agent_system", agent),
+            patch.object(self.main, "checkpoint_saver", saver),
+        ):
+            explicit_response = await self.main.chat(
+                self.main.ChatMessage(message="explicit", session_id="s-explicit"),
+                fastapi.Response(),
+            )
+            generated_response = await self.main.chat(
+                self.main.ChatMessage(message="generated", session_id=None),
+                fastapi.Response(),
+            )
+
+        self.assertEqual(explicit_response.session_id, "s-explicit")
+        self.assertEqual(observed_session_ids[0], "s-explicit")
+        self.assertEqual(
+            observed_session_ids[1], generated_response.session_id
+        )
+        self.assertTrue(generated_response.session_id)
+
+    async def test_history_and_clear_bind_the_route_session_id(self):
+        observed_calls = []
+
+        async def get_checkpoint(_config):
+            observed_calls.append(
+                (
+                    "aget_tuple",
+                    structlog.contextvars.get_contextvars().get("session_id"),
+                )
+            )
+            return None
+
+        async def delete_checkpoint(_session_id):
+            observed_calls.append(
+                (
+                    "adelete_thread",
+                    structlog.contextvars.get_contextvars().get("session_id"),
+                )
+            )
+
+        saver = AsyncMock()
+        saver.aget_tuple = AsyncMock(side_effect=get_checkpoint)
+        saver.adelete_thread = AsyncMock(side_effect=delete_checkpoint)
+        await self.main.sessions.touch("s-h")
+
+        with patch.object(self.main, "checkpoint_saver", saver):
+            history = await self.main.get_history("s-h")
+            cleared = await self.main.clear_history("s-c")
+
+        self.assertEqual(history, {"session_id": "s-h", "history": []})
+        self.assertTrue(cleared["success"])
+        self.assertEqual(
+            observed_calls,
+            [("aget_tuple", "s-h"), ("adelete_thread", "s-c")],
+        )
+
+    async def test_unavailable_model_returns_the_session_id_that_was_bound(self):
+        recovery = AsyncMock(return_value=None)
+        response = fastapi.Response()
+
+        with (
+            patch.object(self.main, "tool_service", object()),
+            patch.object(self.main, "agent_system", None),
+            patch.object(self.main, "checkpoint_saver", object()),
+            patch.object(self.main, "_recover_agent_system", new=recovery),
+        ):
+            result = await self.main.chat(
+                self.main.ChatMessage(message="unavailable", session_id=None),
+                response,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            result.session_id,
+            structlog.contextvars.get_contextvars().get("session_id"),
+        )
+        self.assertEqual(len(result.session_id), 32)
+        recovery.assert_awaited_once_with()
 
 
 class TestAPI(unittest.TestCase):
@@ -3018,6 +3193,8 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestSessionIndex))
     suite.addTests(loader.loadTestsFromTestCase(TestGameDataService))
     suite.addTests(loader.loadTestsFromTestCase(TestReportAgentSystem))
+    suite.addTests(loader.loadTestsFromTestCase(TestBackendApplication))
+    suite.addTests(loader.loadTestsFromTestCase(TestSessionLogCorrelation))
     suite.addTests(loader.loadTestsFromTestCase(TestAPI))
     suite.addTests(loader.loadTestsFromTestCase(TestSessionLifecycleAPI))
     suite.addTests(loader.loadTestsFromTestCase(TestStartupInitialization))

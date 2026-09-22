@@ -3,14 +3,9 @@ from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, Fo
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, selectinload
 import datetime
 import logging
-from .config import LOG_LEVEL, SQLALCHEMY_LOGGING
 from .config import DATABASE_URL
 from .bd_game import BdGame
 
-# Set up logging
-logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
-if SQLALCHEMY_LOGGING:
-    logging.getLogger("sqlalchemy.engine").setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 # Base class for all models

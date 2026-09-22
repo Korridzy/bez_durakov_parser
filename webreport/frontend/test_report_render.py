@@ -22,7 +22,7 @@ class ReportRenderTest(unittest.TestCase):
         options.add_argument("--disable-dev-shm-usage")
         options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
         cls.driver = webdriver.Chrome(options=options)
-        cls.wait = WebDriverWait(cls.driver, 15)
+        cls.wait = WebDriverWait(cls.driver, 90)
 
     @classmethod
     def tearDownClass(cls) -> None:

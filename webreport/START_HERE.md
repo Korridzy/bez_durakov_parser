@@ -113,7 +113,7 @@ webreport/
 - **SQLAlchemy** - ORM (из основного проекта)
 - **Pandas** - Data processing
 - **MySQL, PostgreSQL или SQLite** - база набора данных (из bd_shared/config.toml)
-- **SQLite** - backend checkpoint store `../vm/backend/checkpoints`
+- **SQLite**. Состояние агента и отдельный архив разговоров находятся в `../vm/backend/checkpoints`
 
 Backend при запуске выполняет глубокий LiteLLM probe. Без доступной модели процесс остаётся запущенным и отвечает 503, а каждая следующая попытка чата повторяет проверку один раз. LiteLLM не публикует host port, он доступен только на `litellm:4000` внутри сети. Поддерживается только один backend replica.
 
