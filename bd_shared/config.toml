@@ -46,7 +46,7 @@ knowledge_max_doc_bytes = 65536
 knowledge_max_bytes_per_turn = 131072
 knowledge_max_scope_chars = 2000
 # Whether durable conversation and LLM-call archiving is enabled.
-archive_enabled = true
+archive_enabled = false
 # SQLite database path for durable conversation and LLM-call archives.
 archive_db_path = "/data/conversations.db"
 # Archived conversation retention in days; 0 = keep forever.
