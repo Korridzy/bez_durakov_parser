@@ -26,6 +26,12 @@ xlsm_archive/*
 secret/
 bd_shared/config.local.toml
 
+# Web client build and test artefacts
+webreport/ui/node_modules/
+webreport/ui/dist/
+webreport/ui/test-results/
+webreport/ui/playwright-report/
+
 # VM directory
 vm/
 
