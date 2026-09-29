@@ -5,9 +5,13 @@ import json
 from pathlib import Path
 import sqlite3
 import tempfile
+from typing import Any
 import unittest
 
-from chat_store import Chat, ChatBusy, ChatStore
+from chat_store import (
+    Chat, ChatBusy, ChatStore, Report, ReportNotFound, RequestConflict,
+    RequestExists, Run, RunConflict,
+)
 
 
 class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
@@ -28,6 +32,16 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         chat = await self.store.get_chat(chat_id)
         assert chat is not None
         return chat
+
+    async def existing_run(self, request_id: str) -> Run:
+        run = await self.store.get_run(request_id)
+        assert run is not None
+        return run
+
+    async def existing_report(self, report_id: str) -> Report:
+        report = await self.store.get_report(report_id)
+        assert report is not None
+        return report
 
     async def rows(self, sql: str, params: tuple[object, ...] = ()) -> list[tuple[object, ...]]:
         assert self.store.connection is not None
@@ -99,13 +113,24 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         assert self.store.connection is not None
         await self.store.connection.execute("UPDATE chats SET updated_at='2026-01-01T00:00:00Z'")
         await self.store.connection.commit()
-        seen: list[str] = []
-        cursor = None
-        for size in (50, 50, 20):
+        first_page, cursor = await self.store.list_chats(None, 50, None)
+        self.assertEqual(len(first_page), 50)
+        assert cursor is not None
+        # Both mutations land before the cursor. Offset pagination would duplicate a
+        # page-one row and omit a row from the original 120.
+        inserted = await self.store.create_chat("New arrival")
+        await self.store.connection.execute(
+            "UPDATE chats SET updated_at='9999-01-01T00:00:00Z' WHERE id=?",
+            (first_page[-1]["id"],),
+        )
+        await self.store.connection.commit()
+        seen = [chat["id"] for chat in first_page]
+        for size in (50, 20):
             page, cursor = await self.store.list_chats(None, 50, cursor)
             self.assertEqual(len(page), size)
             seen.extend(chat["id"] for chat in page)
         self.assertIsNone(cursor)
+        self.assertNotIn(inserted["id"], seen)
         self.assertEqual(seen, sorted((chat["id"] for chat in chats), reverse=True))
         self.assertEqual(len(set(seen)), 120)
 
@@ -263,6 +288,301 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await self.store.list_messages(chat["id"])), 2)
         for term in ("alpha", "beta"):
             self.assertEqual([row["id"] for row in (await self.store.list_chats(term, 50, None))[0]], [chat["id"]])
+
+    async def new_run(self, message: str = "What happened?") -> tuple[str, str]:
+        chat = await self.store.create_chat()
+        request_id = f"request-{chat['id']}"
+        await self.store.create_run(chat["id"], request_id, message, "boot-1")
+        return chat["id"], request_id
+
+    @staticmethod
+    def marked_report(report_id: str = "report-1", data: object = None) -> dict[str, Any]:
+        return {
+            "id": report_id, "title": "Answer", "question": "What happened?",
+            "tool": "read_rows", "args": {"limit": 2, "category": "данные"},
+            "data": [{"value": 12}, {"value": 13}] if data is None else data,
+            "generated_at": "2026-01-02T00:00:00Z",
+        }
+
+    @staticmethod
+    def answered(content: str = "Answer") -> tuple[dict[str, Any], dict[str, Any]]:
+        return (
+            {"content": content, "reasoning": "because"},
+            {"session_id": "chat", "message": content, "success": True,
+             "data": [{"value": 12}], "report": None},
+        )
+
+    async def test_create_run_conflicts_and_request_reuse(self) -> None:
+        chat_id, request_id = await self.new_run()
+        other = await self.store.create_chat()
+        run = await self.store.get_run(request_id)
+        assert run is not None
+        self.assertEqual(run["chat_id"], chat_id)
+        self.assertEqual(run["state"], "running")
+        self.assertIsNone(run["response"])
+        self.assertIsNone(run["finished_at"])
+        with self.assertRaises(RequestExists) as existing:
+            await self.store.create_run(chat_id, request_id, "What happened?", "boot-2")
+        self.assertEqual(existing.exception.run, run)
+        with self.assertRaises(RequestConflict):
+            await self.store.create_run(chat_id, request_id, "Different", "boot-1")
+        with self.assertRaises(RequestConflict):
+            await self.store.create_run(other["id"], request_id, "What happened?", "boot-1")
+        with self.assertRaises(RunConflict):
+            await self.store.create_run(chat_id, "another", "Second", "boot-1")
+        self.assertEqual(await self.rows("SELECT request_id FROM runs"), [(request_id,)])
+        self.assertIsNone(await self.store.get_run("missing"))
+
+    async def test_concurrent_create_run_one_active_index_decides(self) -> None:
+        chat = await self.store.create_chat()
+        results = await asyncio.wait_for(asyncio.gather(
+            self.store.create_run(chat["id"], "one", "First", "boot"),
+            self.store.create_run(chat["id"], "two", "Second", "boot"),
+            return_exceptions=True,
+        ), 5)
+        self.assertEqual(sum(isinstance(result, dict) for result in results), 1)
+        self.assertEqual(sum(isinstance(result, RunConflict) for result in results), 1)
+        self.assertEqual(len(await self.rows("SELECT request_id FROM runs")), 1)
+        self.assertEqual(
+            await self.rows("SELECT name FROM sqlite_master WHERE type='index' AND name='runs_one_active'"),
+            [("runs_one_active",)],
+        )
+
+    async def test_run_state_finish_and_invalid_states_check_constraints(self) -> None:
+        chat_id, request_id = await self.new_run()
+        active_run = await self.store.active_run(chat_id)
+        assert active_run is not None
+        self.assertEqual(active_run["request_id"], request_id)
+        await self.store.set_run_state(request_id, "cancelling")
+        self.assertEqual((await self.existing_run(request_id))["state"], "cancelling")
+        response = {"success": False, "data": [12], "message": "Failed"}
+        await self.store.finish_run(request_id, "failed", response, ("timeout", "Timed out"))
+        run = await self.store.get_run(request_id)
+        assert run is not None
+        self.assertEqual(run["response"], response)
+        self.assertEqual(run["error"], {"code": "timeout", "message": "Timed out"})
+        self.assertIsNotNone(run["finished_at"])
+        self.assertIsNone(await self.store.active_run(chat_id))
+        self.assertEqual(await self.store.last_run(chat_id), run)
+        await self.store.set_run_state(request_id, "cancelling")
+        await self.store.finish_run(request_id, "cancelled", None, None)
+        self.assertEqual(await self.store.get_run(request_id), run)
+        active = await self.store.create_run(chat_id, "next", "Next", "boot")
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.store.set_run_state(active["request_id"], "not-a-state")
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.store.finish_run(active["request_id"], "not-a-state", None, None)
+        self.assertEqual((await self.existing_run("next"))["state"], "running")
+        self.assertIsNone(await self.store.last_run("missing"))
+
+    async def test_sweep_interrupted_only_foreign_boot_rows_and_idempotent_setup(self) -> None:
+        a = await self.store.create_chat()
+        b = await self.store.create_chat()
+        c = await self.store.create_chat()
+        d = await self.store.create_chat()
+        await self.store.create_run(a["id"], "foreign-running", "Q", "old")
+        await self.store.create_run(b["id"], "foreign-cancelling", "Q", "old")
+        await self.store.set_run_state("foreign-cancelling", "cancelling")
+        await self.store.create_run(c["id"], "current-running", "Q", "current")
+        await self.store.create_run(d["id"], "foreign-finished", "Q", "old")
+        await self.store.finish_run("foreign-finished", "succeeded", {"success": True}, None)
+        await self.store.close()
+        self.store = ChatStore(self.path)
+        await self.store.setup()
+        self.assertEqual(
+            {run["request_id"] for run in await self.store.sweep_interrupted("current")},
+            {"foreign-running", "foreign-cancelling"},
+        )
+        self.assertEqual(await self.store.sweep_interrupted("current"), [])
+        self.assertEqual((await self.existing_run("foreign-running"))["state"], "interrupted")
+        self.assertIsNotNone((await self.existing_run("foreign-cancelling"))["finished_at"])
+        self.assertEqual((await self.existing_run("current-running"))["state"], "running")
+        self.assertEqual((await self.existing_run("foreign-finished"))["state"], "succeeded")
+
+    async def test_publish_result_atomically_links_message_report_and_response(self) -> None:
+        chat_id, request_id = await self.new_run()
+        await self.store.append_message(chat_id, request_id, "user", "What happened?", None, None, None)
+        assistant, response = self.answered("Answer with needle")
+        self.assertTrue(await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report(), response=response,
+            state="succeeded",
+        ))
+        run = await self.existing_run(request_id)
+        self.assertEqual(run["state"], "succeeded")
+        stored_response = run["response"]
+        assert stored_response is not None
+        self.assertEqual(stored_response["data"], response["data"])
+        self.assertEqual(stored_response["report"]["id"], "report-1")
+        self.assertIsNotNone(run["finished_at"])
+        messages = await self.store.list_messages(chat_id)
+        self.assertEqual([row["role"] for row in messages], ["user", "assistant"])
+        self.assertEqual(messages[1]["report_id"], "report-1")
+        self.assertEqual(messages[1]["reasoning"], "because")
+        self.assertEqual(messages[1]["state"], "succeeded")
+        report = await self.existing_report("report-1")
+        self.assertEqual(report["args"], {"limit": 2, "category": "данные"})
+        self.assertEqual(report["data"], [{"value": 12}, {"value": 13}])
+        self.assertEqual(report["row_count"], 2)
+        self.assertEqual(report["version"], 1)
+        self.assertEqual((await self.store.list_reports(chat_id))[0]["id"], report["id"])
+        self.assertEqual((await self.existing_chat(chat_id))["report_count"], 1)
+        self.assertEqual([chat["id"] for chat in (await self.store.list_chats("NEEDLE"))[0]], [chat_id])
+        self.assertEqual((await self.existing_chat(chat_id))["last_message_at"], messages[1]["created_at"])
+
+    async def test_publish_failed_text_only_result_has_no_report(self) -> None:
+        chat_id, request_id = await self.new_run()
+        assistant, response = self.answered("Unavailable")
+        self.assertTrue(await self.store.publish_result(
+            request_id, assistant=assistant, report=None, response=response, state="failed",
+        ))
+        run = await self.existing_run(request_id)
+        self.assertEqual(run["state"], "failed")
+        stored_response = run["response"]
+        assert stored_response is not None
+        self.assertIsNone(stored_response["report"])
+        self.assertEqual((await self.store.list_messages(chat_id))[0]["state"], "failed")
+        self.assertEqual(await self.store.list_reports(chat_id), [])
+
+    async def test_cancelled_run_rejects_late_publication_without_phantom_report(self) -> None:
+        chat_id, request_id = await self.new_run()
+        await self.store.finish_run(request_id, "cancelled", None, None)
+        before = await self.store.get_run(request_id)
+        assistant, response = self.answered()
+        self.assertFalse(await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report(),
+            response=response, state="succeeded",
+        ))
+        self.assertEqual(await self.store.get_run(request_id), before)
+        self.assertEqual(await self.rows("SELECT id FROM messages"), [])
+        self.assertEqual(await self.rows("SELECT id FROM reports"), [])
+        self.assertEqual(await self.store.list_reports(chat_id), [])
+        self.assertFalse(await self.store.publish_result(
+            "missing", assistant=assistant, report=None, response=response, state="failed",
+        ))
+
+    async def test_publish_report_insert_failure_rolls_back_message_and_run(self) -> None:
+        chat_id, request_id = await self.new_run()
+        await self.report(chat_id, "duplicate", False)
+        before = await self.store.get_run(request_id)
+        before_chat = await self.existing_chat(chat_id)
+        assistant, response = self.answered("Uncommitted")
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.store.publish_result(
+                request_id, assistant=assistant, report=self.marked_report("duplicate"),
+                response=response, state="succeeded",
+            )
+        self.assertEqual(await self.store.get_run(request_id), before)
+        self.assertEqual(await self.existing_chat(chat_id), before_chat)
+        self.assertEqual(await self.rows("SELECT id FROM messages"), [])
+        self.assertEqual(await self.rows("SELECT id FROM reports"), [("duplicate",)])
+        self.assertTrue(await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report("valid"),
+            response=response, state="succeeded",
+        ))
+
+    async def test_non_json_report_data_fails_before_sql_transaction(self) -> None:
+        _, request_id = await self.new_run()
+        assert self.store.connection is not None
+        statements: list[str] = []
+        await self.store.connection.set_trace_callback(statements.append)
+        assistant, response = self.answered()
+        with self.assertRaises(TypeError):
+            await self.store.publish_result(
+                request_id, assistant=assistant,
+                report=self.marked_report(data={"not_json": {1, 2}}),
+                response=response, state="succeeded",
+            )
+        self.assertEqual(statements, [])
+        self.assertEqual((await self.existing_run(request_id))["state"], "running")
+        await self.store.connection.set_trace_callback(None)
+
+    async def test_reports_saved_order_and_idempotent_bookmark(self) -> None:
+        chat_id, request_id = await self.new_run()
+        assistant, response = self.answered()
+        self.assertTrue(await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report("first"),
+            response=response, state="succeeded",
+        ))
+        await self.store.create_run(chat_id, "second-run", "Q2", "boot")
+        self.assertTrue(await self.store.publish_result(
+            "second-run", assistant=assistant, report=self.marked_report("second"),
+            response=response, state="succeeded",
+        ))
+        assert self.store.connection is not None
+        await self.store.connection.execute(
+            "UPDATE reports SET created_at=? WHERE id=?", ("2026-01-01T00:00:00Z", "first")
+        )
+        await self.store.connection.commit()
+        self.assertEqual([r["id"] for r in await self.store.list_reports(chat_id)], ["second", "first"])
+        self.assertEqual(await self.store.list_saved_reports(), [])
+        first = await self.store.set_saved("first", True)
+        self.assertNotIn("data", first)
+        saved_at = first["saved_at"]
+        self.assertIsNotNone(saved_at)
+        self.assertEqual((await self.store.set_saved("first", True))["saved_at"], saved_at)
+        await self.store.set_saved("second", True)
+        await self.store.connection.execute(
+            "UPDATE reports SET saved_at=? WHERE id=?", ("2026-01-01T00:00:00Z", "first")
+        )
+        await self.store.connection.commit()
+        self.assertEqual([r["id"] for r in await self.store.list_saved_reports()], ["second", "first"])
+        self.assertEqual((await self.store.set_saved("first", False))["saved_at"], None)
+        self.assertIsNone((await self.store.set_saved("first", False))["saved_at"])
+        self.assertEqual([r["id"] for r in await self.store.list_saved_reports()], ["second"])
+        with self.assertRaises(ReportNotFound):
+            await self.store.set_saved("missing", True)
+        self.assertIsNone(await self.store.get_report("missing"))
+
+    async def test_replace_report_data_version_row_count_and_stale_version(self) -> None:
+        chat_id, request_id = await self.new_run()
+        assistant, response = self.answered()
+        await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report(),
+            response=response, state="succeeded",
+        )
+        old = await self.existing_report("report-1")
+        updated = await self.store.replace_report_data(
+            "report-1", [{"value": 400}], "2026-02-01T00:00:00Z", expected_version=1,
+        )
+        assert updated is not None
+        self.assertEqual(updated["version"], 2)
+        self.assertEqual(updated["row_count"], 1)
+        self.assertEqual(updated["data"], [{"value": 400}])
+        self.assertEqual(updated["generated_at"], "2026-02-01T00:00:00Z")
+        self.assertEqual(updated["created_at"], old["created_at"])
+        self.assertEqual(updated["saved_at"], old["saved_at"])
+        self.assertIsNone(await self.store.replace_report_data(
+            "report-1", [999], "2026-03-01T00:00:00Z", expected_version=1,
+        ))
+        self.assertIsNone(await self.store.replace_report_data(
+            "missing", [999], "2026-03-01T00:00:00Z", expected_version=1,
+        ))
+        self.assertEqual(await self.store.get_report("report-1"), updated)
+        self.assertEqual((await self.existing_chat(chat_id))["report_count"], 1)
+        changed = await self.store.replace_report_data(
+            "report-1", {"summary": "new"}, "2026-04-01T00:00:00Z", expected_version=2,
+        )
+        assert changed is not None
+        self.assertIsNone(changed["row_count"])
+        self.assertEqual(changed["data"], {"summary": "new"})
+
+    async def test_saved_report_survives_chat_deletion_as_orphan(self) -> None:
+        chat_id, request_id = await self.new_run()
+        assistant, response = self.answered()
+        await self.store.publish_result(
+            request_id, assistant=assistant, report=self.marked_report(),
+            response=response, state="succeeded",
+        )
+        await self.store.set_saved("report-1", True)
+        await self.store.create_run(chat_id, "another", "Another", "boot")
+        await self.store.publish_result(
+            "another", assistant=assistant, report=self.marked_report("unsaved"),
+            response=response, state="succeeded",
+        )
+        await self.store.delete_chat(chat_id)
+        self.assertIsNone((await self.existing_report("report-1"))["chat_id"])
+        self.assertEqual([card["id"] for card in await self.store.list_saved_reports()], ["report-1"])
+        self.assertIsNone(await self.store.get_report("unsaved"))
 
 
 if __name__ == "__main__":

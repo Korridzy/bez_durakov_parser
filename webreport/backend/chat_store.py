@@ -3,12 +3,14 @@
 import asyncio
 import base64
 import binascii
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
-from typing import Literal, TypedDict
+import sqlite3
+from typing import Any, Literal, TypedDict
 import unicodedata
 from uuid import uuid4
 
@@ -34,6 +36,54 @@ class Message(TypedDict):
     state: Literal["succeeded", "failed", "cancelled", "interrupted"] | None
     report_id: str | None
     created_at: str
+
+
+class Run(TypedDict):
+    request_id: str
+    chat_id: str
+    state: Literal["running", "cancelling", "succeeded", "failed", "cancelled", "interrupted"]
+    created_at: str
+    finished_at: str | None
+    error: dict[str, str] | None
+    response: dict[str, Any] | None
+
+
+class ReportCard(TypedDict):
+    id: str
+    chat_id: str | None
+    title: str
+    question: str
+    tool: str
+    args: dict[str, object]
+    generated_at: str
+    version: int
+    saved_at: str | None
+    row_count: int | None
+    created_at: str
+
+
+class Report(ReportCard):
+    data: object
+
+
+class RunConflict(RuntimeError):
+    """A different active run already owns this chat."""
+
+
+class RequestConflict(RuntimeError):
+    """The request id belongs to a different chat or message."""
+
+
+class RequestExists(RuntimeError):
+    """The request id already identifies this exact turn."""
+
+    def __init__(self, run: Run) -> None:
+        super().__init__(run["request_id"])
+        self.run: Run = run
+
+
+class ReportNotFound(LookupError):
+    """The requested report does not exist."""
 
 
 class ChatBusy(RuntimeError):
@@ -79,7 +129,7 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
 
 
 class ChatStore:
-    """Use one serialized SQLite connection for chat and message operations."""
+    """Use one serialized SQLite connection for chats, runs and reports."""
 
     def __init__(self, path: str | Path) -> None:
         self.path: Path = Path(path)
@@ -418,3 +468,306 @@ class ChatStore:
                        WHERE id = ?""",
                     (_searchable(row["title"]), _now(), chat_id),
                 )
+
+    @staticmethod
+    def _run(row: aiosqlite.Row) -> Run:
+        return {
+            "request_id": row["request_id"],
+            "chat_id": row["chat_id"],
+            "state": row["state"],
+            "created_at": row["created_at"],
+            "finished_at": row["finished_at"],
+            "error": (
+                {"code": row["error_code"], "message": row["error_message"]}
+                if row["error_code"] is not None else None
+            ),
+            "response": json.loads(row["response_json"]) if row["response_json"] is not None else None,
+        }
+
+    @staticmethod
+    def _report_card(row: aiosqlite.Row) -> ReportCard:
+        return {
+            "id": row["id"],
+            "chat_id": row["chat_id"],
+            "title": row["title"],
+            "question": row["question"],
+            "tool": row["tool"],
+            "args": json.loads(row["args_json"]),
+            "generated_at": row["generated_at"],
+            "version": row["version"],
+            "saved_at": row["saved_at"],
+            "row_count": row["row_count"],
+            "created_at": row["created_at"],
+        }
+
+    @classmethod
+    def _report(cls, row: aiosqlite.Row) -> Report:
+        return {**cls._report_card(row), "data": json.loads(row["data_json"])}
+
+    async def _get_run(self, connection: aiosqlite.Connection, request_id: str) -> Run | None:
+        cursor = await connection.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,))
+        try:
+            row = await cursor.fetchone()
+        finally:
+            await cursor.close()
+        return self._run(row) if row is not None else None
+
+    async def _get_report(self, connection: aiosqlite.Connection, report_id: str) -> Report | None:
+        cursor = await connection.execute("SELECT * FROM reports WHERE id = ?", (report_id,))
+        try:
+            row = await cursor.fetchone()
+        finally:
+            await cursor.close()
+        return self._report(row) if row is not None else None
+
+    async def create_run(
+        self, chat_id: str, request_id: str, message: str, boot_id: str
+    ) -> Run:
+        now = _now()
+        try:
+            async with self._transaction() as connection:
+                await connection.execute(
+                    """INSERT INTO runs (request_id, chat_id, message, state, boot_id, created_at)
+                       VALUES (?, ?, ?, 'running', ?, ?)""",
+                    (request_id, chat_id, message, boot_id, now),
+                )
+                run = await self._get_run(connection, request_id)
+        except sqlite3.IntegrityError as error:
+            if "runs.request_id" not in str(error) and "runs.chat_id" not in str(error):
+                raise
+            # SQLite may report the partial index before the primary key when both
+            # collide. Inspect the id only AFTER the failed insert, never before it.
+            async with self._write_lock:
+                cursor = await self._require_connection().execute(
+                    "SELECT * FROM runs WHERE request_id = ?", (request_id,)
+                )
+                try:
+                    existing = await cursor.fetchone()
+                finally:
+                    await cursor.close()
+            if existing is not None:
+                if (existing["chat_id"], existing["message"]) == (chat_id, message):
+                    raise RequestExists(self._run(existing)) from error
+                raise RequestConflict(request_id) from error
+            if "runs.chat_id" in str(error):
+                raise RunConflict(chat_id) from error
+            raise
+        assert run is not None
+        return run
+
+    async def get_run(self, request_id: str) -> Run | None:
+        async with self._write_lock:
+            return await self._get_run(self._require_connection(), request_id)
+
+    async def finish_run(
+        self, request_id: str, state: str, response: Mapping[str, Any] | None,
+        error: tuple[str, str] | None,
+    ) -> None:
+        response_json = json.dumps(response, ensure_ascii=False) if response is not None else None
+        code, message = error if error is not None else (None, None)
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """UPDATE runs SET state = ?, response_json = ?, error_code = ?,
+                       error_message = ?, finished_at = ?
+                   WHERE request_id = ? AND state IN ('running','cancelling')""",
+                (state, response_json, code, message, _now(), request_id),
+            )
+            await cursor.close()
+
+    async def set_run_state(self, request_id: str, state: str) -> None:
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                "UPDATE runs SET state = ? WHERE request_id = ? AND state = 'running'",
+                (state, request_id),
+            )
+            await cursor.close()
+
+    async def active_run(self, chat_id: str) -> Run | None:
+        async with self._write_lock:
+            cursor = await self._require_connection().execute(
+                """SELECT * FROM runs WHERE chat_id = ?
+                   AND state IN ('running','cancelling')""", (chat_id,)
+            )
+            try:
+                row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+        return self._run(row) if row is not None else None
+
+    async def last_run(self, chat_id: str) -> Run | None:
+        async with self._write_lock:
+            cursor = await self._require_connection().execute(
+                """SELECT * FROM runs WHERE chat_id = ?
+                   AND state NOT IN ('running','cancelling')
+                   ORDER BY created_at DESC, request_id DESC LIMIT 1""", (chat_id,)
+            )
+            try:
+                row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+        return self._run(row) if row is not None else None
+
+    async def sweep_interrupted(self, boot_id: str) -> list[Run]:
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """SELECT request_id FROM runs WHERE boot_id != ?
+                   AND state IN ('running','cancelling') ORDER BY created_at, request_id""",
+                (boot_id,),
+            )
+            try:
+                ids = [row["request_id"] for row in await cursor.fetchall()]
+            finally:
+                await cursor.close()
+            if not ids:
+                return []
+            await connection.execute(
+                """UPDATE runs SET state = 'interrupted', finished_at = ?
+                   WHERE boot_id != ? AND state IN ('running','cancelling')""",
+                (_now(), boot_id),
+            )
+            runs = [await self._get_run(connection, request_id) for request_id in ids]
+        return [run for run in runs if run is not None]
+
+    async def publish_result(
+        self, request_id: str, *, assistant: Mapping[str, Any], report: Mapping[str, Any] | None,
+        response: Mapping[str, Any], state: Literal["succeeded", "failed"],
+    ) -> bool:
+        """Commit the assistant, prepared report and response as one terminal outcome.
+
+        A report supplies id, title, question, tool, args, data and generated_at.
+        """
+        # Reject non-JSON report data before even opening the transaction.
+        now = _now()
+        report_id = report["id"] if report is not None else None
+        if report is not None:
+            args_json = json.dumps(report["args"], ensure_ascii=False)
+            data_json = json.dumps(report["data"], ensure_ascii=False)
+        else:
+            args_json = data_json = None
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT chat_id FROM runs WHERE request_id = ?", (request_id,)
+            )
+            try:
+                run_row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+            # The state-guarded UPDATE remains the publication arbiter. A terminal run
+            # may be observed here, but no assistant/report row can be inserted for it.
+            chat_id = run_row["chat_id"] if run_row is not None else None
+            card: ReportCard | None = None
+            if report is not None:
+                card = ReportCard(
+                    id=report["id"], chat_id=chat_id,
+                    title=report["title"], question=report["question"],
+                    tool=report["tool"], args=report["args"],
+                    generated_at=report["generated_at"], version=1,
+                    saved_at=None,
+                    row_count=len(report["data"]) if isinstance(report["data"], list) else None,
+                    created_at=report.get("created_at", now),
+                )
+            response_json = json.dumps({**response, "report": card}, ensure_ascii=False)
+            updated = await connection.execute(
+                """UPDATE runs SET state = ?, response_json = ?, finished_at = ?
+                   WHERE request_id = ? AND state IN ('running','cancelling')""",
+                (state, response_json, now, request_id),
+            )
+            count = updated.rowcount
+            await updated.close()
+            if count == 0:
+                return False
+            message_id = uuid4().hex
+            await connection.execute(
+                """INSERT INTO messages (id, chat_id, request_id, role, content, reasoning,
+                                         state, report_id, created_at)
+                   VALUES (?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)""",
+                (message_id, chat_id, request_id, assistant["content"],
+                 assistant.get("reasoning"), state, now),
+            )
+            if report is not None:
+                assert card is not None
+                await connection.execute(
+                    """INSERT INTO reports (id, chat_id, request_id, title, question, tool,
+                                            args_json, data_json, row_count, generated_at, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (report_id, chat_id, request_id, card["title"], card["question"],
+                     card["tool"], args_json, data_json, card["row_count"],
+                     card["generated_at"], card["created_at"]),
+                )
+                await connection.execute(
+                    "UPDATE messages SET report_id = ? WHERE id = ?", (report_id, message_id)
+                )
+            await connection.execute(
+                """UPDATE chats SET search_text = search_text || ' ' || ?,
+                       updated_at = ?, last_message_at = ? WHERE id = ?""",
+                (_searchable(assistant["content"]), now, now, chat_id),
+            )
+        return True
+
+    async def get_report(self, report_id: str) -> Report | None:
+        async with self._write_lock:
+            return await self._get_report(self._require_connection(), report_id)
+
+    async def list_reports(self, chat_id: str) -> list[ReportCard]:
+        async with self._write_lock:
+            cursor = await self._require_connection().execute(
+                """SELECT id, chat_id, title, question, tool, args_json, row_count,
+                          version, generated_at, created_at, saved_at
+                   FROM reports WHERE chat_id = ? ORDER BY created_at DESC, id DESC""",
+                (chat_id,),
+            )
+            try:
+                return [self._report_card(row) for row in await cursor.fetchall()]
+            finally:
+                await cursor.close()
+
+    async def list_saved_reports(self) -> list[ReportCard]:
+        async with self._write_lock:
+            cursor = await self._require_connection().execute(
+                """SELECT id, chat_id, title, question, tool, args_json, row_count,
+                          version, generated_at, created_at, saved_at
+                   FROM reports WHERE saved_at IS NOT NULL ORDER BY saved_at DESC, id DESC"""
+            )
+            try:
+                return [self._report_card(row) for row in await cursor.fetchall()]
+            finally:
+                await cursor.close()
+
+    async def set_saved(self, report_id: str, saved: bool) -> ReportCard:
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """UPDATE reports SET saved_at = CASE WHEN ? THEN COALESCE(saved_at, ?) ELSE NULL END
+                   WHERE id = ?""",
+                (int(saved), _now(), report_id),
+            )
+            count = cursor.rowcount
+            await cursor.close()
+            if count == 0:
+                raise ReportNotFound(report_id)
+            cursor = await connection.execute(
+                """SELECT id, chat_id, title, question, tool, args_json, row_count,
+                          version, generated_at, created_at, saved_at
+                   FROM reports WHERE id = ?""", (report_id,)
+            )
+            try:
+                row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+            assert row is not None
+            card = self._report_card(row)
+        return card
+
+    async def replace_report_data(
+        self, report_id: str, data: object, generated_at: str, expected_version: int
+    ) -> Report | None:
+        data_json = json.dumps(data, ensure_ascii=False)
+        row_count = len(data) if isinstance(data, list) else None
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """UPDATE reports SET data_json = ?, row_count = ?, generated_at = ?,
+                       version = version + 1 WHERE id = ? AND version = ?""",
+                (data_json, row_count, generated_at, report_id, expected_version),
+            )
+            count = cursor.rowcount
+            await cursor.close()
+            return await self._get_report(connection, report_id) if count else None
