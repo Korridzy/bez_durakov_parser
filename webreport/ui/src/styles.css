@@ -255,3 +255,124 @@ p {
     padding: var(--space-6) var(--space-3);
   }
 }
+
+/* ThinkingMark */
+
+.thinking {
+  --thinking-mark-size: 1.75rem; /* 28 px */
+  --thinking-duration: 2.4s;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.thinking-mark {
+  flex-shrink: 0;
+  width: var(--thinking-mark-size);
+  height: var(--thinking-mark-size);
+  color: var(--color-accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.thinking__text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.01em;
+}
+
+/* Each arc is a partial circle: pathLength="100" makes the dash values percentages. */
+
+.thinking-mark__arc {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+
+.thinking-mark__arc--outer {
+  stroke-dasharray: 58 42;
+  opacity: 0.9;
+}
+
+.thinking-mark__arc--middle {
+  stroke-dasharray: 40 60;
+  transform: rotate(140deg);
+  opacity: 0.7;
+}
+
+.thinking-mark__arc--inner {
+  stroke-dasharray: 72 28;
+  transform: rotate(250deg);
+  opacity: 0.5;
+}
+
+/* Slow counter-rotating arcs with an opacity pulse; CSS keyframes only. */
+
+.thinking-mark.is-animated .thinking-mark__arc--outer {
+  animation: thinking-turn-cw var(--thinking-duration) ease-in-out infinite;
+}
+
+.thinking-mark.is-animated .thinking-mark__arc--middle {
+  animation: thinking-turn-ccw var(--thinking-duration) ease-in-out infinite;
+}
+
+.thinking-mark.is-animated .thinking-mark__arc--inner {
+  animation: thinking-pulse var(--thinking-duration) ease-in-out infinite;
+}
+
+@keyframes thinking-turn-cw {
+  from {
+    transform: rotate(0deg);
+    opacity: 0.9;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+
+  to {
+    transform: rotate(360deg);
+    opacity: 0.9;
+  }
+}
+
+@keyframes thinking-turn-ccw {
+  from {
+    transform: rotate(140deg);
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+
+  to {
+    transform: rotate(-220deg);
+    opacity: 0.4;
+  }
+}
+
+@keyframes thinking-pulse {
+  from,
+  to {
+    transform: rotate(250deg) scale(0.85);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: rotate(250deg) scale(1);
+    opacity: 0.8;
+  }
+}
+
+/* CSS-level belt: even without the hook the mark never moves under reduced motion.
+   The arc selector repeats .is-animated so it outranks the per-arc animation rules. */
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-mark,
+  .thinking-mark.is-animated .thinking-mark__arc {
+    animation: none;
+  }
+}
