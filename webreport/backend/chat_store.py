@@ -534,6 +534,19 @@ class ChatStore:
         now = _now()
         try:
             async with self._transaction() as connection:
+                cursor = await connection.execute(
+                    "SELECT chat_id, message FROM runs WHERE request_id = ?", (request_id,)
+                )
+                try:
+                    existing = await cursor.fetchone()
+                finally:
+                    await cursor.close()
+                if existing is not None:
+                    if (existing["chat_id"], existing["message"]) == (chat_id, message):
+                        run = await self._get_run(connection, request_id)
+                        assert run is not None
+                        raise RequestExists(run)
+                    raise RequestConflict(request_id)
                 await connection.execute(
                     """INSERT INTO runs (request_id, chat_id, message, state, boot_id, created_at)
                        VALUES (?, ?, ?, 'running', ?, ?)""",
@@ -572,6 +585,18 @@ class ChatStore:
     async def get_run(self, request_id: str) -> Run | None:
         async with self._write_lock:
             return await self._get_run(self._require_connection(), request_id)
+
+    async def get_request(self, request_id: str) -> tuple[Run, str] | None:
+        """Return the public run and its original input for retry identity checks."""
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM runs WHERE request_id = ?", (request_id,)
+            )
+            try:
+                row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+            return (self._run(row), row["message"]) if row is not None else None
 
     async def finish_run(
         self, request_id: str, state: str, response: Mapping[str, Any] | None,

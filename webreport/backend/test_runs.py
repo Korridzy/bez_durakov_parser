@@ -90,7 +90,8 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         return self._admission_lock
 
     async def submit(self, chat=None, request=None, message='Question'):
-        return await self.registry.submit(chat or self.chat, request or uuid4().hex, message)
+        submitted = await self.registry.submit(chat or self.chat, request or uuid4().hex, message)
+        return submitted.run
 
     async def finish(self, request):
         self.agent.release.set()
@@ -105,6 +106,68 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done['response']['message'], 'Answer')
         self.assertEqual([m['role'] for m in await self.store.list_messages(self.chat)], ['user', 'assistant'])
         self.assertEqual(self.pinned, {})
+
+    async def test_submit_result_distinguishes_creation_from_identical_retry(self):
+        request_id = uuid4().hex
+        first = await self.registry.submit(self.chat, request_id, 'Question')
+        self.assertTrue(first.created)
+        self.assertEqual(first.run['state'], 'running')
+        duplicate = await self.registry.submit(self.chat, request_id, 'Question')
+        self.assertFalse(duplicate.created)
+        self.assertEqual(duplicate.run, first.run)
+        await self.finish(request_id)
+
+    async def test_concurrent_direct_submit_reports_only_one_created(self):
+        request_id = uuid4().hex
+        entered, checked_twice, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original_create = self.store.create_run
+        original_get = self.store.get_request
+        checks = 0
+
+        async def paused_create(*args, **kwargs):
+            if args[1] == request_id:
+                entered.set()
+                await release.wait()
+            return await original_create(*args, **kwargs)
+
+        async def observed_get(run_id):
+            nonlocal checks
+            result = await original_get(run_id)
+            if run_id == request_id and result is None:
+                checks += 1
+                if checks == 2:
+                    checked_twice.set()
+            return result
+
+        self.store.create_run = paused_create
+        self.store.get_request = observed_get
+        try:
+            first = asyncio.create_task(self.registry.submit(self.chat, request_id, 'Question'))
+            await asyncio.wait_for(entered.wait(), 5)
+            second = asyncio.create_task(self.registry.submit(self.chat, request_id, 'Question'))
+            await asyncio.wait_for(checked_twice.wait(), 5)
+            release.set()
+            outcomes = await asyncio.wait_for(asyncio.gather(first, second), 5)
+            self.assertEqual([outcome.created for outcome in outcomes], [True, False])
+            self.assertEqual(outcomes[0].run['request_id'], outcomes[1].run['request_id'])
+        finally:
+            release.set()
+            self.store.create_run = original_create
+            self.store.get_request = original_get
+        await self.finish(request_id)
+        self.assertEqual(len(self.archive.begins), 1)
+        self.assertEqual(self.pinned, {})
+
+    async def test_submit_after_clear_creates_again(self):
+        request_id = uuid4().hex
+        first = await self.registry.submit(self.chat, request_id, 'Question')
+        self.assertTrue(first.created)
+        await self.finish(request_id)
+        await self.store.clear_chat(self.chat)
+        new = await self.registry.submit(self.chat, request_id, 'Question')
+        self.assertTrue(new.created)
+        self.assertEqual(new.run['state'], 'running')
+        await self.finish(request_id)
 
     async def test_report_retained(self):
         self.agent.result = success('# Report', [], [{'n': 1}], reasoning='thinking', report_handle={'tool': 'read_rows', 'args': {'limit': 1}})

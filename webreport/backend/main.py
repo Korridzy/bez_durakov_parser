@@ -4,7 +4,7 @@ Provides REST API for chat and report generation.
 """
 from typing import Dict, Any, Literal, Optional, Protocol, TypedDict, TypeGuard, assert_never
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import importlib
 import logging
@@ -26,6 +26,7 @@ from bd_shared.config import (
     ARCHIVE_ENABLED,
     CHECKPOINT_DB_PATH,
     CHECKPOINT_TTL_SECONDS,
+    CHATS_DB_PATH,
     DATABASE_NAME,
     DATABASE_URL,
     DATASET_CONFIG_ERROR,
@@ -58,23 +59,21 @@ from agent.knowledge import (
 )
 from agent.engine import build_read_only_engine
 from api_errors import register_api_error_handler
+from chat_routes import router as chat_router
+from chat_store import ChatStore, ChatBusy as StoreChatBusy
+from runs import RunRegistry, ChatBusy, ModelUnavailable, Overloaded, ToolServiceUnavailable
 from agent.reasoning import extract_reasoning, extract_text
 from agent.registry import ToolRegistry
 from report_routes import router as report_router
 from agent.toolmodule import ToolSpec, load_tool_module
 from agents.report_runtime import ReportAgentSystem
-from agents.report_support import failure
 from archive import (
     ArchiveConfigError,
     ArchiveSettings,
     ConversationArchive,
     NullArchive,
 )
-from request_context import (
-    RequestCorrelationMiddleware,
-    derive_trace_id,
-    new_request_id,
-)
+from request_context import RequestCorrelationMiddleware
 from session_store import MAX_SESSIONS, SessionIndex
 
 configure_logging("webreport-backend", level=LOG_LEVEL, logger_levels={"sqlalchemy.engine": LOG_LEVEL} if SQLALCHEMY_LOGGING else None)
@@ -144,6 +143,7 @@ app = FastAPI(
 )
 
 register_api_error_handler(app)
+app.include_router(chat_router)
 app.include_router(report_router)
 
 # CORS middleware for frontend communication
@@ -467,7 +467,7 @@ def _validate_scope_gate_history_turns(value: object) -> int:
 async def startup_event():
     """Initialize services on startup."""
     global agent_system, archive, checkpoint_connection, checkpoint_saver
-    global tool_engine, tool_service, tool_registry, knowledge, llm_proxy_healthy
+    global tool_engine, tool_service, tool_registry, knowledge, llm_proxy_healthy, chat_store, registry
 
     if DATASET_CONFIG_ERROR is not None:
         logger.error("%s", DATASET_CONFIG_ERROR)
@@ -556,6 +556,11 @@ async def startup_event():
         else:
             archive = NullArchive()
 
+        chat_store = ChatStore(CHATS_DB_PATH)
+        await chat_store.setup()
+        registry = RunRegistry(chat_store, runtime=lambda: __import__(__name__), boot_id=BOOT_ID)
+        await registry.sweep_on_startup()
+
         llm_proxy_healthy = await probe_llm_proxy(sleep=probe_sleep)
 
         await rebuild_session_index()
@@ -566,18 +571,29 @@ async def startup_event():
         startup_complete = True
     finally:
         if not startup_complete:
+            if chat_store is not None:
+                await chat_store.close()
+                chat_store = None
+            await archive.close()
             await connection.close()
             checkpoint_connection = None
             checkpoint_saver = None
+            registry = None
 
     logger.info("Services initialized successfully")
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    global checkpoint_connection, checkpoint_saver, tool_engine
+    global checkpoint_connection, checkpoint_saver, tool_engine, chat_store, registry
 
+    if registry is not None:
+        await registry.shutdown()
     await archive.close()
+    if chat_store is not None:
+        await chat_store.close()
+    chat_store = None
+    registry = None
 
     if checkpoint_connection is not None:
         await checkpoint_connection.close()
@@ -679,77 +695,57 @@ async def chat(message: ChatMessage, response: Response):
             error="llm_proxy_unavailable",
         )
 
-    pinned_added = False
+    # The old session id is the durable chat id too. Creating it before submission
+    # retains explicit ids and lets repeated legacy calls reopen the same chat.
+    created = False
     try:
-        async with admission_lock:
-            for expired_id in await sessions.expired_ids():
-                if pinned.get(expired_id, 0) > 0:
-                    continue
-                await saver.adelete_thread(expired_id)
-                await sessions.drop(expired_id)
-
-            pinned[session_id] = pinned.get(session_id, 0) + 1
-            pinned_added = True
-
-            if not await sessions.is_live(session_id) and len(sessions) >= sessions.max_size:
-                victim = await sessions.lru_victim(pinned)
-                if victim is None:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Сервер перегружен, повторите позже",
-                    )
-                await saver.adelete_thread(victim)
-                await sessions.drop(victim)
-
-            await sessions.touch(session_id)
-
-        context = structlog.contextvars.get_contextvars()
-        request_id = str(context.get("request_id") or new_request_id())
-        trace_id = str(context.get("trace_id") or derive_trace_id(request_id))
-        row_id = await archive.begin(
-            request_id=request_id,
-            trace_id=trace_id,
-            session_id=session_id,
-            user_id=None,
-            model=AGENT_MODEL,
-            user_message=message.message,
+        if await chat_store.get_chat(session_id) is None:
+            async with chat_store._transaction() as connection:
+                now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                cursor = await connection.execute(
+                    "INSERT OR IGNORE INTO chats (id, title, search_text, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (session_id, "Новый чат", "новый чат", now, now),
+                )
+                created = bool(cursor.rowcount)
+                await cursor.close()
+        submitted = await registry.submit(session_id, uuid.uuid4().hex, message.message)
+        run = submitted.run
+    except ToolServiceUnavailable as error:
+        if created:
+            await chat_store.delete_chat(session_id)
+        raise HTTPException(status_code=503, detail="Tool service not available") from error
+    except ModelUnavailable:
+        if created:
+            await chat_store.delete_chat(session_id)
+        response.status_code = 503
+        return ChatResponse(
+            success=False, session_id=session_id, data=None, query_info=[],
+            message=MODEL_UNAVAILABLE_MESSAGE, timestamp=datetime.now().isoformat(),
+            error="llm_proxy_unavailable",
         )
-        result = None
-        try:
-            result = await system.process_user_request(
-                message.message,
-                session_id=session_id,
-            )
-            return ChatResponse(
-                success=result["success"],
-                session_id=session_id,
-                data=result.get("data"),
-                query_info=result["query_info"],
-                message=result["message"],
-                timestamp=result["timestamp"],
-                error=result.get("error"),
-                reasoning=result.get("reasoning"),
-                scope_verdict=result.get("verdict"),
-            )
-        except Exception as e:
-            result = failure(
-                "Внутренняя ошибка",
-                f"internal:{type(e).__name__}",
-            )
-            raise _internal_error(e)
-        finally:
-            await archive.complete(row_id, result)
-    except HTTPException:
+    except Overloaded as error:
+        if created:
+            await chat_store.delete_chat(session_id)
+        raise HTTPException(status_code=503, detail="Сервер перегружен, повторите позже") from error
+    except ChatBusy as error:
+        raise HTTPException(status_code=409, detail="Чат занят, дождитесь ответа") from error
+    except Exception as error:
+        raise _internal_error(error) from error
+
+    handle = registry.tasks.get(run["request_id"])
+    try:
+        completed = await registry.wait(run["request_id"])
+    except asyncio.CancelledError:
+        await registry.cancel(session_id, run["request_id"])
+        if handle is not None:
+            await asyncio.wait_for(handle.done.wait(), 5)
         raise
-    except Exception as e:
-        raise _internal_error(e)
-    finally:
-        if pinned_added:
-            remaining_pins = pinned[session_id] - 1
-            if remaining_pins > 0:
-                pinned[session_id] = remaining_pins
-            else:
-                del pinned[session_id]
+    if completed["error"] and completed["error"]["code"].startswith("internal:"):
+        raise _internal_error(RuntimeError(completed["error"]["code"]))
+    if completed["response"] is None:
+        raise _internal_error(RuntimeError("Run completed without a response"))
+    return ChatResponse(**completed["response"])
 
 
 class QuestionMessage(Protocol):
@@ -855,6 +851,11 @@ async def clear_history(session_id: str):
         raise HTTPException(status_code=503, detail="Checkpoint store not available")
 
     async with admission_lock:
+        if chat_store is not None:
+            try:
+                await chat_store.clear_chat(session_id)
+            except StoreChatBusy as error:
+                raise HTTPException(status_code=409, detail="Чат занят, дождитесь ответа") from error
         await saver.adelete_thread(session_id)
         await sessions.drop(session_id)
 

@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import json
 import sys
+import tempfile
 import unittest
 from collections.abc import Mapping
 from types import SimpleNamespace
@@ -49,8 +50,11 @@ class StubAgentSystem:
         self.response = dict(response)
         self.calls: list[tuple[str, str]] = []
 
+    async def head_messages(self, _session_id: str) -> list[object]:
+        return []
+
     async def process_user_request(
-        self, user_message: str, session_id: str
+        self, user_message: str, session_id: str, history=()
     ) -> dict[str, object]:
         self.calls.append((user_message, session_id))
         return dict(self.response)
@@ -85,6 +89,9 @@ class _EndpointHarness:
                 "admission_lock",
                 "agent_system",
                 "checkpoint_saver",
+                "chat_store",
+                "registry",
+                "tool_service",
                 "pinned",
                 "sessions",
             )
@@ -92,8 +99,14 @@ class _EndpointHarness:
         self.main.admission_lock = asyncio.Lock()
         self.main.pinned = {}
         self.main.sessions = session_store.SessionIndex(max_size=4, ttl=60)
+        self.main.tool_service = object()
+        self._chat_dir = tempfile.TemporaryDirectory()
+        await importlib.import_module("test_support").install_test_runtime(self.main, self._chat_dir.name)
 
     async def asyncTearDown(self):
+        await self.main.registry.shutdown()
+        await self.main.chat_store.close()
+        self._chat_dir.cleanup()
         for name, value in self.saved.items():
             setattr(self.main, name, value)
 

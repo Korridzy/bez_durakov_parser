@@ -3,13 +3,14 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 import re
+import sqlite3
 from uuid import uuid4
 
 import structlog
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agents.report_support import failure
-from chat_store import ChatNotFound, RunConflict, RequestConflict, RequestExists
+from chat_store import ChatNotFound, Run, RunConflict, RequestConflict, RequestExists
 from request_context import derive_trace_id, new_request_id
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,12 @@ class RunNotFound(LookupError):
     pass
 
 
+@dataclass(frozen=True)
+class SubmitResult:
+    run: Run
+    created: bool
+
+
 @dataclass
 class RunHandle:
     request_id: str
@@ -68,11 +75,17 @@ class RunRegistry:
         self.interrupted = False
         self._cancel_lock = asyncio.Lock()
 
-    async def submit(self, chat_id: str, request_id: str, message: str):
+    async def submit(self, chat_id: str, request_id: str, message: str) -> SubmitResult:
         if not REQUEST_ID.fullmatch(request_id):
             raise InvalidRequest(request_id)
         if await self.store.get_chat(chat_id) is None:
             raise ChatNotFound(chat_id)
+        previous = await self.store.get_request(request_id)
+        if previous is not None:
+            run, original_message = previous
+            if run['chat_id'] != chat_id or original_message != message:
+                raise RequestConflict(request_id)
+            return SubmitResult(run, created=False)
         rt = self.runtime()
         if getattr(rt, 'tool_service', True) is None:
             raise ToolServiceUnavailable()
@@ -128,8 +141,13 @@ class RunRegistry:
                     raise
                 except RunConflict as exc:
                     raise ChatBusy(chat_id) from exc
+                except sqlite3.IntegrityError as exc:
+                    if ('FOREIGN KEY constraint failed' in str(exc)
+                            and await self.store.get_chat(chat_id) is None):
+                        raise ChatNotFound(chat_id) from exc
+                    raise
                 except RequestExists as exc:
-                    return exc.run
+                    return SubmitResult(exc.run, created=False)
                 created = True
                 if not owns_handle:
                     raise RuntimeError('Run id is already owned by another submission')
@@ -141,7 +159,7 @@ class RunRegistry:
                     task.cancel()
                 handle.ready.set()
                 pinned_added = False
-                return run
+                return SubmitResult(run, created=True)
             finally:
                 if created and not registered:
                     await self.store.finish_run(request_id, 'cancelled', None, None)
