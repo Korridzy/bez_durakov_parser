@@ -191,6 +191,9 @@ ARCHIVE_ENABLED = config["webreport"].get("archive_enabled", True)
 ARCHIVE_DB_PATH = os.environ.get("BD_ARCHIVE_DB_PATH") or config["webreport"].get(
     "archive_db_path", "/data/conversations.db"
 )
+CHATS_DB_PATH = os.environ.get("BD_CHATS_DB_PATH") or config["webreport"].get(
+    "chats_db_path", "/data/chats.db"
+)
 ARCHIVE_RETENTION_DAYS = config["webreport"].get("archive_retention_days", 0)
 ARCHIVE_STORE_REASONING = config["webreport"].get("archive_store_reasoning", True)
 ARCHIVE_REASONING_RETENTION_DAYS = config["webreport"].get("archive_reasoning_retention_days", 30)

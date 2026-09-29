@@ -28,6 +28,8 @@ PROBE = (
     "'agent_model': AGENT_MODEL}))"
 )
 
+CHATS_DB_PROBE = "from bd_shared.config import CHATS_DB_PATH; print(CHATS_DB_PATH)"
+
 ARCHIVE_PROBE = (
     "import json;"
     "from bd_shared.config import ("
@@ -62,6 +64,7 @@ def run_probe(
     environment.pop("BD_DOCKER", None)
     environment.pop("BD_CONFIG_LOCAL_FILE", None)
     environment.pop("BD_ARCHIVE_DB_PATH", None)
+    environment.pop("BD_CHATS_DB_PATH", None)
     if config_path is not None:
         environment["BD_CONFIG_FILE"] = config_path
     if overlay_path is not None:
@@ -81,8 +84,13 @@ def load_config(overlay_path: str | None) -> subprocess.CompletedProcess[str]:
     return run_probe(PROBE, overlay_path=overlay_path)
 
 
-def write_scratch_config(directory: str, archive_db_path: str | None = None) -> Path:
+def write_scratch_config(
+    directory: str,
+    archive_db_path: str | None = None,
+    chats_db_path: str | None = None,
+) -> Path:
     archive_setting = "" if archive_db_path is None else f'archive_db_path = "{archive_db_path}"\n'
+    chats_setting = "" if chats_db_path is None else f'chats_db_path = "{chats_db_path}"\n'
     config_path = Path(directory) / "config.toml"
     config_path.write_text(
         "[database]\n"
@@ -92,7 +100,8 @@ def write_scratch_config(directory: str, archive_db_path: str | None = None) -> 
         'default_game_date = "02.03.2022"\n'
         "\n"
         "[webreport]\n"
-        + archive_setting,
+        + archive_setting
+        + chats_setting,
         encoding="utf-8",
     )
     return config_path
@@ -135,6 +144,55 @@ class TestConfigLocalOverride(unittest.TestCase):
             f"default database URL should still name bez_durakov, got {values['database_url']}",
         )
         print("✅ BD_CONFIG_LOCAL_FILE unset: the bez_durakov defaults are untouched")
+
+    def test_chats_db_path_defaults_from_scratch_config(self):
+        """Given no chats database path, When config loads, Then the default applies."""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = write_scratch_config(directory)
+            result = run_probe(CHATS_DB_PROBE, config_path=str(config_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "/data/chats.db")
+        print("✅ chats config: scratch configs default to /data/chats.db")
+
+    def test_chats_db_path_from_overlay(self):
+        """Given an overlay path, When config loads, Then it overrides the base config."""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = write_scratch_config(directory, chats_db_path="/config/chats.db")
+            overlay = Path(directory) / "config.local.toml"
+            overlay.write_text(
+                '[webreport]\nchats_db_path = "/overlay/chats.db"\n',
+                encoding="utf-8",
+            )
+            result = run_probe(
+                CHATS_DB_PROBE,
+                config_path=str(config_path),
+                overlay_path=str(overlay),
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "/overlay/chats.db")
+        print("✅ chats config: the local overlay supplies chats_db_path")
+
+    def test_chats_db_path_environment_override_wins(self):
+        """Given a chats path env var, When config loads, Then it wins over both files."""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = write_scratch_config(directory, chats_db_path="/config/chats.db")
+            overlay = Path(directory) / "config.local.toml"
+            overlay.write_text(
+                '[webreport]\nchats_db_path = "/overlay/chats.db"\n',
+                encoding="utf-8",
+            )
+            result = run_probe(
+                CHATS_DB_PROBE,
+                config_path=str(config_path),
+                overlay_path=str(overlay),
+                environment_overrides={"BD_CHATS_DB_PATH": "/env/chats.db"},
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "/env/chats.db")
+        print("✅ chats config: BD_CHATS_DB_PATH overrides both config files")
 
     def test_archive_defaults_from_scratch_config(self):
         """Given no archive keys, When config loads, Then tracked defaults apply."""

@@ -59,6 +59,8 @@ archive_store_reasoning = true
 archive_reasoning_retention_days = 30
 # Interval in seconds between archive retention sweeps.
 archive_sweep_interval_seconds = 600
+# SQLite database path for the chat and report store.
+chats_db_path = "/data/chats.db"
 # Langfuse host; all three Langfuse settings must be non-empty to enable it.
 langfuse_host = ""
 # Langfuse public key; all three Langfuse settings must be non-empty to enable it.
