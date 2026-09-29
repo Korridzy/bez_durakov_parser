@@ -1310,3 +1310,333 @@ p {
     flex: 1;
   }
 }
+
+/* ReportsPanel */
+
+.reports-panel {
+  position: sticky;
+  top: var(--header-height);
+  display: flex;
+  flex-shrink: 0;
+  width: var(--reports-panel-current, var(--reports-panel-width));
+  min-width: var(--reports-panel-width);
+  height: calc(100vh - var(--header-height));
+  min-height: 0;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+}
+
+/* Drag handle on the panel's left edge; the pill marks the grab area. */
+
+.reports-panel__handle {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--space-2);
+  margin-left: calc(-1 * var(--space-1));
+  cursor: col-resize;
+  touch-action: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.reports-panel__handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: var(--space-8);
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+  transform: translate(-50%, -50%);
+}
+
+.reports-panel__handle:hover,
+.reports-panel__handle:focus-visible,
+.reports-panel__handle:active {
+  background: var(--color-accent-soft);
+}
+
+.reports-panel__handle:hover::after,
+.reports-panel__handle:focus-visible::after,
+.reports-panel__handle:active::after {
+  background: var(--color-accent);
+}
+
+.reports-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.reports-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-2);
+}
+
+.reports-panel__heading {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.reports-panel__scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-2) var(--space-3) var(--space-4);
+  overflow-y: auto;
+}
+
+.reports-panel__empty {
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.reports-panel__notice {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+}
+
+.reports-panel__error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* Cards */
+
+.report-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.report-card:hover,
+.report-card:focus-within {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.report-card.is-highlighted {
+  border-color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  animation: report-card-arrive var(--duration-base) var(--ease-standard);
+}
+
+@keyframes report-card-arrive {
+  from {
+    transform: translateY(calc(-1 * var(--space-2)));
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.report-card__open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-card__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-weight: var(--weight-medium);
+}
+
+.report-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.report-card__save {
+  margin: var(--space-1) var(--space-1) 0 0;
+}
+
+.report-card__save.is-saved,
+.report-save.is-saved {
+  color: var(--color-warning);
+}
+
+.report-star {
+  flex-shrink: 0;
+}
+
+/* Preview inside the panel */
+
+.reports-preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reports-preview__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.reports-preview__toolbar .button {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.reports-preview__expand {
+  margin-left: auto;
+}
+
+/* The panel frame already draws the surface: the preview card drops its own box. */
+
+.reports-preview .report-preview {
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Fullscreen dialog */
+
+.reports-fullscreen {
+  width: calc(100vw - var(--space-8));
+  height: calc(100vh - var(--space-8));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+}
+
+.reports-fullscreen::backdrop {
+  background: var(--color-overlay);
+}
+
+.reports-fullscreen__body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.reports-fullscreen .reports-preview__toolbar {
+  padding: var(--space-4) var(--space-6) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reports-fullscreen__scroll {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-4) var(--space-6) var(--space-8);
+  overflow: auto;
+}
+
+.reports-fullscreen .report-preview {
+  max-width: 1200px;
+  margin: 0 auto;
+  border: 0;
+  box-shadow: none;
+}
+
+.reports-fullscreen .report-table-wrap,
+.reports-fullscreen .report-json {
+  max-height: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reports-panel__handle,
+  .report-card {
+    transition: none;
+  }
+
+  .report-card.is-highlighted {
+    animation: none;
+  }
+}
+
+/* Narrow screens: full width, no drag handle; the drawer arrives with the responsive layout todo. */
+@media (max-width: 900px) {
+  .reports-panel {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    max-height: 60vh;
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .reports-panel__handle {
+    display: none;
+  }
+
+  .reports-fullscreen {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .reports-fullscreen .reports-preview__toolbar,
+  .reports-fullscreen__scroll {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+}
