@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 
 import { ChatList, NEW_CHAT_ID } from "./chats/ChatList";
+import { SavedReportsPage } from "./saved/SavedReportsPage";
 
 function ChatsPage() {
   const { chatId } = useParams();
@@ -23,20 +24,6 @@ function ChatsPage() {
         </p>
       </section>
     </div>
-  );
-}
-
-function SavedReportsPage() {
-  const { reportId } = useParams();
-  return (
-    <section className="page" aria-labelledby="saved-heading">
-      <h1 id="saved-heading">Сохранённые отчёты</h1>
-      <p className="page-lead">
-        {reportId === undefined
-          ? "Здесь появятся сохранённые отчёты."
-          : `Отчёт ${reportId}`}
-      </p>
-    </section>
   );
 }
 
