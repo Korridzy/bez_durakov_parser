@@ -57,7 +57,10 @@ from agent.knowledge import (
     validate_limits,
 )
 from agent.engine import build_read_only_engine
+from api_errors import register_api_error_handler
 from agent.reasoning import extract_reasoning, extract_text
+from agent.registry import ToolRegistry
+from report_routes import router as report_router
 from agent.toolmodule import ToolSpec, load_tool_module
 from agents.report_runtime import ReportAgentSystem
 from agents.report_support import failure
@@ -140,6 +143,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
+register_api_error_handler(app)
+app.include_router(report_router)
+
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
@@ -159,6 +165,7 @@ checkpoint_connection = None
 checkpoint_saver = None
 tool_engine: Engine | None = None
 tool_service: object | None = None
+tool_registry: ToolRegistry | None = None
 knowledge: Knowledge | None = None
 llm_proxy_healthy: bool = False
 archive: ConversationArchive | NullArchive = NullArchive()
@@ -460,7 +467,7 @@ def _validate_scope_gate_history_turns(value: object) -> int:
 async def startup_event():
     """Initialize services on startup."""
     global agent_system, archive, checkpoint_connection, checkpoint_saver
-    global tool_engine, tool_service, knowledge, llm_proxy_healthy
+    global tool_engine, tool_service, tool_registry, knowledge, llm_proxy_healthy
 
     if DATASET_CONFIG_ERROR is not None:
         logger.error("%s", DATASET_CONFIG_ERROR)
@@ -518,6 +525,7 @@ async def startup_event():
     # The discovered specs are logged by the helper and re-derived by ToolRegistry from the
     # same service object, so startup keeps only the engine it must dispose and the service.
     tool_engine, tool_service, _ = await initialize_tool_service_with_retry()
+    tool_registry = ToolRegistry(tool_service)
 
     connection = await aiosqlite.connect(CHECKPOINT_DB_PATH)
     saver = AsyncSqliteSaver(connection)
