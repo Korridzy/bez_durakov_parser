@@ -22,6 +22,7 @@ _runnables = importlib.import_module("langchain_core.runnables")
 
 END = _graph.END
 GraphRecursionError = _errors.GraphRecursionError
+BaseMessage = _messages.BaseMessage
 HumanMessage = _messages.HumanMessage
 AIMessage = _messages.AIMessage
 SystemMessage = _messages.SystemMessage
@@ -265,11 +266,12 @@ async def arun(
     thread_id: str,
     *,
     extra_steps: int = 0,
+    history: Sequence[BaseMessage] = (),
 ) -> GraphRunResult:
     try:
         return await graph.ainvoke(
             {
-                "messages": [HumanMessage(content=user_message)],
+                "messages": [*history, HumanMessage(content=user_message)],
                 "rows_consumed": 0,
                 "knowledge_bytes_consumed": 0,
                 "report_payload": None,

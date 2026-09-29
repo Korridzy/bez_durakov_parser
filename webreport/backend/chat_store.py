@@ -380,44 +380,51 @@ class ChatStore:
             "created_at": _now(),
         }
         async with self._transaction() as connection:
-            first_user = False
-            if role == "user":
-                cursor = await connection.execute(
-                    """SELECT 1 FROM chats WHERE id = ? AND auto_title = 1
-                       AND NOT EXISTS (SELECT 1 FROM messages WHERE chat_id = ? AND role = 'user')""",
-                    (chat_id, chat_id),
-                )
-                try:
-                    first_user = await cursor.fetchone() is not None
-                finally:
-                    await cursor.close()
+            await self._insert_message(connection, chat_id, message)
+        return message
+
+    async def _insert_message(
+        self, connection: aiosqlite.Connection, chat_id: str, message: Message
+    ) -> None:
+        role = message["role"]
+        content = message["content"]
+        first_user = False
+        if role == "user":
+            cursor = await connection.execute(
+                """SELECT 1 FROM chats WHERE id = ? AND auto_title = 1
+                   AND NOT EXISTS (SELECT 1 FROM messages WHERE chat_id = ? AND role = 'user')""",
+                (chat_id, chat_id),
+            )
+            try:
+                first_user = await cursor.fetchone() is not None
+            finally:
+                await cursor.close()
+        await connection.execute(
+            """INSERT INTO messages (id, chat_id, request_id, role, content, reasoning,
+                                     state, report_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                message["id"], chat_id, message["request_id"], role, content,
+                message["reasoning"], message["state"], message["report_id"], message["created_at"],
+            ),
+        )
+        if first_user and content.split():
+            clean = " ".join(content.split())[:80]
             await connection.execute(
-                """INSERT INTO messages (id, chat_id, request_id, role, content, reasoning,
-                                         state, report_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """UPDATE chats SET title = ?, search_text = ?, updated_at = ?, last_message_at = ?
+                   WHERE id = ?""",
                 (
-                    message["id"], chat_id, request_id, role, content,
-                    reasoning, state, report_id, message["created_at"],
+                    clean,
+                    _searchable(clean) + " " + _searchable(content),
+                    message["created_at"], message["created_at"], chat_id,
                 ),
             )
-            if first_user and content.split():
-                clean = " ".join(content.split())[:80]
-                await connection.execute(
-                    """UPDATE chats SET title = ?, search_text = ?, updated_at = ?, last_message_at = ?
-                       WHERE id = ?""",
-                    (
-                        clean,
-                        _searchable(clean) + " " + _searchable(content),
-                        message["created_at"], message["created_at"], chat_id,
-                    ),
-                )
-            else:
-                await connection.execute(
-                    """UPDATE chats SET search_text = search_text || ' ' || ?,
-                           updated_at = ?, last_message_at = ? WHERE id = ?""",
-                    (_searchable(content), message["created_at"], message["created_at"], chat_id),
-                )
-        return message
+        else:
+            await connection.execute(
+                """UPDATE chats SET search_text = search_text || ' ' || ?,
+                       updated_at = ?, last_message_at = ? WHERE id = ?""",
+                (_searchable(content), message["created_at"], message["created_at"], chat_id),
+            )
 
     async def list_messages(self, chat_id: str) -> list[Message]:
         async with self._write_lock:
@@ -521,7 +528,8 @@ class ChatStore:
         return self._report(row) if row is not None else None
 
     async def create_run(
-        self, chat_id: str, request_id: str, message: str, boot_id: str
+        self, chat_id: str, request_id: str, message: str, boot_id: str,
+        *, with_user_message: bool = False,
     ) -> Run:
         now = _now()
         try:
@@ -531,6 +539,12 @@ class ChatStore:
                        VALUES (?, ?, ?, 'running', ?, ?)""",
                     (request_id, chat_id, message, boot_id, now),
                 )
+                if with_user_message:
+                    await self._insert_message(connection, chat_id, {
+                        "id": uuid4().hex, "request_id": request_id, "role": "user",
+                        "content": message, "reasoning": None, "state": None,
+                        "report_id": None, "created_at": now,
+                    })
                 run = await self._get_run(connection, request_id)
         except sqlite3.IntegrityError as error:
             if "runs.request_id" not in str(error) and "runs.chat_id" not in str(error):
@@ -571,6 +585,17 @@ class ChatStore:
                        error_message = ?, finished_at = ?
                    WHERE request_id = ? AND state IN ('running','cancelling')""",
                 (state, response_json, code, message, _now(), request_id),
+            )
+            await cursor.close()
+
+    async def force_fail_run(self, request_id: str) -> None:
+        """Minimal terminal write if normal run finalisation raised before committing."""
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """UPDATE runs SET state = 'failed', error_code = 'internal:finalise',
+                          error_message = 'Внутренняя ошибка', finished_at = ?
+                   WHERE request_id = ? AND state IN ('running','cancelling')""",
+                (_now(), request_id),
             )
             await cursor.close()
 
