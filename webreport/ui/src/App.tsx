@@ -7,17 +7,22 @@ import {
   useParams,
 } from "react-router-dom";
 
+import { ChatList, NEW_CHAT_ID } from "./chats/ChatList";
+
 function ChatsPage() {
   const { chatId } = useParams();
   return (
-    <section className="page" aria-labelledby="chats-heading">
-      <h1 id="chats-heading">Чаты</h1>
-      <p className="page-lead">
-        {chatId === undefined
-          ? "Выберите чат или начните новый."
-          : `Чат ${chatId}`}
-      </p>
-    </section>
+    <div className="chats-layout">
+      <ChatList selectedChatId={chatId} />
+      <section className="page" aria-labelledby="chats-heading">
+        <h1 id="chats-heading">Чаты</h1>
+        <p className="page-lead">
+          {chatId === undefined || chatId === NEW_CHAT_ID
+            ? "Выберите чат или начните новый."
+            : `Чат ${chatId}`}
+        </p>
+      </section>
+    </div>
   );
 }
 
