@@ -362,9 +362,11 @@ function ChatRow({
 export interface ChatListProps {
   /** The `:chatId` route param; `undefined` on `/chats`, `"new"` on `/chats/new`. */
   selectedChatId: string | undefined;
+  /** Any change of this value (after mount) reloads the list, e.g. after a run finished. */
+  refreshKey?: number;
 }
 
-export function ChatList({ selectedChatId }: ChatListProps) {
+export function ChatList({ selectedChatId, refreshKey }: ChatListProps) {
   const navigate = useNavigate();
   const chats = useChats();
   const [open, setOpen] = useSidebarOpen();
@@ -376,7 +378,15 @@ export function ChatList({ selectedChatId }: ChatListProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const now = Date.now();
 
-  const { items, status, activeQuery } = chats;
+  const { items, status, activeQuery, reload } = chats;
+
+  const seenRefreshKey = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKey !== seenRefreshKey.current) {
+      seenRefreshKey.current = refreshKey;
+      reload();
+    }
+  }, [refreshKey, reload]);
 
   // `/chats` without an id opens the most recent chat, or the empty new-chat
   // route when none exists. A search in progress shows its results instead.

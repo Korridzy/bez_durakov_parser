@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import {
   BrowserRouter,
   NavLink,
@@ -7,22 +8,20 @@ import {
   useParams,
 } from "react-router-dom";
 
-import { ChatList, NEW_CHAT_ID } from "./chats/ChatList";
+import { ChatList } from "./chats/ChatList";
+import { ChatView } from "./chats/ChatView";
 import { SavedReportsPage } from "./saved/SavedReportsPage";
 
 function ChatsPage() {
   const { chatId } = useParams();
+  // The sidebar reloads its list whenever the conversation created a chat or
+  // finished a run (title, last message and report count change server-side).
+  const [chatsVersion, setChatsVersion] = useState(0);
+  const onChatsChanged = useCallback(() => setChatsVersion((n) => n + 1), []);
   return (
     <div className="chats-layout">
-      <ChatList selectedChatId={chatId} />
-      <section className="page" aria-labelledby="chats-heading">
-        <h1 id="chats-heading">Чаты</h1>
-        <p className="page-lead">
-          {chatId === undefined || chatId === NEW_CHAT_ID
-            ? "Выберите чат или начните новый."
-            : `Чат ${chatId}`}
-        </p>
-      </section>
+      <ChatList selectedChatId={chatId} refreshKey={chatsVersion} />
+      <ChatView chatId={chatId} onChatsChanged={onChatsChanged} />
     </div>
   );
 }
