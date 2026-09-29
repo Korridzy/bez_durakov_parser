@@ -92,6 +92,21 @@ class ChatMessage(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
 
 
+class ReportCard(BaseModel):
+    """Metadata for a retained report."""
+    id: str
+    chat_id: Optional[str]
+    title: str
+    question: str
+    tool: str
+    args: Dict[str, Any]
+    generated_at: str
+    version: int
+    saved_at: Optional[str]
+    row_count: Optional[int]
+    created_at: str
+
+
 class ChatResponse(BaseModel):
     """Chat response model."""
     success: bool
@@ -103,14 +118,7 @@ class ChatResponse(BaseModel):
     error: Optional[str] = None
     reasoning: Optional[str] = None
     scope_verdict: Optional[str] = None
-
-
-class ReportData(BaseModel):
-    """Report data model."""
-    report_id: str
-    data: Any
-    generated_at: str
-    query: Dict[str, Any]
+    report: Optional[ReportCard] = None
 
 
 class HealthServices(TypedDict):

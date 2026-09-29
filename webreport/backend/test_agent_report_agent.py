@@ -388,6 +388,60 @@ class ReportAgentSystemTests(unittest.IsolatedAsyncioTestCase):
         stored = checkpoint["channel_values"]["messages"]
         self.assertEqual([message.type for message in stored], ["human", "ai"])
 
+    async def test_marked_report_handle_is_returned_but_text_only_has_none(self):
+        handle = {"tool": "get_all_teams", "args": {}}
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="", tool_calls=[tool_call("get_all_teams", {}, "data")]
+                ),
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[tool_call("mark_report", {"handle": handle}, "mark")],
+                ),
+                self.messages.AIMessage(content="Отчёт готов."),
+                self.messages.AIMessage(content="Просто ответ."),
+            ]
+        )
+        async with self.checkpoint.AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            system, service = self.make_system(saver, model=model)
+            service.results["get_all_teams"] = []
+            marked = await system.process_user_request("Покажи команды", "marked-thread")
+            text_only = await system.process_user_request("Привет", "text-only-thread")
+
+        self.assertEqual(marked["report_handle"], handle)
+        self.assertIsNone(text_only["report_handle"])
+
+    async def test_report_mark_tool_error_keeps_success_without_handle(self):
+        model = ScriptedModel(
+            [
+                self.messages.AIMessage(
+                    content="",
+                    tool_calls=[
+                        tool_call(
+                            "mark_report",
+                            {"handle": {"tool": "unknown_tool", "args": {}}},
+                            "invalid-mark",
+                        )
+                    ],
+                ),
+                self.messages.AIMessage(content="Обычный ответ."),
+            ]
+        )
+        system, _ = self.make_system(self.memory.InMemorySaver(), model=model)
+
+        response = await system.process_user_request("Покажи данные", "failed-mark-thread")
+
+        tool_messages = [
+            message
+            for message in model.requests[1]
+            if isinstance(message, self.messages.ToolMessage)
+        ]
+        self.assertEqual(len(tool_messages), 1)
+        self.assertTrue(tool_messages[0].content.startswith("Tool error:"))
+        self.assertTrue(response["success"])
+        self.assertIsNone(response["report_handle"])
+
     async def test_marked_report_is_freshly_materialized(self):
         handle = {"tool": "get_all_teams", "args": {}}
         model = ScriptedModel(

@@ -40,6 +40,7 @@ def success(
     *,
     reasoning: str | None,
     verdict: str | None = None,
+    report_handle: dict[str, object] | None = None,
 ) -> ReportResponse:
     return {
         "success": True,
@@ -49,6 +50,7 @@ def success(
         "message": message,
         "reasoning": reasoning,
         "verdict": verdict,
+        "report_handle": report_handle,
     }
 
 
@@ -69,4 +71,5 @@ def failure(
         "data": None,
         "reasoning": reasoning,
         "verdict": verdict,
+        "report_handle": None,
     }

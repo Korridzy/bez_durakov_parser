@@ -299,13 +299,16 @@ class ReportAgentSystem:
         query_trace = trace(turn_messages)
         payload = result["report_payload"]
         data = None
+        report_handle = None
         if payload is not None:
             name, args = _parse_handle(payload)
             data = await self._registry.execute_response(name, args)
+            report_handle = {"tool": name, "args": args}
         return success(
             extract_text(turn_messages[-1].content),
             query_trace,
             data,
             reasoning=current_turn_reasoning(result["messages"]),
             verdict=result.get("scope_verdict"),
+            report_handle=report_handle,
         )

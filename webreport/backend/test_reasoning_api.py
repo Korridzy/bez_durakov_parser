@@ -317,6 +317,13 @@ class TestChatResponseShape(_MainImports, unittest.TestCase):
         self.assertIn("reasoning", dumped)
         self.assertIsNone(dumped["reasoning"])
 
+    def test_model_dump_always_contains_report(self):
+        """Given no report, When dumped, Then the key is present and None."""
+        dumped = self._response().model_dump()
+
+        self.assertIn("report", dumped)
+        self.assertIsNone(dumped["report"])
+
     def test_model_dump_json_is_null_when_absent(self):
         """Given no reasoning, When serialized, Then JSON carries an explicit null."""
         payload = json.loads(self._response().model_dump_json())
