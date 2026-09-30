@@ -19,7 +19,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { cancelRun, createChat, getChat, sendMessage } from "../api/client";
 import { ApiError } from "../api/types";
 import { ReportsProvider } from "../reports/ReportsContext";
-import { ReportsPanel } from "../reports/ReportsPanel";
+import { ChatLayout, ReportsToggle } from "../layout/ChatLayout";
 import type { ThinkingPhase } from "../thinking/ThinkingMark";
 import { NEW_CHAT_ID } from "./ChatList";
 import { Composer } from "./Composer";
@@ -268,6 +268,7 @@ export function ChatView({ chatId, onChatsChanged }: ChatViewProps) {
         </div>
         <div className="chat-composer-bar">
           <div className="chat-column">
+            <ReportsToggle count={state.reports.length} />
             {awaitingRetry ? (
               <div className="chat-notice is-retry" role="alert">
                 <span>{CONNECTION_RETRY_TEXT}</span>
@@ -326,12 +327,7 @@ export function ChatView({ chatId, onChatsChanged }: ChatViewProps) {
       refreshToken={state.completedRun?.request_id ?? null}
       highlightReportId={state.completedRun?.response?.report?.id ?? null}
     >
-      <div className="chat-view">
-        <section className="chat-main" aria-label="Диалог">
-          {main}
-        </section>
-        <ReportsPanel />
-      </div>
+      <ChatLayout>{main}</ChatLayout>
     </ReportsProvider>
   );
 }

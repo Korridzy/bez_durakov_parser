@@ -74,10 +74,13 @@
 
   /* Layout. */
   --chat-column-max: 768px;
+  --chat-column-min: 24rem;
   --sidebar-width: 280px;
   --reports-panel-width: 360px;
   --header-height: 3.25rem;
   --narrow-breakpoint: 900px;
+  --drawer-max-height: 70dvh;
+  --saved-list-narrow-height: 32dvh;
 
   /* Motion. */
   --duration-fast: 120ms;
@@ -97,7 +100,7 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-body);
@@ -107,7 +110,8 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -166,7 +170,8 @@ p {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
 }
 
 .app-header {
@@ -177,6 +182,7 @@ p {
   align-items: center;
   gap: var(--space-6);
   min-height: var(--header-height);
+  flex-shrink: 0;
   padding: 0 var(--space-4);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
@@ -208,9 +214,6 @@ p {
   text-decoration: none;
   font-weight: var(--weight-medium);
   border-bottom: 2px solid transparent;
-  transition:
-    color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .app-tab:hover {
@@ -223,9 +226,11 @@ p {
 }
 
 .app-main {
-  display: flex;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 /* Placeholder page content until the feature todos fill the routes. */
@@ -249,6 +254,20 @@ p {
   .app-header {
     gap: var(--space-4);
     padding: 0 var(--space-3);
+  }
+
+  .app-brand {
+    display: none;
+  }
+
+  .app-tabs {
+    min-width: 0;
+    flex-shrink: 1;
+    gap: 0;
+  }
+
+  .app-tab {
+    padding-inline: var(--space-2);
   }
 
   .page {
@@ -306,20 +325,6 @@ p {
   stroke-dasharray: 72 28;
   transform: rotate(250deg);
   opacity: 0.5;
-}
-
-/* Slow counter-rotating arcs with an opacity pulse; CSS keyframes only. */
-
-.thinking-mark.is-animated .thinking-mark__arc--outer {
-  animation: thinking-turn-cw var(--thinking-duration) ease-in-out infinite;
-}
-
-.thinking-mark.is-animated .thinking-mark__arc--middle {
-  animation: thinking-turn-ccw var(--thinking-duration) ease-in-out infinite;
-}
-
-.thinking-mark.is-animated .thinking-mark__arc--inner {
-  animation: thinking-pulse var(--thinking-duration) ease-in-out infinite;
 }
 
 @keyframes thinking-turn-cw {
@@ -437,7 +442,7 @@ p {
 
 .report-params__list {
   display: grid;
-  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: var(--space-2) var(--space-4);
   margin: 0;
 }
@@ -491,7 +496,6 @@ p {
   border-radius: var(--radius-md);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .report-button:hover {
@@ -560,6 +564,8 @@ p {
 }
 
 .report-select {
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-1) var(--space-2);
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
@@ -581,7 +587,6 @@ p {
 
 .report-chart__bar {
   fill: currentColor;
-  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .report-chart__bar:hover {
@@ -649,7 +654,9 @@ p {
 /* ChatList */
 
 .chats-layout {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -668,10 +675,6 @@ p {
   font-weight: var(--weight-medium);
   line-height: var(--leading-tight);
   cursor: pointer;
-  transition:
-    background-color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
 }
 
 .button:disabled {
@@ -722,9 +725,6 @@ p {
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition:
-    background-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
 }
 
 .icon-button:hover {
@@ -735,13 +735,12 @@ p {
 /* Sidebar frame */
 
 .chat-sidebar {
-  position: sticky;
-  top: var(--header-height);
+  position: relative;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   width: var(--sidebar-width);
-  height: calc(100vh - var(--header-height));
+  height: 100%;
   min-height: 0;
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
@@ -911,7 +910,6 @@ p {
 
 .chat-row-kebab {
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .chat-row:hover .chat-row-kebab,
@@ -1020,25 +1018,10 @@ p {
   }
 }
 
-/* Narrow screens: stack the list above the conversation so nothing overflows
-   horizontally; the drawer behaviour arrives with the responsive layout todo. */
+/* The sidebar is an overlay at this breakpoint, not another document row. */
 @media (max-width: 900px) {
   .chats-layout {
-    flex-direction: column;
-  }
-
-  .chat-sidebar {
-    position: static;
-    width: 100%;
-    height: auto;
-    max-height: 40vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .chat-sidebar.is-collapsed {
-    flex-direction: row;
-    justify-content: flex-start;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1055,13 +1038,12 @@ p {
 /* List column: same sticky frame as the chats sidebar. */
 
 .saved-list {
-  position: sticky;
-  top: var(--header-height);
+  position: relative;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   width: var(--saved-list-width);
-  height: calc(100vh - var(--header-height));
+  height: 100%;
   min-height: 0;
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
@@ -1243,6 +1225,8 @@ p {
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
   padding: var(--space-6) var(--space-6) var(--space-10);
 }
 
@@ -1282,8 +1266,7 @@ p {
   color: var(--color-accent);
 }
 
-/* Narrow screens: stack the list above the preview so nothing overflows
-   horizontally; the drawer behaviour arrives with the responsive layout todo. */
+/* Saved reports keep their independent list and preview scroll regions. */
 @media (max-width: 900px) {
   .saved-layout {
     flex-direction: column;
@@ -1293,7 +1276,7 @@ p {
     position: static;
     width: 100%;
     height: auto;
-    max-height: 40vh;
+    max-height: var(--saved-list-narrow-height);
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
   }
@@ -1314,13 +1297,13 @@ p {
 /* ReportsPanel */
 
 .reports-panel {
-  position: sticky;
-  top: var(--header-height);
+  position: relative;
   display: flex;
   flex-shrink: 0;
   width: var(--reports-panel-current, var(--reports-panel-width));
   min-width: var(--reports-panel-width);
-  height: calc(100vh - var(--header-height));
+  max-width: min(50vw, calc(100vw - var(--sidebar-width) - var(--chat-column-min)));
+  height: 100%;
   min-height: 0;
   background: var(--color-surface);
   border-left: 1px solid var(--color-border);
@@ -1335,7 +1318,6 @@ p {
   margin-left: calc(-1 * var(--space-1));
   cursor: col-resize;
   touch-action: none;
-  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .reports-panel__handle::after {
@@ -1442,9 +1424,6 @@ p {
   border-left: 3px solid transparent;
   border-radius: var(--radius-md);
   background: var(--color-surface-raised);
-  transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .report-card:hover,
@@ -1457,7 +1436,6 @@ p {
   border-color: var(--color-accent);
   border-left-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
-  animation: report-card-arrive var(--duration-base) var(--ease-standard);
 }
 
 @keyframes report-card-arrive {
@@ -1612,25 +1590,10 @@ p {
   }
 }
 
-/* Narrow screens: full width, no drag handle; the drawer arrives with the responsive layout todo. */
 @media (max-width: 900px) {
-  .reports-panel {
-    position: static;
-    width: 100%;
-    min-width: 0;
-    height: auto;
-    max-height: 60vh;
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .reports-panel__handle {
-    display: none;
-  }
-
   .reports-fullscreen {
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
     border-radius: 0;
   }
 
@@ -1644,7 +1607,10 @@ p {
 /* ChatView */
 
 .chat-view {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -1655,7 +1621,7 @@ p {
   flex: 1;
   flex-direction: column;
   min-width: 0;
-  min-height: calc(100vh - var(--header-height));
+  min-height: 0;
 }
 
 /* Conversation and composer share one centered column with identical padding. */
@@ -1669,6 +1635,8 @@ p {
 
 .chat-scroll {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: var(--space-6) 0 var(--space-4);
 }
 
@@ -1829,9 +1797,6 @@ p {
   font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
-  transition:
-    background-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
 }
 
 .msg__report-chip:hover {
@@ -1963,6 +1928,7 @@ p {
   position: sticky;
   bottom: 0;
   z-index: 5;
+  flex-shrink: 0;
   padding: var(--space-2) 0 var(--space-4);
   background: var(--color-bg);
 }
@@ -2010,7 +1976,6 @@ p {
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: var(--shadow-sm);
-  transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
 .composer:focus-within {
@@ -2058,10 +2023,6 @@ p {
 }
 
 @media (max-width: 900px) {
-  .chat-view {
-    flex-direction: column;
-  }
-
   .chat-main {
     min-height: 0;
   }
@@ -2080,5 +2041,214 @@ p {
 
   .composer__hint {
     display: none;
+  }
+}
+
+/* Responsive surfaces keep their children mounted: resizing never restarts
+   report requests, loses an open preview, or resets the sidebar search. */
+
+.sidebar-content {
+  height: 100%;
+  min-height: 0;
+}
+
+.drawer-surface.is-inline {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.is-inline > .drawer {
+  position: static;
+  width: auto;
+  height: 100%;
+  overflow: visible;
+}
+
+.drawer-surface:not(.is-inline) {
+  position: absolute;
+  inset: 0 0 var(--composer-height, 0px);
+  z-index: 20;
+  pointer-events: none;
+}
+
+.drawer-surface[hidden] {
+  display: none;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--color-overlay);
+  pointer-events: auto;
+}
+
+.drawer-surface:not(.is-inline) > .drawer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: min(var(--drawer-max-height), 100%);
+  max-height: 100%;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+
+.drawer__head {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.drawer__title {
+  font-weight: var(--weight-semibold);
+}
+
+.drawer__head .button {
+  font-size: var(--text-sm);
+}
+
+.reports-toggle {
+  width: 100%;
+  margin-bottom: var(--space-2);
+}
+
+@media (max-width: 1199px) {
+  .chat-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drawer--reports .reports-panel {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: auto;
+    border-left: 0;
+  }
+
+  .reports-panel__handle {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .drawer-surface--sidebar:not(.is-inline) {
+    position: fixed;
+    inset: var(--header-height) 0 0;
+    z-index: 30;
+  }
+
+  .drawer-surface--sidebar:not(.is-inline) > .drawer {
+    top: 0;
+    width: min(var(--sidebar-width), calc(100% - var(--space-8)));
+    height: 100%;
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  }
+
+  .drawer--sidebar .sidebar-content {
+    flex: 1;
+  }
+
+  .drawer--sidebar .chat-sidebar {
+    width: 100%;
+    border: 0;
+  }
+
+  .drawer--sidebar .chat-sidebar-head {
+    display: none;
+  }
+
+  .drawer--sidebar .chat-sidebar-tools {
+    padding-top: var(--space-3);
+  }
+}
+
+/* Motion is opt-in. Drawers open immediately; the existing progress mark and
+   control feedback only move when the user has no reduced-motion preference. */
+@media (prefers-reduced-motion: no-preference) {
+  .app-tab {
+    transition:
+      color var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .button {
+    transition:
+      background-color var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
+  }
+
+  .icon-button,
+  .msg__report-chip {
+    transition:
+      background-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
+  }
+
+  .report-button,
+  .reports-panel__handle {
+    transition: background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .report-chart__bar,
+  .chat-row-kebab {
+    transition: opacity var(--duration-fast) var(--ease-standard);
+  }
+
+  .report-card {
+    transition:
+      border-color var(--duration-fast) var(--ease-standard),
+      box-shadow var(--duration-fast) var(--ease-standard);
+  }
+
+  .composer {
+    transition: border-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .report-card.is-highlighted {
+    animation: report-card-arrive var(--duration-base) var(--ease-standard);
+  }
+
+  .thinking-mark.is-animated .thinking-mark__arc--outer {
+    animation: thinking-turn-cw var(--thinking-duration) ease-in-out infinite;
+  }
+
+  .thinking-mark.is-animated .thinking-mark__arc--middle {
+    animation: thinking-turn-ccw var(--thinking-duration) ease-in-out infinite;
+  }
+
+  .thinking-mark.is-animated .thinking-mark__arc--inner {
+    animation: thinking-pulse var(--thinking-duration) ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none;
+    transition: none;
+    scroll-behavior: auto;
   }
 }

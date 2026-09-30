@@ -11,16 +11,20 @@ import {
 import { ChatList } from "./chats/ChatList";
 import { ChatView } from "./chats/ChatView";
 import { SavedReportsPage } from "./saved/SavedReportsPage";
+import { SidebarLayout, SidebarSurface, SidebarToggle, useSidebarLayout } from "./layout/SidebarLayout";
 
 function ChatsPage() {
   const { chatId } = useParams();
+  const { narrow } = useSidebarLayout();
   // The sidebar reloads its list whenever the conversation created a chat or
   // finished a run (title, last message and report count change server-side).
   const [chatsVersion, setChatsVersion] = useState(0);
   const onChatsChanged = useCallback(() => setChatsVersion((n) => n + 1), []);
   return (
     <div className="chats-layout">
-      <ChatList selectedChatId={chatId} refreshKey={chatsVersion} />
+      <SidebarSurface>
+        <ChatList selectedChatId={chatId} refreshKey={chatsVersion} drawer={narrow} />
+      </SidebarSurface>
       <ChatView chatId={chatId} onChatsChanged={onChatsChanged} />
     </div>
   );
@@ -28,8 +32,10 @@ function ChatsPage() {
 
 export function AppShell() {
   return (
+    <SidebarLayout>
     <div className="app-shell">
       <header className="app-header">
+        <SidebarToggle />
         <p className="app-brand">Отчёты по данным</p>
         <nav className="app-tabs" aria-label="Разделы">
           <NavLink className="app-tab" to="/chats">
@@ -51,6 +57,7 @@ export function AppShell() {
         </Routes>
       </main>
     </div>
+    </SidebarLayout>
   );
 }
 

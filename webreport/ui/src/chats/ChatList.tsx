@@ -364,9 +364,11 @@ export interface ChatListProps {
   selectedChatId: string | undefined;
   /** Any change of this value (after mount) reloads the list, e.g. after a run finished. */
   refreshKey?: number;
+  /** Mobile drawers always show the full list without changing desktop collapse. */
+  drawer?: boolean;
 }
 
-export function ChatList({ selectedChatId, refreshKey }: ChatListProps) {
+export function ChatList({ selectedChatId, refreshKey, drawer = false }: ChatListProps) {
   const navigate = useNavigate();
   const chats = useChats();
   const [open, setOpen] = useSidebarOpen();
@@ -465,7 +467,7 @@ export function ChatList({ selectedChatId, refreshKey }: ChatListProps) {
     }
   };
 
-  if (!open) {
+  if (!open && !drawer) {
     return (
       <nav className="chat-sidebar is-collapsed" aria-label="Чаты">
         <button
@@ -498,7 +500,7 @@ export function ChatList({ selectedChatId, refreshKey }: ChatListProps) {
         <h2 className="chat-sidebar-heading">
           Чаты
         </h2>
-        <button
+        {!drawer ? <button
           type="button"
           className="icon-button"
           aria-label="Скрыть список чатов"
@@ -506,7 +508,7 @@ export function ChatList({ selectedChatId, refreshKey }: ChatListProps) {
           onClick={() => setOpen(false)}
         >
           <PanelIcon open={true} />
-        </button>
+        </button> : null}
       </div>
 
       <div className="chat-sidebar-tools">
