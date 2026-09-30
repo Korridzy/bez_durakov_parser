@@ -292,7 +292,7 @@ describe("ChatList", () => {
     await settle();
 
     expect(renameChat).toHaveBeenCalledWith("c1", "Сезон 2026");
-    expect(screen.getByRole("link", { name: /Сезон 2026/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Сезон 2026/ })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Новое название чата" })).toBeNull();
   });
 

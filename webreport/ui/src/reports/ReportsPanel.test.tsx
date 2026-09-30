@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -136,6 +136,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -1988,6 +1989,7 @@ describe("ReportsPanel: a gone report (404 or missing from a newer list of this 
     listChatReports.mockResolvedValue([r2]);
 
     await user.click(screen.getByRole("button", { name: "Повторить" }));
+    await screen.findByRole("status");
 
     expectClosedWithNotice();
     expect(screen.getByTestId("highlight")).toBeEmptyDOMElement();
@@ -2486,7 +2488,12 @@ describe("ReportsPanel bookmark timeline: own and foreign changes x responses", 
     ]);
   });
 
-  it.each(cases.map((c) => [c.name, c] as const))("%s", async (_name, c) => {
+  it.each(
+    cases.map((c) => [
+      `initially ${c.initial ? "saved" : "unsaved"} | ${c.name}`,
+      c,
+    ] as const),
+  )("%s", async (_name, c) => {
     await runTimeline(c.initial, c.steps);
   });
 });
