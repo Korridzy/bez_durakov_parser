@@ -97,7 +97,7 @@ make test-proxy-contract         # Prove the LiteLLM Langfuse contract offline
 make clean      # Remove __pycache__, .pyc files
 ```
 
-The `make test` chain includes `test_request_context.py`, `test_agent_correlation.py`, `test_archive_store.py`, `test_archive_api.py`, and `test_archive_cli.py`; it also runs the SQLite and PostgreSQL acceptance lanes plus `make test-proxy-contract`.
+The `make test` chain includes `test_request_context.py`, `test_agent_correlation.py`, `test_archive_store.py`, `test_archive_api.py`, `test_archive_cli.py`, `test_chat_store.py`, `test_runs.py`, `test_chat_routes.py`, and `test_report_routes.py`; it also runs the SQLite and PostgreSQL acceptance lanes plus `make test-proxy-contract`.
 
 ## NOTES
 

@@ -894,19 +894,30 @@ class TestAPI(unittest.TestCase):
         print(f"✅ API health check passed: {data.get('status')}")
 
     def test_openapi_lists_only_the_surviving_paths(self):
-        """Given the deleted endpoints, When the schema is read, Then four paths remain."""
+        """The schema lists exactly the legacy and new API paths."""
         main_module = importlib.import_module("main")
 
         self.assertEqual(
             sorted(main_module.app.openapi()["paths"]),
             [
                 "/api/chat",
+                "/api/chats",
+                "/api/chats/{chat_id}",
+                "/api/chats/{chat_id}/cancel",
+                "/api/chats/{chat_id}/messages",
+                "/api/chats/{chat_id}/reports",
+                "/api/chats/{chat_id}/status",
                 "/api/clear/{session_id}",
                 "/api/history/{session_id}",
+                "/api/reports/{report_id}",
+                "/api/reports/{report_id}/saved",
+                "/api/reports/{report_id}/update",
+                "/api/runs/{request_id}",
+                "/api/saved-reports",
                 "/health",
             ],
         )
-        print("✅ API surface: exactly the four surviving paths")
+        print("✅ API surface: exactly the 15 supported paths")
 
     def test_openapi_json_documents_an_optional_scope_verdict(self):
         """Given the served schema, When it is fetched, Then ChatResponse lists scope_verdict."""
@@ -1371,11 +1382,7 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
 
     async def test_two_requests_keep_same_session_pinned_until_both_finish(self):
         first_release = asyncio.Event()
-        second_release = asyncio.Event()
-        agent = _LifecycleAgent(
-            releases={"first": first_release, "second": second_release},
-            expected_starts=2,
-        )
+        agent = _LifecycleAgent(releases={"first": first_release}, expected_starts=1)
         self.main.agent_system = agent
 
         first = asyncio.create_task(
@@ -1385,24 +1392,20 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
                 {"message": "first", "session_id": "shared"},
             )
         )
-        second = asyncio.create_task(
-            self._request(
-                "POST",
-                "/api/chat",
-                {"message": "second", "session_id": "shared"},
-            )
-        )
         await asyncio.wait_for(agent.all_started.wait(), timeout=1)
-        self.assertEqual(self.main.pinned["shared"], 2)
+        second_status, second_body = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "second", "session_id": "shared"},
+        )
+        self.assertEqual(second_status, 409)
+        self.assertEqual(second_body["detail"], "Чат занят, дождитесь ответа")
+        self.assertEqual(agent.calls, [("first", "shared")])
+        self.assertEqual(self.main.pinned["shared"], 1)
 
         first_release.set()
         first_status, _ = await first
         self.assertEqual(first_status, 200)
-        self.assertEqual(self.main.pinned["shared"], 1)
-
-        second_release.set()
-        second_status, _ = await second
-        self.assertEqual(second_status, 200)
         self.assertNotIn("shared", self.main.pinned)
 
     async def test_simultaneous_admissions_never_double_pick_or_overshoot(self):
