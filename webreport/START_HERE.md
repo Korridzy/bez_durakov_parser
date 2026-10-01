@@ -27,7 +27,7 @@ make start
 ## 📋 Что было создано
 
 ### 🏗️ Архитектура (SOA)
-- ✅ **Frontend** - Streamlit UI с двумя представлениями (Чат и Отчёт)
+- ✅ **Frontend** - React/nginx UI с вкладками «Чаты» и «Сохранённые отчёты»
 - ✅ **Backend** - FastAPI REST API
 - ✅ **Agents** - LangGraph ReAct agent над инструментами, найденными в модуле оператора
 - ✅ **Модуль инструментов** - модуль из `dataset.tools_module`, получающий движок от backend
@@ -46,7 +46,15 @@ webreport/
 │   ├── backend/agents/report_runtime.py
 │   ├── backend/agent/toolmodule.py
 │   ├── ../bd_shared/tools/bez_durakov.py
-│   └── frontend/main.py       - Streamlit
+│   ├── backend/chat_store.py - Чаты, сообщения, runs, отчёты
+│   ├── backend/runs.py       - Фоновые запросы и отмена
+│   ├── backend/chat_routes.py
+│   ├── backend/report_routes.py
+│   └── ui/src/               - React/TypeScript
+│       ├── App.tsx           - Навигация
+│       ├── chats/            - Список и разговор
+│       ├── reports/          - Панель и предпросмотр
+│       └── saved/            - Закладки и Update
 ├── 📥 Data collector
 │   ├── data_collector/entrypoint.py
 │   └── data_collector/fetch_pipeline.py
@@ -64,7 +72,8 @@ webreport/
 ### 💬 Чат с AI-агентом
 - Ввод требований на естественном языке
 - Автоматическая интерпретация запросов
-- История диалога
+- Сохранение разговоров после перезагрузки, поиск, переименование и удаление
+- Остановка активного запроса
 
 **Примеры запросов:**
 ```
@@ -78,10 +87,14 @@ webreport/
 - Таблицы с данными
 - Графики и метрики
 - Экспорт в CSV
-- Интерактивные элементы
+- Параметры исходного инструмента и дата генерации
+- Закладки и Update с неизменными аргументами, без модели
 
 ### 🔌 REST API
-- `/api/chat` - диалог с агентом
+- `/api/chats` - список, поиск и создание чатов
+- `/api/chats/{id}/messages`, `/status`, `/cancel` - фоновый запрос и остановка
+- `/api/saved-reports`, `/api/reports/{id}/update` - закладки и Update
+- `/api/chat` - совместимый синхронный маршрут
 - `/api/history/{session_id}` - история диалога
 - `/api/clear/{session_id}` - очистка истории
 - `/health` - готовность сервиса
@@ -106,14 +119,14 @@ webreport/
 ## 🛠️ Технологии
 
 - **Python 3.11+**
-- **Streamlit** - UI framework
+- **React 19 + TypeScript 5 + Vite 6**, nginx раздаёт UI и проксирует `/api/`
 - **FastAPI** - REST API framework  
 - **LangGraph** - ReAct agent и checkpointed threads
 - **LiteLLM** - internal model proxy `litellm:4000`
 - **SQLAlchemy** - ORM (из основного проекта)
 - **Pandas** - Data processing
 - **MySQL, PostgreSQL или SQLite** - база набора данных (из bd_shared/config.toml)
-- **SQLite**. Состояние агента и отдельный архив разговоров находятся в `../vm/backend/checkpoints`
+- **SQLite**. Состояние агента, отдельный архив разговоров и chats.db находятся в `../vm/backend/checkpoints`
 
 Backend при запуске выполняет глубокий LiteLLM probe. Без доступной модели процесс остаётся запущенным и отвечает 503, а каждая следующая попытка чата повторяет проверку один раз. LiteLLM не публикует host port, он доступен только на `litellm:4000` внутри сети. Поддерживается только один backend replica.
 
@@ -130,13 +143,18 @@ make restart       # Перезапуск после обеих проверок
 make validate-knowledge # Проверить папку знаний
 make validate-tools     # Проверить модуль инструментов оператора
 make test          # Тесты, включая обе приёмочные полосы
+make test-ui       # UI образ, Vitest и TypeScript/Vite
+make test-e2e-setup # Playwright image и npm-зависимости в Docker
+make test-e2e      # Офлайн Playwright с API stub
 make logs          # Логи
 ```
 
+UI собран в nginx образе без монтирования исходников. После UI изменений нужен `make restart`. Node и Chromium на хосте для UI тестов не нужны.
+
 ### Проверка
 ```bash
-python3 validate_setup.py  # Валидация установки
-python3 backend/test_system.py     # Тесты системы
+poetry run python validate_setup.py  # Валидация установки
+make test     # Тесты системы
 ```
 
 ### Остановка
@@ -150,9 +168,8 @@ make stop          # Через Make
 ## 🔍 Валидация
 
 ```bash
-$ python3 validate_setup.py
+$ poetry run python validate_setup.py
 
-✅ Passed: 33/33 checks
 🎉 All checks passed! System is ready to use.
 ```
 
@@ -237,7 +254,9 @@ Backend не содержит запросов к набору данных. О�
    - `backend/agent/toolmodule.py`
    - `backend/agents/report_runtime.py`
    - `backend/main.py`
-   - `frontend/main.py`
+   - `backend/chat_store.py`, `backend/runs.py`
+   - `backend/chat_routes.py`, `backend/report_routes.py`
+   - `ui/src/App.tsx` и каталоги `ui/src/chats/`, `reports/`, `saved/`
 
 ---
 

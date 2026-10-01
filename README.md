@@ -130,7 +130,7 @@ $ python four_buckets.py
 
 ### Web Report System
 
-Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и Streamlit. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000` и хранит состояние диалогов в service-local SQLite checkpoint store: `../vm/backend/checkpoints`.
+Проект включает веб-систему для генерации отчётов с LangGraph ReAct агентом, FastAPI и React/nginx. Backend обращается к внутреннему LiteLLM proxy по адресу `litellm:4000`. В `../vm/backend/checkpoints` находятся три независимых SQLite хранилища: память агента `checkpoints.db`, архив оператора `conversations.db` и пользовательские чаты, сообщения, запуски и отчёты `chats.db`. При `DATASET=<name>` файлы получают суффикс `-<name>`.
 
 При запуске backend выполняет глубокую проверку LiteLLM. Если модель недоступна, процесс остаётся запущенным, но отказывается отвечать, и `/health` вместе с `/api/chat` возвращают 503. Каждая следующая попытка чата повторяет проверку один раз, и первый успешный результат собирает агента и отвечает на этот же запрос. WebReport поддерживает только один экземпляр backend, горизонтальное масштабирование backend не поддерживается.
 
@@ -143,9 +143,11 @@ $ make webreport-start
 ```
 
 После запуска по умолчанию доступны:
-- **Frontend** (Streamlit UI): http://localhost:28501
+- **Frontend** (React/nginx UI): http://localhost:28501
 - **Backend API**: http://localhost:28000
 - **API документация**: http://localhost:28000/docs
+
+Вкладка «Чаты» позволяет искать и открывать разговоры после перезагрузки, останавливать запросы и просматривать несколько отчётов. «Сохранённые отчёты» содержит закладки; «Обновить» повторяет исходный инструмент с зафиксированными аргументами без обращения к модели. Все посетители видят общие чаты и отчёты, авторизации нет.
 
 Фактические порты берутся из секции `[webreport]` в `bd_shared/config.toml` и выводятся командой запуска.
 
@@ -162,6 +164,8 @@ $ make webreport-stop
 ```bash
 $ make restart
 ```
+
+React UI поставляется внутри nginx образа, без монтирования исходников. После изменений только UI тоже нужен `make restart`. Из `webreport/` доступны `make test-ui` (Vitest и сборка образа), `make test-e2e-setup` и `make test-e2e` (офлайн Playwright в Docker, Node и Chromium на хосте не нужны).
 
 #### Только база данных
 
@@ -203,4 +207,4 @@ $ make logs SERVICE=data_collector
 - [Описание ORM](./doc/ORM.md)
 - [Описание структуры данных](./doc/bd_game.md) для хранения полной информации об игре. Её возвращает функция `Database.get_game_data()`.
 - [Код примера анализа](./examples/four_buckets.py)
-- [db_helpers](./db_helpers.py)
+- [db_helpers](./bd_shared/db_helpers.py)

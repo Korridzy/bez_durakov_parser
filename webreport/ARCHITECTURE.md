@@ -4,64 +4,35 @@
 
 Система построена на основе **сервис-ориентированной архитектуры (SOA)** и состоит из нескольких независимых компонентов, взаимодействующих через чётко определённые интерфейсы.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        USER INTERFACE                           │
-│                      (Streamlit Frontend)                       │
-│  ┌──────────────────┐              ┌──────────────────┐        │
-│  │   Chat View      │              │   Report View    │        │
-│  │  💬 Диалог с AI  │◄────────────►│  📊 Визуализация │        │
-│  └──────────────────┘              └──────────────────┘        │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTP/REST
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         REST API                                │
-│                      (FastAPI Backend)                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │ Chat API     │  │ History API  │  │ Health API   │         │
-│  │ /api/chat    │  │ /api/history │  │ /health      │         │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘         │
-└─────────┼──────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  BACKEND, ONE REPLICA ONLY                       │
-│  Startup: one read-only engine, then the operator tool module    │
-│  Without a reachable model the backend refuses to serve (503)    │
-│                                                                 │
-│  LangGraph ReAct graph over discovered tools ──┐                │
-│                                                 │               │
-│  SQLite checkpoint store                        ▼               │
-│  ../vm/backend/checkpoints            operator tool module      │
-│  persists LangGraph thread state       (dataset.tools_module)   │
-└───────────────────────────┬─────────────────────┼───────────────┘
-                            │ HTTP model calls    │ read-only queries
-                            ▼                     ▼
-                 ┌──────────────────┐  ┌─────────────────────────┐
-                 │ LiteLLM proxy    │  │ MySQL, PostgreSQL or    │
-                 │ litellm:4000     │  │ SQLite via SQLAlchemy   │
-                 │ internal only    │  └─────────────────────────┘
-                 └──────────────────┘
+```text
+Браузер: React UI (Чаты / Сохранённые отчёты)
+    |
+nginx :8501, SPA assets из образа, /api/ proxy
+    |
+FastAPI :8000, chat_routes.py / report_routes.py / legacy API
+    |                          |
+RunRegistry (runs.py)           Update: replay tool + args, без модели
+    |                          |
+LangGraph + scope gate         Модуль инструментов оператора
+    |                          |
+LiteLLM litellm:4000            Read-only dataset engine
+
+Три независимых SQLite файла backend, один экземпляр:
+checkpoints.db       conversations.db       chats.db
+память LangGraph     архив оператора        чаты, сообщения, runs, reports
 ```
 
 ## Компоненты системы
 
-### 1. Frontend (Streamlit)
-**Файл**: `frontend/main.py`
+### 1. Frontend (React + nginx)
 
-**Ответственность**:
-- Отображение пользовательского интерфейса
-- Управление двумя представлениями (чат и отчёт)
-- Взаимодействие с пользователем
-- Отправка запросов к REST API
-- Визуализация данных (таблицы, графики)
+**Файлы**: `ui/src/App.tsx`, `ui/src/chats/`, `ui/src/reports/`, `ui/src/saved/`, `ui/nginx.conf`.
 
-**Ключевые функции**:
-- `render_chat_view()` - отображение чата
-- `render_report_view()` - отображение отчёта
-- `send_chat_message()` - отправка сообщений в API
-- `get_conversation_history()` - получение истории
+React 19 + TypeScript + Vite отображает вкладки «Чаты» и «Сохранённые отчёты». URL `/chats/:chatId` открывает разговор, `/saved/:reportId` открывает сохранённый отчёт. Список поддерживает поиск, создание, переименование и удаление. Чат содержит Markdown ответы, свёрнутые рассуждения, composer с отправкой и остановкой и панель нескольких отчётов.
+
+`useRunPolling.ts` опрашивает статус активного запуска раз в секунду, при ошибке соединения интервал увеличивается до трёх секунд. Перезагрузка получает transcript и активный run с backend, а не из памяти страницы. До 900 px боковые панели становятся drawers; при reduced motion индикатор статичен.
+
+nginx раздаёт собранные assets, возвращает SPA для клиентских URL и проксирует `/api/` на `backend:8000`. Источники UI не монтируются в контейнер. После UI изменений нужен `make restart`; `make test-ui` собирает образ с Vitest и TypeScript/Vite, `make test-e2e-setup` и `make test-e2e` обслуживают офлайн Playwright в Docker.
 
 ### 2. Backend (FastAPI)
 **Файл**: `backend/main.py`
@@ -73,7 +44,11 @@
 - Координация между агентами и сервисами
 
 **Основные endpoints**:
-- `POST /api/chat` - обработка сообщений пользователя
+- `/api/chats` - создание, поиск, чтение, переименование и удаление чатов
+- `/api/chats/{id}/messages`, `/status`, `/cancel` - фоновые запросы
+- `/api/chats/{id}/reports`, `/api/reports/{id}`, `/api/saved-reports` - отчёты и закладки
+- `POST /api/reports/{id}/update` - повтор инструмента с исходными аргументами
+- `POST /api/chat` - совместимая обёртка, ожидающая фонового запроса
 - `GET /api/history/{session_id}` - получение истории диалога
 - `POST /api/clear/{session_id}` - очистка истории диалога
 - `GET /health` - готовность сервиса
@@ -127,7 +102,17 @@ Backend хранит состояние LangGraph по thread ID в локаль
 
 Рядом находится отдельный SQLite архив `../vm/backend/checkpoints/conversations.db`. Он записывает допущенные ходы чата независимо от checkpoint store. TTL, LRU, `/api/clear` и перезапуск не удаляют завершённые строки архива.
 
-Оба SQLite хранилища рассчитаны на одну backend replica. Горизонтальное масштабирование backend не поддерживается. Подробности схемы и хранения находятся в [ARCHIVE.md](ARCHIVE.md).
+Все три backend-owned SQLite хранилища рассчитаны на одну backend replica. Горизонтальное масштабирование backend не поддерживается. Подробности схемы и хранения находятся в [ARCHIVE.md](ARCHIVE.md).
+
+### 4.1. Хранилище чатов и отчётов
+
+**Файлы**: `backend/chat_store.py`, `backend/runs.py`, `backend/chat_routes.py`, `backend/report_routes.py`, `backend/api_errors.py`.
+
+`[webreport].chats_db_path` задаёт `/data/chats.db`, `BD_CHATS_DB_PATH` переопределяет его; DATASET задаёт `chats-<name>.db`. SQLite WAL содержит отдельные таблицы `chats`, `messages`, `runs`, `reports`, без TTL и без таблиц в checkpoint или archive файлах. `messages.reasoning` сохраняется вместе с transcript независимо от настройки и срока reasoning в архиве.
+
+RunRegistry допускает один активный run на чат. При успешном ответе с report handle сообщение, отчёт и терминальное состояние публикуются одной транзакцией. Текстовый ответ, отказ или отмена не создают отчёт. Отмена до публикации сохраняет «Запрос отменён» и продолжает тот же checkpoint thread; уже завершённый результат не заменяется отменой. После перезапуска незавершённые runs становятся `interrupted` с «Ответ прерван перезапуском сервера» и не запускаются повторно. После TTL/LRU следующий вопрос восстанавливает до двадцати успешных пар вопрос/ответ из transcript.
+
+Закладка меняет `saved_at` одного отчёта, а не создаёт копию. Update обновляет его данные, дату и версию в обоих представлениях. Удаление чата удаляет сообщения, runs и несохранённые отчёты; сохранённые остаются с `chat_id=null`. `/api/clear` удаляет checkpoint, сообщения и runs, но сохраняет сам чат и все отчёты. Архив ни один из этих маршрутов не меняет.
 
 ### 5. Модуль инструментов оператора
 **Файл**: задаётся ключом `dataset.tools_module`. Для этого развёртывания —
@@ -166,7 +151,9 @@ Backend хранит состояние LangGraph по thread ID в локаль
 
 ### 7. Логирование и корреляция
 
-Все процессы явно инициализируют общий конвейер `structlog` и `logging`. Он добавляет сведения о сервисе, среде и версии к структурированным записям.
+Python процессы явно инициализируют общий конвейер `structlog` и `logging`. Он добавляет сведения о сервисе, среде и версии к структурированным записям.
+
+nginx пишет собственные access/error logs, React не ведёт серверный журнал. `run_id` связывает записи фонового запуска с chats.db.
 
 `X-Request-ID` связывает вызов фронтенда, обработку backend и записи запроса. Из него выводится `trace_id`. Идентификатор из 32 строчных шестнадцатеричных символов сохраняется, другой идентификатор получает первые 32 символа SHA-256 хеша.
 
@@ -176,43 +163,22 @@ Backend хранит состояние LangGraph по thread ID в локаль
 
 ## Потоки данных
 
-### Поток 1: Генерация отчёта
+### Поток 1: Запрос, публикация и отмена
 
-```
-1. Пользователь вводит требования в чат
-   ↓
-2. Фронтенд создаёт `X-Request-ID` и отправляет POST /api/chat
-   ↓
-3. Бэкенд принимает или создаёт идентификатор, возвращает его в ответе и связывает контекст запроса
-   ↓
-4. Бэкенд передаёт запрос проверке области набора данных при загруженной папке знаний
-   ↓
-5. Проверка области передаёт запрос агенту либо завершает несвязанный или неясный запрос собственным ответом
-   ↓
-6. Агент LangGraph ReAct выбирает инструмент из найденных на объекте оператора
-   ↓
-7. Реестр вызывает соответствующий метод модуля инструментов
-   ↓
-8. Метод обращается к базе через внедрённый движок, доступный только для чтения
-   ↓
-9. База данных возвращает данные
-   ↓
-10. Данные преобразуются в DataFrame
-   ↓
-11. Результат возвращается через API
-   ↓
-12. Фронтенд отображает отчёт
-```
+1. UI создаёт чат через `POST /api/chats`, если нужно, и отправляет вопрос с 32-hex `request_id` в `POST /api/chats/{id}/messages`.
+2. Registry проверяет модель, admission и занятость. Принятый вопрос и `running` run записываются в chats.db; HTTP ответ 202 не ждёт модель.
+3. Фоновая задача записывает архив, вызывает scope gate при наличии знаний и LangGraph над инструментами оператора.
+4. Ответ и, при наличии помеченного handle, отчёт сохраняются вместе с терминальным run. Публичный Run не включает строки данных; UI получает их через `GET /api/reports/{id}`.
+5. UI опрашивает `GET /api/chats/{id}/status` и после завершения перечитывает разговор и карточки отчётов.
+6. «Остановить» вызывает `POST /api/chats/{id}/cancel`. Пока задача завершается, состояние `cancelling`; при отмене до публикации появляется «Запрос отменён», без отчёта. Закрытие вкладки не заменяет cancel.
 
-### Поток 2: Просмотр истории
+### Поток 2: Повторное открытие
 
-```
-1. Пользователь переключается на представление отчёта
-   ↓
-2. Frontend использует сохранённые данные из session_state
-   ↓
-3. Данные визуализируются (таблицы, графики)
-```
+`GET /api/chats?q=...` ищет название и сохранённый текст сообщений. `GET /api/chats/{id}` возвращает transcript, карточки и status; UI восстанавливает разговор после reload даже при истёкшем checkpoint TTL. Сохранённые отчёты независимо от открытого чата читаются через `GET /api/saved-reports`.
+
+### Поток 3: Update
+
+`POST /api/reports/{id}/update` вызывает `tool_registry.execute_response(report["tool"], report["args"])` в текущем HTTP запросе, с таймаутом `agent_timeout_seconds`, без модели. Аргументы остаются исходными. Успех меняет data, generated_at и version; 502 `update_failed` возвращает прежний отчёт, а 409 `report_busy` означает занятый отчёт или активный run его чата. Удалённый чат не мешает Update сохранённого отчёта.
 
 ## Принципы архитектуры
 
@@ -227,7 +193,7 @@ Backend хранит состояние LangGraph по thread ID в локаль
 - Frontend, data collector и MySQL имеют собственные границы ответственности
 
 ### 3. Слоистая архитектура (Layered Architecture)
-- Presentation Layer (Streamlit)
+- Presentation Layer (React + nginx)
 - API Layer (FastAPI)
 - Business Logic Layer (Agents + Services)
 - Data Access Layer (db.py, db_helpers.py)
@@ -242,7 +208,7 @@ Backend хранит состояние LangGraph по thread ID в локаль
 
 | Компонент | Технология | Назначение |
 |-----------|------------|------------|
-| Frontend | Streamlit | UI framework |
+| Frontend | React 19 + TypeScript 5 + Vite 6, nginx | UI и proxy /api/ |
 | Backend | FastAPI | REST API framework |
 | Agents | LangGraph | ReAct graph and checkpointed threads |
 | Model client | ChatLiteLLM (`langchain-litellm`) | Calls the internal LiteLLM proxy and supports reasoning round-trip |
@@ -285,7 +251,7 @@ Backend хранит состояние LangGraph по thread ID в локаль
 ### Добавление новых функций
 1. **Новый инструмент**: добавить публичный метод с docstring и аннотациями в модуль из `dataset.tools_module`, затем проверить его командой `make validate-tools`
 2. **Новый endpoint**: Добавить в backend/main.py
-3. **Новая визуализация**: Добавить в frontend/main.py
+3. **Новая визуализация**: изменить `ui/src/reports/`, проверить `make test-ui` и `make test-e2e`
 4. **Другая база**: изменить `[database]` и `[dataset]` в конфигурации, код backend при этом не меняется
 
 ### Интеграция с другими системами
