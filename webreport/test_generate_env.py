@@ -115,7 +115,7 @@ class GenerateEnvTests(unittest.TestCase):
             self.assertFalse(frontend_env.exists())
 
     def test_generates_environments_without_obsolete_frontend_settings(self) -> None:
-        # Given: a config without the settings that only Streamlit consumed.
+        # Given: a config without the removed client's legacy settings.
         from bd_shared.config import get_config
 
         config = deepcopy(get_config())
