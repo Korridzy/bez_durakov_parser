@@ -41,7 +41,13 @@ COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.ym
 CASE_FILE ?=
 ARCHIVE_USER = $(if $(filter command line,$(origin USER)),$(strip $(USER)))
 
-.PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+# Keep this tag equal to the exact @playwright/test version in ui/package.json.
+PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.55.0-noble
+UI_E2E_RUN = docker run --rm --init --name sdae18-ui-e2e-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work --network none -e CI=1 $(PLAYWRIGHT_IMAGE)
+UI_E2E_RUN_WITH_NETWORK = docker run --rm --init --name sdae18-ui-e2e-setup-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work -e CI=1 $(PLAYWRIGHT_IMAGE)
+E2E_ARGS ?=
+
+.PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-ui test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -64,8 +70,9 @@ help:
 	@echo "  make test                - Run the offline backend suite (no running stack needed)"
 	@echo "  make test-proxy-contract - Prove the LiteLLM Langfuse contract offline"
 	@echo "  make test-postgres       - Run the acceptance lane against a throwaway PostgreSQL"
-	@echo "  make test-e2e-setup      - One-time: install frontend dev deps and Chromium (needs network)"
-	@echo "  make test-e2e            - Run the offline stub-backed Playwright lane"
+	@echo "  make test-ui             - Build the frontend image with Vitest and TypeScript checks"
+	@echo "  make test-e2e-setup      - One-time: pull Playwright and install npm deps in Docker (needs network)"
+	@echo "  make test-e2e            - Run offline Chromium in Docker, both motion projects (no host Node)"
 	@echo ""
 	@echo "Conversation archive:"
 	@echo "  make archive-list [SESSION=<id>] [USER=<id>] [LIMIT=<n>]"
@@ -185,14 +192,18 @@ test-postgres: generate-env
 	 $(COMPOSE_TEST) rm -fsv postgres_test; \
 	 exit $$status
 
+test-ui:
+	$(DOCKER_COMPOSE) build frontend
+
 test-e2e-setup:
-	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."
-	cd frontend && PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring poetry install --with dev --no-root && poetry run playwright install chromium
+	@echo "🎭 Installing the pinned Playwright image and npm dependencies in Docker..."
+	docker pull $(PLAYWRIGHT_IMAGE)
+	$(UI_E2E_RUN_WITH_NETWORK) npm ci --no-audit --no-fund
 	@echo "✅ e2e lane ready. Run: make test-e2e"
 
 test-e2e:
 	@echo "🎭 Running the offline stub-backed Playwright lane..."
-	cd frontend && PYTHONPATH="$(abspath ..)" poetry run pytest tests_e2e -x -q
+	$(UI_E2E_RUN) npx --no-install playwright test $(E2E_ARGS)
 	@echo ""
 
 clean:

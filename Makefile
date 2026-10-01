@@ -105,6 +105,7 @@ test:
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
 	run $(MAKE) -C webreport test; \
 	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py && poetry run python test_logging_jobs.py'; \
+	run $(MAKE) -C webreport test-ui; \
 	run $(MAKE) -C webreport test-e2e; \
 	if [ $$status -eq 0 ]; then \
 		echo ""; \
