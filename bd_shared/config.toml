@@ -20,9 +20,11 @@ allowed_origins = ["http://localhost:28501", "http://127.0.0.1:28501"]
 debug = false
 reload = true
 backend_debug_port = 5678
+# unused since #112; kept so existing overlays keep loading
 frontend_debug_port = 5679
 agent_recursion_limit = 8
 agent_timeout_seconds = 120
+# unused since #112; kept so existing overlays keep loading
 chat_request_timeout_seconds = 150
 agent_max_rows_per_fetch = 256
 agent_max_rows_per_run = 1024

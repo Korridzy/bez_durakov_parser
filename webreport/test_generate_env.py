@@ -91,10 +91,49 @@ class GenerateEnvTests(unittest.TestCase):
                     ".env",
                     ".env.backend",
                     ".env.data_collector",
-                    ".env.frontend",
                     ".env.litellm",
                     ".env.mysql",
                 },
+            )
+
+    def test_removes_a_stale_frontend_environment(self) -> None:
+        # Given: an environment file left by the former Python frontend.
+        source_script = Path(__file__).with_name("generate_env.py")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            script = Path(temp_directory) / source_script.name
+            _ = shutil.copyfile(source_script, script)
+            frontend_env = Path(temp_directory) / ".env.frontend"
+            _ = frontend_env.write_text(
+                "API_BASE_URL='http://obsolete:8000'\n",
+                encoding="utf-8",
+            )
+
+            # When: the operator regenerates the service environments.
+            _ = runpy.run_path(str(script), run_name="__main__")
+
+            # Then: obsolete frontend settings cannot survive the migration.
+            self.assertFalse(frontend_env.exists())
+
+    def test_generates_environments_without_obsolete_frontend_settings(self) -> None:
+        # Given: a config without the settings that only Streamlit consumed.
+        from bd_shared.config import get_config
+
+        config = deepcopy(get_config())
+        del config["webreport"]["chat_request_timeout_seconds"]
+        del config["webreport"]["frontend_debug_port"]
+        source_script = Path(__file__).with_name("generate_env.py")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            script = Path(temp_directory) / source_script.name
+            _ = shutil.copyfile(source_script, script)
+
+            # When: environment generation reads the reduced config.
+            with patch("bd_shared.config.get_config", return_value=config):
+                _ = runpy.run_path(str(script), run_name="__main__")
+
+            # Then: all remaining services get their environments.
+            self.assertEqual(
+                {path.name for path in Path(temp_directory).glob(".env*")},
+                self.EXPECTED_ENV_FILES,
             )
 
     @staticmethod
@@ -167,7 +206,7 @@ class GenerateEnvTests(unittest.TestCase):
             "BD_ENVIRONMENT": "development",
             "BD_APP_VERSION": "abc1234",
         }
-        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
+        for file_name in (".env.backend", ".env.data_collector"):
             with self.subTest(file_name=file_name):
                 for key, value in expected.items():
                     self.assertEqual(generated[file_name][key], value)
@@ -203,9 +242,7 @@ class GenerateEnvTests(unittest.TestCase):
         generated = self._generate_with_patched_git(error=FileNotFoundError("git"))
 
         # Then: application environments use the documented fallback version.
-        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
-            with self.subTest(file_name=file_name):
-                self.assertEqual(generated[file_name]["BD_APP_VERSION"], "unknown")
+        self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "unknown")
 
     def test_uses_unknown_app_version_when_git_returns_nonzero(self) -> None:
         # Given: the directory is not a git repository.
@@ -220,9 +257,7 @@ class GenerateEnvTests(unittest.TestCase):
         generated = self._generate_with_patched_git(result=completed)
 
         # Then: application environments use the documented fallback version.
-        for file_name in (".env.backend", ".env.data_collector", ".env.frontend"):
-            with self.subTest(file_name=file_name):
-                self.assertEqual(generated[file_name]["BD_APP_VERSION"], "unknown")
+        self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "unknown")
 
     def _generate_with_database_url(self, url: str) -> tuple[Path, dict[str, str]]:
         """Run the generator against a config whose database URL is `url`.
@@ -273,7 +308,6 @@ class GenerateEnvTests(unittest.TestCase):
         ".env",
         ".env.backend",
         ".env.data_collector",
-        ".env.frontend",
         ".env.litellm",
         ".env.mysql",
     }

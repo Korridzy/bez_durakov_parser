@@ -51,11 +51,11 @@ help:
 	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start DATASET=<name> - Start against the dataset in ../range/<name>"
 	@echo "                              (add DATASET_DIR=<abs path> when it lives elsewhere)"
-	@echo "  make start       - Start services with Docker Compose"
+	@echo "  make start       - Build the UI image and start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
 	@echo "  make validate-tools - Validate the configured operator tool module"
-	@echo "  make restart     - Validate, then recreate LiteLLM, backend, and frontend"
+	@echo "  make restart     - Validate, build the UI image, then recreate application services"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
 	@echo "  make rebuild     - Validate, rebuild, and restart services"
@@ -91,7 +91,7 @@ generate-env:
 
 start: generate-env
 	@echo "🐳 Starting services with Docker Compose..."
-	$(DOCKER_COMPOSE) up -d $(COMPOSE_SERVICES)
+	$(DOCKER_COMPOSE) up -d --build $(COMPOSE_SERVICES)
 	@echo ""
 	@echo "✅ Services started!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -139,7 +139,7 @@ test-live-scope-eval:
 
 restart: generate-env validate-knowledge validate-tools
 	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
-	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
+	$(DOCKER_COMPOSE) up -d --build --force-recreate litellm backend frontend
 	@echo "✅ Application services recreated"
 
 logs:
