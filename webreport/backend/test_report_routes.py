@@ -6,6 +6,9 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from datetime import date, datetime, time
+from decimal import Decimal
+from fastapi.encoders import jsonable_encoder
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
@@ -168,6 +171,42 @@ class ReportRouteTests(unittest.TestCase):
         self.assertTrue(any(self.fixture.report in entry for entry in captured.output))
         self.assertTrue(all("source offline" not in entry for entry in captured.output))
         self.assertEqual(self.fixture.agent.calls, 0)
+
+    def test_update_persists_mysql_scalar_rows_without_changing_existing_reports(self):
+        rows = [{"day": date(2026, 10, 1), "moment": datetime(2026, 10, 1, 12, 30),
+                 "clock": time(12, 30), "amount": Decimal("1234.5678"),
+                 "count": Decimal("100000"), "id": uuid4(), "label": b"rows"}]
+        other = asyncio.run(self.fixture.add_report(self.fixture.other_chat))
+        before = self.client.get(f"/api/reports/{other}").content
+        path = f"/api/reports/{self.fixture.report}"
+        with patch.object(self.fixture.service, "sample", return_value=rows):
+            response = self.client.post(f"{path}/update", json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"], jsonable_encoder(rows))
+        self.assertEqual(self.client.get(path).json()["data"], jsonable_encoder(rows))
+        self.assertEqual(self.client.get(f"/api/reports/{other}").content, before)
+        self.assertEqual(self.fixture.agent.calls, 0)
+
+    def test_update_persists_reviewer_date_key_repro(self):
+        rows = [{date(2026, 10, 1): Decimal("1.25")}]
+        path = f"/api/reports/{self.fixture.report}"
+        with patch.object(self.fixture.service, "sample", return_value=rows):
+            response = self.client.post(f"{path}/update", json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"], jsonable_encoder(rows))
+        self.assertEqual(self.client.get(path).json()["data"], jsonable_encoder(rows))
+        self.assertEqual(response.json()["version"], 2)
+
+    def test_collision_repro_update_rejects_and_keeps_previous_report(self):
+        rows = [{date(2026, 10, 1): object(), "2026-10-01": 1}]
+        path = f"/api/reports/{self.fixture.report}"
+        before = self.client.get(path).content
+        with patch.object(self.fixture.service, "sample", return_value=rows):
+            response = self.client.post(f"{path}/update", json={})
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["error"]["code"], "update_failed")
+        self.assertIn("TypeError", response.json()["error"]["message"])
+        self.assertEqual(self.client.get(path).content, before)
 
     def test_unknown_update_is_404_even_without_tool_service(self):
         main.tool_service = None

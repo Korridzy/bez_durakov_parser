@@ -5,6 +5,9 @@ import threading
 import sys
 import tempfile
 import unittest
+from datetime import date, datetime, time
+from decimal import Decimal
+from fastapi.encoders import jsonable_encoder
 from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -177,6 +180,55 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card['title'], 'Report')
         self.assertEqual((await self.store.get_report(card['id']))['data'], [{'n': 1}])
         self.assertEqual((await self.store.list_messages(self.chat))[-1]['reasoning'], 'thinking')
+
+    async def test_report_retains_mysql_scalar_rows(self):
+        rows = [{'day': date(2026, 10, 1), 'moment': datetime(2026, 10, 1, 12, 30),
+                 'clock': time(12, 30), 'amount': Decimal('1234.5678'),
+                 'count': Decimal('100000'), 'id': uuid4(), 'label': b'rows'}]
+        agent = FakeAgent()
+        agent.result = success('Report', [], rows, reasoning=None,
+                               report_handle={'tool': 'read_rows', 'args': {}})
+        self.agent = agent
+        run = await self.submit()
+        done = await self.finish(run['request_id'])
+        self.assertEqual(done['state'], 'succeeded', done)
+        response = done['response']
+        assert response is not None
+        self.assertEqual(response['data'], jsonable_encoder(rows))
+        report = await self.store.get_report(response['report']['id'])
+        assert report is not None
+        self.assertEqual(report['data'], jsonable_encoder(rows))
+
+    async def test_report_retains_reviewer_date_key_repro(self):
+        rows = [{date(2026, 10, 1): Decimal("1.25")}]
+        agent = FakeAgent()
+        agent.result = success("Report", [], rows, reasoning=None,
+                               report_handle={"tool": "read_rows", "args": {}})
+        self.agent = agent
+        run = await self.submit()
+        done = await self.finish(run["request_id"])
+        self.assertEqual(done["state"], "succeeded", done)
+        response = done["response"]
+        assert response is not None
+        report = await self.store.get_report(response["report"]["id"])
+        assert report is not None
+        self.assertEqual(response["data"], jsonable_encoder(rows))
+        self.assertEqual(report["data"], jsonable_encoder(rows))
+
+    async def test_collision_repro_fails_without_retaining_report(self):
+        rows = [{date(2026, 10, 1): object(), "2026-10-01": 1}]
+        agent = FakeAgent()
+        agent.result = success("Report", [], rows, reasoning=None,
+                               report_handle={"tool": "read_rows", "args": {}})
+        self.agent = agent
+        run = await self.submit()
+        done = await self.finish(run["request_id"])
+        self.assertEqual(done["state"], "failed", done)
+        error = done["error"]
+        assert error is not None
+        self.assertEqual(error["code"], "internal:TypeError")
+        self.assertIsNone(done["response"])
+        self.assertEqual(await self.store.list_reports(self.chat), [])
 
     async def test_cancel_wait_and_idempotence(self):
         run = await self.submit()

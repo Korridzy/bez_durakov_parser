@@ -15,6 +15,23 @@ import unicodedata
 from uuid import uuid4
 
 import aiosqlite
+from fastapi.encoders import jsonable_encoder
+
+
+def _dump_json(value: object) -> str:
+    """Encode whole payloads through FastAPI before any database transaction.
+
+    The store's protected set-rejection contract is the sole encoder override.
+    Unencodable objects raise TypeError; non-finite numbers fail strict JSON.
+    """
+    def reject_set(item: object) -> None:
+        raise TypeError(f"Object of type {type(item).__name__} is not JSON serializable")
+
+    try:
+        encoded = jsonable_encoder(value, custom_encoder={set: reject_set, frozenset: reject_set})
+    except ValueError as error:
+        raise TypeError("Payload is not JSON serializable") from error
+    return json.dumps(encoded, ensure_ascii=False, allow_nan=False)
 
 
 class Chat(TypedDict):
@@ -602,7 +619,7 @@ class ChatStore:
         self, request_id: str, state: str, response: Mapping[str, Any] | None,
         error: tuple[str, str] | None,
     ) -> None:
-        response_json = json.dumps(response, ensure_ascii=False) if response is not None else None
+        response_json = _dump_json(response) if response is not None else None
         code, message = error if error is not None else (None, None)
         async with self._transaction() as connection:
             cursor = await connection.execute(
@@ -690,10 +707,12 @@ class ChatStore:
         now = _now()
         report_id = report["id"] if report is not None else None
         if report is not None:
-            args_json = json.dumps(report["args"], ensure_ascii=False)
-            data_json = json.dumps(report["data"], ensure_ascii=False)
+            args_json = _dump_json(report["args"])
+            data_json = _dump_json(report["data"])
         else:
             args_json = data_json = None
+        # Validate the entire envelope too, not only the marked report's rows.
+        prepared_response = json.loads(_dump_json(response))
         async with self._transaction() as connection:
             cursor = await connection.execute(
                 "SELECT chat_id FROM runs WHERE request_id = ?", (request_id,)
@@ -707,16 +726,17 @@ class ChatStore:
             chat_id = run_row["chat_id"] if run_row is not None else None
             card: ReportCard | None = None
             if report is not None:
+                assert args_json is not None
                 card = ReportCard(
                     id=report["id"], chat_id=chat_id,
                     title=report["title"], question=report["question"],
-                    tool=report["tool"], args=report["args"],
+                    tool=report["tool"], args=json.loads(args_json),
                     generated_at=report["generated_at"], version=1,
                     saved_at=None,
                     row_count=len(report["data"]) if isinstance(report["data"], list) else None,
                     created_at=report.get("created_at", now),
                 )
-            response_json = json.dumps({**response, "report": card}, ensure_ascii=False)
+            response_json = _dump_json({**prepared_response, "report": card})
             updated = await connection.execute(
                 """UPDATE runs SET state = ?, response_json = ?, finished_at = ?
                    WHERE request_id = ? AND state IN ('running','cancelling')""",
@@ -810,7 +830,7 @@ class ChatStore:
     async def replace_report_data(
         self, report_id: str, data: object, generated_at: str, expected_version: int
     ) -> Report | None:
-        data_json = json.dumps(data, ensure_ascii=False)
+        data_json = _dump_json(data)
         row_count = len(data) if isinstance(data, list) else None
         async with self._transaction() as connection:
             cursor = await connection.execute(

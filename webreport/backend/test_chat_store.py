@@ -7,6 +7,15 @@ import sqlite3
 import tempfile
 from typing import Any
 import unittest
+from datetime import date, datetime, time
+from decimal import Decimal
+from enum import Enum
+from dataclasses import dataclass
+from itertools import product
+from pydantic import BaseModel
+from uuid import UUID
+from fastapi.encoders import jsonable_encoder
+from starlette.responses import JSONResponse
 
 from chat_store import (
     Chat, ChatBusy, ChatStore, Report, ReportNotFound, RequestConflict,
@@ -496,6 +505,56 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.existing_run(request_id))["state"], "running")
         await self.store.connection.set_trace_callback(None)
 
+    async def test_colliding_invalid_value_fails_before_sql_transaction(self) -> None:
+        _, request_id = await self.new_run()
+        assistant, response = self.answered()
+        rows = [{date(2026, 10, 1): object(), "2026-10-01": 1}]
+        assert self.store.connection is not None
+        statements: list[str] = []
+        await self.store.connection.set_trace_callback(statements.append)
+        try:
+            with self.assertRaises(TypeError):
+                await self.store.publish_result(
+                    request_id, assistant=assistant, report=self.marked_report(data=rows),
+                    response=response, state="succeeded",
+                )
+            self.assertEqual(statements, [])
+        finally:
+            await self.store.connection.set_trace_callback(None)
+        self.assertEqual((await self.existing_run(request_id))["state"], "running")
+
+    async def test_invalid_dictionary_keys_fail_before_sql_transaction(self) -> None:
+        _, request_id = await self.new_run()
+        assistant, response = self.answered()
+        assert self.store.connection is not None
+        statements: list[str] = []
+        await self.store.connection.set_trace_callback(statements.append)
+        try:
+            for key in (object(), (1, 2)):
+                bad = {key: 1}
+                operations = {
+                    "finish": lambda: self.store.finish_run(
+                        request_id, "succeeded", {"data": bad}, None),
+                    "publish_data": lambda: self.store.publish_result(
+                        request_id, assistant=assistant, report=self.marked_report(data=bad),
+                        response=response, state="succeeded"),
+                    "publish_args": lambda: self.store.publish_result(
+                        request_id, assistant=assistant,
+                        report={**self.marked_report(), "args": bad},
+                        response=response, state="succeeded"),
+                    "publish_response": lambda: self.store.publish_result(
+                        request_id, assistant=assistant, report=None,
+                        response={"data": bad}, state="succeeded"),
+                    "update": lambda: self.store.replace_report_data("missing", bad, "now", 1),
+                }
+                for name, operation in operations.items():
+                    with self.subTest(key=type(key).__name__, operation=name):
+                        with self.assertRaises(TypeError):
+                            await operation()
+                        self.assertEqual(statements, [])
+        finally:
+            await self.store.connection.set_trace_callback(None)
+
     async def test_reports_saved_order_and_idempotent_bookmark(self) -> None:
         chat_id, request_id = await self.new_run()
         assistant, response = self.answered()
@@ -583,6 +642,140 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.existing_report("report-1"))["chat_id"])
         self.assertEqual([card["id"] for card in await self.store.list_saved_reports()], ["report-1"])
         self.assertIsNone(await self.store.get_report("unsaved"))
+
+
+class JsonStorageTests(unittest.TestCase):
+    def test_collision_repro_rejects_unencodable_value(self):
+        from chat_store import _dump_json
+        rows = [{date(2026, 10, 1): object(), "2026-10-01": 1}]
+        with self.assertRaises(ValueError):
+            jsonable_encoder(rows)
+        with self.assertRaises(TypeError):
+            _dump_json(rows)
+
+    def test_systematic_key_value_collision_parity(self):
+        from chat_store import _dump_json
+
+        class Key(Enum):
+            LABEL = "text"
+            INT = 7
+            FLOAT = 1.25
+            BOOL = True
+            NULL = None
+
+        @dataclass
+        class Record:
+            day: date
+
+        class Model(BaseModel):
+            count: int
+
+        class Custom:
+            def __init__(self):
+                self.amount = Decimal("1.25")
+
+        key_pairs = [
+            ("str", "text", Key.LABEL), ("int", 7, Key.INT),
+            ("float", 1.25, Key.FLOAT), ("bool", True, Key.BOOL),
+            ("None", None, Key.NULL),
+            ("date", date(2026, 10, 1), "2026-10-01"),
+            ("datetime", datetime(2026, 10, 1, 12), "2026-10-01T12:00:00"),
+            ("Decimal", Decimal("1.25"), Key.FLOAT),
+            ("UUID", UUID(int=1), str(UUID(int=1))), ("Enum", Key.LABEL, "text"),
+        ]
+        encodable = {"record": Record(date(2026, 10, 1)), "model": Model(count=1),
+                     "custom": Custom(), "enum": Key.INT, "bytes": b"rows",
+                     "clock": time(12), "number": Decimal("1234.5678")}
+        for (kind, key, twin), invalid, collision, nested in product(
+            key_pairs, (False, True), (False, True), (False, True)
+        ):
+            value = object() if invalid else encodable
+            data = {key: value, twin if collision else "other": 1}
+            rows = [{"nested": [data]}] if nested else data
+            with self.subTest(key=kind, invalid=invalid, collision=collision, nested=nested):
+                try:
+                    encoded = jsonable_encoder(rows)
+                except (ValueError, TypeError):
+                    with self.assertRaises(TypeError):
+                        _dump_json(rows)
+                else:
+                    expected = json.dumps(encoded, ensure_ascii=False, allow_nan=False)
+                    self.assertEqual(
+                        json.loads(_dump_json(rows), object_pairs_hook=list),
+                        json.loads(expected, object_pairs_hook=list),
+                    )
+
+    def test_dictionary_keys_match_installed_fastapi_oracle(self):
+        from chat_store import _dump_json
+
+        class Key(Enum):
+            LABEL = "enum"
+            NUMBER = 7
+
+        keys = ["text", 7, 1.25, True, False, None, date(2026, 10, 1),
+                datetime(2026, 10, 1, 12), time(12), Decimal("1.25"),
+                Decimal("100000"), UUID(int=1), Key.LABEL, Key.NUMBER, b"rows"]
+        cases: list[tuple[str, object]] = [
+            (type(key).__name__ + ":" + repr(key), {key: Decimal("1.25")})
+            for key in keys]
+        cases.extend([
+            ("nested", {"rows": [{date(2026, 10, 1): {
+                UUID(int=1): [{Decimal("1.25"): datetime(2026, 10, 1, 12)}]}}]}),
+            ("collision", {date(2026, 10, 1): 1, "2026-10-01": 2}),
+            ("sqlalchemy_private", {"_sa_state": "private", "public": 1}),
+        ])
+        for label, rows in cases:
+            with self.subTest(case=label):
+                expected = json.loads(JSONResponse(jsonable_encoder(rows)).body)
+                self.assertEqual(json.loads(_dump_json(rows)), expected)
+
+    def test_rejected_dictionary_keys_remain_type_errors(self):
+        from chat_store import _dump_json
+
+        class Key(Enum):
+            DECIMAL = Decimal("1.25")
+
+        for key in (object(), (1, 2), Key.DECIMAL):
+            with self.subTest(key=type(key).__name__):
+                with self.assertRaises((ValueError, TypeError)):
+                    JSONResponse(jsonable_encoder({key: 1}))
+                with self.assertRaises(TypeError):
+                    _dump_json({key: 1})
+
+    def test_mysql_scalars_match_fastapi_and_keep_decimal_digits_numeric(self):
+        from chat_store import _dump_json
+        rows = [{"day": date(2026, 10, 1), "moment": datetime(2026, 10, 1, 12, 30),
+                 "clock": time(12, 30), "amount": Decimal("1234.5678"),
+                 "count": Decimal("100000"), "id": UUID(int=1), "label": b"rows",
+                 "text": "данные", "nested": [None, True, {"n": 1}]}]
+        encoded = _dump_json(rows)
+        self.assertEqual(json.loads(encoded), jsonable_encoder(rows))
+        self.assertIn("данные", encoded)
+        data = json.loads(encoded)[0]
+        self.assertEqual(str(data["amount"]), "1234.5678")
+        self.assertEqual(str(data["count"]), "100000")
+        self.assertIsInstance(data["amount"], float)
+        self.assertIsInstance(data["count"], int)
+
+    def test_arbitrary_objects_and_sets_remain_type_errors(self):
+        from chat_store import _dump_json
+        for value in (object(), {1, 2}):
+            with self.subTest(value=type(value).__name__), self.assertRaises(TypeError):
+                _dump_json({"bad": value})
+
+    def test_nonfinite_numbers_reject_like_http_json(self):
+        from chat_store import _dump_json
+        for value in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(value=value):
+                encoded = jsonable_encoder({"bad": value})
+                # FastAPI leaves floats alone; json.dumps defaults emit invalid
+                # JSON tokens. Starlette's actual HTTP renderer rejects them.
+                self.assertIn(json.dumps(encoded), ('{"bad": NaN}', '{"bad": Infinity}',
+                                                    '{"bad": -Infinity}'))
+                with self.assertRaises(ValueError):
+                    JSONResponse(encoded)
+                with self.assertRaises(ValueError):
+                    _dump_json(encoded)
 
 
 if __name__ == "__main__":

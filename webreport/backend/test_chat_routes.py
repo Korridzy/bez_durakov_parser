@@ -7,6 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, datetime, time
+from decimal import Decimal
+from fastapi.encoders import jsonable_encoder
+from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -22,7 +26,7 @@ class FakeAgent:
         self.release = asyncio.Event()
         self.release.set()
         self.calls = []
-        self.result = {
+        self.result: dict[str, Any] = {
             "success": True, "data": [{"game": 1}], "message": "# Игры",
             "query_info": [{"tool": "list_games", "args": {"limit": 1}}],
             "timestamp": "2026-09-29T00:00:00Z", "reasoning": "шаг",
@@ -117,6 +121,27 @@ class ChatRoutes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(f"/api/chats/{chat['id']}")).json()["error"]["code"], "not_found")
         self.assertEqual((await self.client.delete(f"/api/chats/{chat['id']}")).status_code, 404)
         self.assertEqual((await self.client.patch("/api/chats/unknown", json={"title": "x"})).status_code, 404)
+
+    async def test_legacy_and_new_run_data_have_identical_mysql_encoding(self):
+        rows = [{"day": date(2026, 10, 1), "moment": datetime(2026, 10, 1, 12, 30),
+                 "clock": time(12, 30), "amount": Decimal("1234.5678"),
+                 "count": Decimal("100000"), "id": uuid4(), "label": b"rows"}]
+        self.agent.result["data"] = rows
+        legacy = await self.client.post("/api/chat", json={"message": "rows"})
+        self.assertEqual(legacy.status_code, 200, legacy.text)
+        self.assertEqual(legacy.json()["data"], jsonable_encoder(rows))
+        chat_id, request_id = await self.create(), uuid4().hex
+        submitted = await self.client.post(f"/api/chats/{chat_id}/messages",
+                                          json={"request_id": request_id, "message": "rows"})
+        self.assertEqual(submitted.status_code, 202)
+        done = await self.finish(request_id)
+        self.assertEqual(done["state"], "succeeded", done)
+        report = await self.client.get(f"/api/reports/{done['response']['report']['id']}")
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(report.json()["data"], legacy.json()["data"])
+        self.assertEqual(done["response"]["data"], legacy.json()["data"])
+        public = await self.client.get(f"/api/runs/{request_id}")
+        self.assertIsNone(public.json()["response"]["data"])
 
     async def test_run_status_report_conflicts_and_recovery(self):
         chat_id = await self.create()
