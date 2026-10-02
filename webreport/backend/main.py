@@ -4,7 +4,8 @@ Provides REST API for chat and report generation.
 """
 from typing import Dict, Any, Literal, Optional, Protocol, TypedDict, TypeGuard, assert_never
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime
+from timestamps import utc_now
 import asyncio
 import importlib
 import logging
@@ -618,7 +619,7 @@ async def health_check(response: Response) -> HealthResponse:
 
     return {
         "status": "healthy" if llm_proxy_healthy else "degraded",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": utc_now(),
         "services": {
             "database": tool_service is not None,
             "agents": agent_system is not None,
@@ -691,7 +692,7 @@ async def chat(message: ChatMessage, response: Response):
             data=None,
             query_info=[],
             message=MODEL_UNAVAILABLE_MESSAGE,
-            timestamp=datetime.now().isoformat(),
+            timestamp=utc_now(),
             error="llm_proxy_unavailable",
         )
 
@@ -701,7 +702,7 @@ async def chat(message: ChatMessage, response: Response):
     try:
         if await chat_store.get_chat(session_id) is None:
             async with chat_store._transaction() as connection:
-                now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                now = utc_now()
                 cursor = await connection.execute(
                     "INSERT OR IGNORE INTO chats (id, title, search_text, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -721,7 +722,7 @@ async def chat(message: ChatMessage, response: Response):
         response.status_code = 503
         return ChatResponse(
             success=False, session_id=session_id, data=None, query_info=[],
-            message=MODEL_UNAVAILABLE_MESSAGE, timestamp=datetime.now().isoformat(),
+            message=MODEL_UNAVAILABLE_MESSAGE, timestamp=utc_now(),
             error="llm_proxy_unavailable",
         )
     except Overloaded as error:

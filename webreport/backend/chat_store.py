@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import aiosqlite
 from fastapi.encoders import jsonable_encoder
+from timestamps import normalize_timestamp, utc_now as _now
 
 
 def _dump_json(value: object) -> str:
@@ -111,10 +112,6 @@ class ChatNotFound(LookupError):
     """The requested chat does not exist."""
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def _searchable(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold()
 
@@ -140,7 +137,7 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
             or not timestamp.endswith("Z")
         ):
             raise ValueError("Invalid chat cursor")
-        return timestamp, chat_id
+        return normalize_timestamp(timestamp, timespec="microseconds"), chat_id
     except (ValueError, UnicodeError, binascii.Error) as error:
         raise ValueError("Invalid chat cursor") from error
 
@@ -164,6 +161,11 @@ class ChatStore:
                 await connection.execute("PRAGMA journal_mode=WAL")
                 await connection.execute("PRAGMA foreign_keys=ON")
                 await connection.execute("PRAGMA synchronous=NORMAL")
+                await connection.create_function(
+                    "utc_timestamp", 1,
+                    lambda value: normalize_timestamp(value, timespec="microseconds"),
+                    deterministic=True,
+                )
                 await connection.execute(
                     """CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, auto_title INTEGER NOT NULL DEFAULT 1 CHECK (auto_title IN (0,1)),
@@ -261,9 +263,9 @@ class ChatStore:
             "id": row["id"],
             "title": row["title"],
             "auto_title": bool(row["auto_title"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "last_message_at": row["last_message_at"],
+            "created_at": normalize_timestamp(row["created_at"]),
+            "updated_at": normalize_timestamp(row["updated_at"]),
+            "last_message_at": normalize_timestamp(row["last_message_at"]),
             "report_count": row["report_count"],
         }
 
@@ -297,7 +299,7 @@ class ChatStore:
             params.append(_searchable(q))
         if cursor is not None:
             timestamp, chat_id = _decode_cursor(cursor)
-            where.append("(chats.updated_at, chats.id) < (?, ?)")
+            where.append("(utc_timestamp(chats.updated_at), chats.id) < (?, ?)")
             params.extend((timestamp, chat_id))
         clause = " WHERE " + " AND ".join(where) if where else ""
         async with self._write_lock:
@@ -305,7 +307,7 @@ class ChatStore:
             result = await connection.execute(
                 """SELECT chats.id, title, auto_title, created_at, updated_at, last_message_at,
                           (SELECT COUNT(*) FROM reports WHERE chat_id = chats.id) AS report_count
-                   FROM chats""" + clause + " ORDER BY chats.updated_at DESC, chats.id DESC LIMIT ?",
+                   FROM chats""" + clause + " ORDER BY utc_timestamp(chats.updated_at) DESC, chats.id DESC LIMIT ?",
                 (*params, limit + 1),
             )
             try:
@@ -327,7 +329,7 @@ class ChatStore:
         clean = _title(title)
         async with self._transaction() as connection:
             cursor = await connection.execute(
-                "SELECT content FROM messages WHERE chat_id = ? ORDER BY created_at, id",
+                "SELECT content FROM messages WHERE chat_id = ? ORDER BY utc_timestamp(created_at), id",
                 (chat_id,),
             )
             try:
@@ -447,7 +449,7 @@ class ChatStore:
         async with self._write_lock:
             cursor = await self._require_connection().execute(
                 """SELECT id, request_id, role, content, reasoning, state, report_id, created_at
-                   FROM messages WHERE chat_id = ? ORDER BY created_at, id""",
+                   FROM messages WHERE chat_id = ? ORDER BY utc_timestamp(created_at), id""",
                 (chat_id,),
             )
             try:
@@ -460,7 +462,7 @@ class ChatStore:
                         "reasoning": row["reasoning"],
                         "state": row["state"],
                         "report_id": row["report_id"],
-                        "created_at": row["created_at"],
+                        "created_at": normalize_timestamp(row["created_at"]),
                     }
                     for row in await cursor.fetchall()
                 ]
@@ -495,17 +497,24 @@ class ChatStore:
 
     @staticmethod
     def _run(row: aiosqlite.Row) -> Run:
+        response = json.loads(row["response_json"]) if row["response_json"] is not None else None
+        if response is not None:
+            if "timestamp" in response:
+                response["timestamp"] = normalize_timestamp(response["timestamp"])
+            if response.get("report") is not None:
+                for field in ("created_at", "generated_at", "saved_at"):
+                    response["report"][field] = normalize_timestamp(response["report"].get(field))
         return {
             "request_id": row["request_id"],
             "chat_id": row["chat_id"],
             "state": row["state"],
-            "created_at": row["created_at"],
-            "finished_at": row["finished_at"],
+            "created_at": normalize_timestamp(row["created_at"]),
+            "finished_at": normalize_timestamp(row["finished_at"]),
             "error": (
                 {"code": row["error_code"], "message": row["error_message"]}
                 if row["error_code"] is not None else None
             ),
-            "response": json.loads(row["response_json"]) if row["response_json"] is not None else None,
+            "response": response,
         }
 
     @staticmethod
@@ -517,11 +526,11 @@ class ChatStore:
             "question": row["question"],
             "tool": row["tool"],
             "args": json.loads(row["args_json"]),
-            "generated_at": row["generated_at"],
+            "generated_at": normalize_timestamp(row["generated_at"]),
             "version": row["version"],
-            "saved_at": row["saved_at"],
+            "saved_at": normalize_timestamp(row["saved_at"]),
             "row_count": row["row_count"],
-            "created_at": row["created_at"],
+            "created_at": normalize_timestamp(row["created_at"]),
         }
 
     @classmethod
@@ -666,7 +675,7 @@ class ChatStore:
             cursor = await self._require_connection().execute(
                 """SELECT * FROM runs WHERE chat_id = ?
                    AND state NOT IN ('running','cancelling')
-                   ORDER BY created_at DESC, request_id DESC LIMIT 1""", (chat_id,)
+                   ORDER BY utc_timestamp(created_at) DESC, request_id DESC LIMIT 1""", (chat_id,)
             )
             try:
                 row = await cursor.fetchone()
@@ -678,7 +687,7 @@ class ChatStore:
         async with self._transaction() as connection:
             cursor = await connection.execute(
                 """SELECT request_id FROM runs WHERE boot_id != ?
-                   AND state IN ('running','cancelling') ORDER BY created_at, request_id""",
+                   AND state IN ('running','cancelling') ORDER BY utc_timestamp(created_at), request_id""",
                 (boot_id,),
             )
             try:
@@ -713,6 +722,8 @@ class ChatStore:
             args_json = data_json = None
         # Validate the entire envelope too, not only the marked report's rows.
         prepared_response = json.loads(_dump_json(response))
+        if "timestamp" in prepared_response:
+            prepared_response["timestamp"] = normalize_timestamp(prepared_response["timestamp"])
         async with self._transaction() as connection:
             cursor = await connection.execute(
                 "SELECT chat_id FROM runs WHERE request_id = ?", (request_id,)
@@ -731,10 +742,10 @@ class ChatStore:
                     id=report["id"], chat_id=chat_id,
                     title=report["title"], question=report["question"],
                     tool=report["tool"], args=json.loads(args_json),
-                    generated_at=report["generated_at"], version=1,
+                    generated_at=normalize_timestamp(report["generated_at"]), version=1,
                     saved_at=None,
                     row_count=len(report["data"]) if isinstance(report["data"], list) else None,
-                    created_at=report.get("created_at", now),
+                    created_at=normalize_timestamp(report.get("created_at", now)),
                 )
             response_json = _dump_json({**prepared_response, "report": card})
             updated = await connection.execute(
@@ -783,7 +794,7 @@ class ChatStore:
             cursor = await self._require_connection().execute(
                 """SELECT id, chat_id, title, question, tool, args_json, row_count,
                           version, generated_at, created_at, saved_at
-                   FROM reports WHERE chat_id = ? ORDER BY created_at DESC, id DESC""",
+                   FROM reports WHERE chat_id = ? ORDER BY utc_timestamp(created_at) DESC, id DESC""",
                 (chat_id,),
             )
             try:
@@ -796,7 +807,7 @@ class ChatStore:
             cursor = await self._require_connection().execute(
                 """SELECT id, chat_id, title, question, tool, args_json, row_count,
                           version, generated_at, created_at, saved_at
-                   FROM reports WHERE saved_at IS NOT NULL ORDER BY saved_at DESC, id DESC"""
+                   FROM reports WHERE saved_at IS NOT NULL ORDER BY utc_timestamp(saved_at) DESC, id DESC"""
             )
             try:
                 return [self._report_card(row) for row in await cursor.fetchall()]

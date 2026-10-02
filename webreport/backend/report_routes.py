@@ -1,7 +1,6 @@
 """Retained report endpoints; Update replays the stored tool handle without a model."""
 
 import asyncio
-from datetime import datetime, timezone
 import importlib
 import logging
 from weakref import WeakValueDictionary
@@ -11,6 +10,7 @@ from fastapi import APIRouter, Response
 from bd_shared.config import AGENT_TIMEOUT_SECONDS
 from api_errors import ApiError
 from chat_store import ReportNotFound
+from timestamps import utc_now
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ async def update_report(report_id: str):
                 runtime.tool_registry.execute_response(report["tool"], report["args"]),
                 AGENT_TIMEOUT_SECONDS,
             )
-            generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            generated_at = utc_now()
             updated = await store.replace_report_data(
                 report_id, data, generated_at, expected_version=report["version"]
             )

@@ -42,6 +42,160 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         assert chat is not None
         return chat
 
+    async def test_legacy_timestamps_normalize_without_rewriting_or_cursor_duplicates(self):
+        connection = self.store.connection
+        assert connection is not None
+        stamps = ("2026-01-01T00:00:00", "2026-01-01T00:00:00Z",
+                  "2026-01-01T00:00:00.000000Z", "2026-01-01T00:00:01")
+        for chat_id, stamp in zip(("c", "b", "a", "d"), stamps):
+            await connection.execute(
+                "INSERT INTO chats (id,title,search_text,created_at,updated_at,last_message_at) "
+                "VALUES (?, 'legacy', 'legacy', ?, ?, ?)", (chat_id, stamp, stamp, stamp))
+        await connection.commit()
+        all_items, _ = await self.store.list_chats(q="LEGACY")
+        self.assertEqual([item["id"] for item in all_items], ["d", "c", "b", "a"])
+        ids, cursor = [], None
+        while True:
+            items, cursor = await self.store.list_chats(q="legacy", limit=1, cursor=cursor)
+            ids.extend(item["id"] for item in items)
+            for item in items:
+                for field in ("created_at", "updated_at", "last_message_at"):
+                    value = item[field]
+                    assert value is not None
+                    self.assertTrue(value.endswith("Z"), item)
+            if cursor is None:
+                break
+            self.assertLessEqual(len(ids), 4, "cursor duplicated a legacy row")
+        self.assertEqual(ids, ["d", "c", "b", "a"])
+        self.assertEqual([row[0] for row in await self.rows(
+            "SELECT updated_at FROM chats ORDER BY id")], [stamps[2], stamps[1], stamps[0], stamps[3]])
+
+    async def test_legacy_nested_run_message_and_report_reads(self):
+        chat = await self.store.create_chat()
+        await self.insert_run(chat["id"], "legacy")
+        await self.report(chat["id"], "legacy-report", True)
+        connection = self.store.connection
+        assert connection is not None
+        naive = "2026-01-01T00:00:00"
+        response = {"timestamp": naive, "report": {
+            "created_at": naive, "generated_at": naive, "saved_at": naive}}
+        await connection.execute("UPDATE runs SET created_at=?, finished_at=?, response_json=?",
+                                 (naive, naive, json.dumps(response)))
+        await connection.execute("UPDATE reports SET created_at=?, generated_at=?, saved_at=?",
+                                 (naive, naive, naive))
+        await connection.commit()
+        await self.store.append_message(chat["id"], "legacy", "assistant", "legacy",
+                                        None, "succeeded", None)
+        await connection.execute("UPDATE messages SET created_at=?", (naive,))
+        await connection.commit()
+        run = await self.existing_run("legacy")
+        for field in ("created_at", "finished_at"):
+            self.assertEqual(run[field], naive + "Z")
+        response = run["response"]
+        assert response is not None
+        self.assertEqual(response["timestamp"], naive + "Z")
+        self.assertEqual(response["report"]["generated_at"], naive + "Z")
+        for report in (await self.existing_report("legacy-report"),
+                       (await self.store.list_reports(chat["id"]))[0],
+                       (await self.store.list_saved_reports())[0]):
+            for field in ("created_at", "generated_at", "saved_at"):
+                self.assertEqual(report[field], naive + "Z")
+        self.assertEqual((await self.store.list_messages(chat["id"]))[0]["created_at"], naive + "Z")
+
+    async def test_legacy_naive_and_offset_rows_preserve_the_correct_utc_instant(self):
+        chat = await self.store.create_chat()
+        connection = self.store.connection
+        assert connection is not None
+        for stored, expected in (
+            ("2026-10-01T10:00:00", "2026-10-01T10:00:00Z"),
+            ("2026-10-01T10:00:00+03:00", "2026-10-01T07:00:00Z"),
+        ):
+            with self.subTest(stored=stored):
+                await connection.execute(
+                    "UPDATE chats SET created_at=?, updated_at=?, last_message_at=? WHERE id=?",
+                    (stored, stored, stored, chat["id"]))
+                await connection.commit()
+                read = await self.existing_chat(chat["id"])
+                for field in ("created_at", "updated_at", "last_message_at"):
+                    self.assertEqual(read[field], expected)
+                self.assertEqual((await self.store.list_chats())[0][0]["updated_at"], expected)
+                self.assertEqual(await self.rows(
+                    "SELECT created_at,updated_at,last_message_at FROM chats WHERE id=?", (chat["id"],)),
+                    [(stored, stored, stored)])
+
+    def test_utc_timestamp_helper(self):
+        from timestamps import normalize_timestamp, utc_now
+        self.assertRegex(utc_now(), r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+        for source, expected in (
+            ("2026-01-01T03:00:00+03:00", "2026-01-01T00:00:00Z"),
+            ("2026-01-01T00:00:00", "2026-01-01T00:00:00Z"),
+            ("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+            (None, None), ("", ""), ("garbage", "garbage"),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(normalize_timestamp(source), expected)
+
+    async def test_malformed_legacy_timestamps_do_not_crash_reads(self):
+        chat = await self.store.create_chat()
+        connection = self.store.connection
+        assert connection is not None
+        for value in ("", "garbage"):
+            await connection.execute("UPDATE chats SET created_at=?, updated_at=?, last_message_at=NULL",
+                                     (value, value))
+            await connection.commit()
+            read = await self.existing_chat(chat["id"])
+            self.assertEqual(read["created_at"], value)
+            self.assertIsNone(read["last_message_at"])
+            self.assertEqual((await self.store.list_chats())[0][0]["updated_at"], value)
+
+    async def test_legacy_message_run_and_report_ordering_uses_utc_keys(self):
+        chat = await self.store.create_chat()
+        connection = self.store.connection
+        assert connection is not None
+        for row_id, stamp in (("c", "2026-01-01T00:00:00"),
+                              ("b", "2026-01-01T00:00:00Z"),
+                              ("a", "2026-01-01T00:00:00.000000Z")):
+            await self.insert_run(chat["id"], row_id)
+            await self.report(chat["id"], row_id, True)
+            message = await self.store.append_message(chat["id"], row_id, "assistant",
+                                                      row_id, None, "succeeded", None)
+            await connection.execute("UPDATE runs SET created_at=? WHERE request_id=?", (stamp, row_id))
+            await connection.execute("UPDATE reports SET created_at=?, saved_at=? WHERE id=?",
+                                     (stamp, stamp, row_id))
+            await connection.execute("UPDATE messages SET id=?, created_at=? WHERE id=?",
+                                     (row_id, stamp, message["id"]))
+            await connection.commit()
+        self.assertEqual([row["id"] for row in await self.store.list_messages(chat["id"])],
+                         ["a", "b", "c"])
+        self.assertEqual([row["id"] for row in await self.store.list_reports(chat["id"])],
+                         ["c", "b", "a"])
+        self.assertEqual([row["id"] for row in await self.store.list_saved_reports()],
+                         ["c", "b", "a"])
+        last = await self.store.last_run(chat["id"])
+        assert last is not None
+        self.assertEqual(last["request_id"], "c")
+
+    async def test_malformed_nested_timestamps_and_nullable_terminal_fields(self):
+        chat = await self.store.create_chat()
+        await self.insert_run(chat["id"], "odd")
+        await self.report(chat["id"], "odd-report", True)
+        connection = self.store.connection
+        assert connection is not None
+        for value in ("", "garbage"):
+            await connection.execute("UPDATE runs SET created_at=?, finished_at=NULL, response_json=?",
+                (value, json.dumps({"timestamp": value, "report": {
+                    "generated_at": value, "created_at": value, "saved_at": None}})))
+            await connection.execute("UPDATE reports SET generated_at=?, created_at=?, saved_at=NULL",
+                                     (value, value))
+            await connection.commit()
+            run = await self.existing_run("odd")
+            self.assertIsNone(run["finished_at"])
+            response = run["response"]
+            assert response is not None
+            self.assertEqual(response["timestamp"], value)
+            self.assertEqual(response["report"]["generated_at"], value)
+            self.assertEqual((await self.existing_report("odd-report"))["generated_at"], value)
+
     async def existing_run(self, request_id: str) -> Run:
         run = await self.store.get_run(request_id)
         assert run is not None

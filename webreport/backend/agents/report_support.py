@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from datetime import datetime
+from timestamps import utc_now
 
 from .report_contracts import (
     QueryTrace,
@@ -46,7 +46,7 @@ def success(
         "success": True,
         "query_info": query_info,
         "data": data,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": utc_now(),
         "message": message,
         "reasoning": reasoning,
         "verdict": verdict,
@@ -66,7 +66,7 @@ def failure(
         "success": False,
         "error": error,
         "message": message,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": utc_now(),
         "query_info": query_info or [],
         "data": None,
         "reasoning": reasoning,

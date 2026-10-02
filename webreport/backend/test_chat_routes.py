@@ -6,8 +6,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time as process_time
 import unittest
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from fastapi.encoders import jsonable_encoder
 from typing import Any
@@ -92,6 +93,138 @@ class ChatRoutes(unittest.IsolatedAsyncioTestCase):
     async def finish(self, request_id):
         self.agent.release.set()
         return await asyncio.wait_for(self.main.registry.wait(request_id), 5)
+
+    async def test_all_contract_timestamps_are_utc_z(self):
+        from agents.report_support import success
+        from agent.registry import ToolRegistry
+        from test_report_routes import SampleService
+
+        class TimestampAgent(FakeAgent):
+            async def process_user_request(self, message, session_id, history=()):
+                await super().process_user_request(message, session_id, history)
+                # Build the production timestamp during the run, within its request bounds.
+                return dict(success("report", [], [{"value": 1}], reasoning=None,
+                                    report_handle={"tool": "sample", "args": {"value": 1}}))
+
+        self.agent = TimestampAgent()
+        self.main.agent_system = self.agent
+        try:
+            with patch.dict(os.environ, {"TZ": "Pacific/Kiritimati"}):
+                process_time.tzset()
+                self.assertEqual(datetime.now().astimezone().utcoffset(), timedelta(hours=14))
+                with patch.object(self.main, "tool_registry", ToolRegistry(SampleService())):
+                    await self.timestamp_lifecycle()
+        finally:
+            # patch.dict has restored TZ, including its absence, before tzset runs.
+            process_time.tzset()
+
+    async def timestamp_lifecycle(self):
+        async def request(method, path, expected: int | tuple[int, ...] = 200, **kwargs):
+            before = datetime.now(timezone.utc)
+            response = await self.client.request(method, path, **kwargs)
+            after = datetime.now(timezone.utc)
+            self.assertIn(response.status_code, (expected,) if isinstance(expected, int) else expected,
+                          response.text)
+            return response.json(), (before, after)
+
+        # GET/list timestamps are historical: check the independently measured interval
+        # of their producing request, not the later read interval. No fixed CI allowance
+        # is needed: slow requests and terminal event waits expand the measured bounds.
+        objects = []
+        created, creation = await request("POST", "/api/chats", 201, json={})
+        chat_id = created["id"]
+        objects.append(("Chat", created, {field: creation for field in
+                                         ("created_at", "updated_at", "last_message_at")}))
+        request_id = uuid4().hex
+        submitted, submission = await request("POST", f"/api/chats/{chat_id}/messages", 202,
+            json={"request_id": request_id, "message": "report"})
+        objects.append(("Run", submitted, {"created_at": submission, "finished_at": submission}))
+        done = await self.finish(request_id)
+        publication = (submission[0], datetime.now(timezone.utc))
+        self.assertEqual(done["state"], "succeeded", done)
+        report_id = done["response"]["report"]["id"]
+        report, _ = await request("GET", f"/api/reports/{report_id}")
+        published_fields = {field: publication for field in ("created_at", "generated_at", "saved_at")}
+        objects.append(("Report", report, published_fields))
+        saved, saving = await request("PUT", f"/api/reports/{report_id}/saved", json={})
+        saved_fields = {**published_fields, "saved_at": saving}
+        objects.append(("ReportCard", saved, saved_fields))
+        updated, updating = await request("POST", f"/api/reports/{report_id}/update", json={})
+        updated_fields = {**saved_fields, "generated_at": updating}
+        objects.append(("Report", updated, updated_fields))
+        self.agent.started.clear()
+        self.agent.release.clear()
+        cancelled_id = uuid4().hex
+        started, starting = await request("POST", f"/api/chats/{chat_id}/messages", 202,
+            json={"request_id": cancelled_id, "message": "cancel"})
+        objects.append(("Run", started, {"created_at": starting, "finished_at": starting}))
+        await asyncio.wait_for(self.agent.started.wait(), 5)
+        active, _ = await request("GET", f"/api/chats/{chat_id}/status")
+        objects.append(("Run", active["active_run"], {"created_at": starting, "finished_at": starting}))
+        cancel, cancelling = await request("POST", f"/api/chats/{chat_id}/cancel", (200, 202),
+                                           json={"request_id": cancelled_id})
+        objects.append(("Run", cancel, {"created_at": starting, "finished_at": cancelling}))
+        cancelled = await asyncio.wait_for(self.main.registry.wait(cancelled_id), 5)
+        cancellation = (cancelling[0], datetime.now(timezone.utc))
+        self.assertEqual(cancelled["state"], "cancelled", cancelled)
+        chat_fields = {"created_at": creation, "updated_at": cancellation, "last_message_at": cancellation}
+        run_fields = {
+            request_id: {"created_at": submission, "finished_at": publication},
+            cancelled_id: {"created_at": starting, "finished_at": cancellation},
+        }
+        message_fields = {
+            (request_id, "user"): submission, (request_id, "assistant"): publication,
+            (cancelled_id, "user"): starting, (cancelled_id, "assistant"): cancellation,
+        }
+        detail, _ = await request("GET", f"/api/chats/{chat_id}")
+        objects.append(("Chat", detail["chat"], chat_fields))
+        objects.extend(("Message", row, {"created_at": message_fields[(row["request_id"], row["role"])]})
+                       for row in detail["messages"])
+        objects.extend(("ReportCard", row, updated_fields) for row in detail["reports"])
+        objects.append(("Run", detail["last_run"], run_fields[cancelled_id]))
+        for run_id in (request_id, cancelled_id):
+            run, _ = await request("GET", f"/api/runs/{run_id}")
+            objects.append(("Run", run, run_fields[run_id]))
+        status, _ = await request("GET", f"/api/chats/{chat_id}/status")
+        objects.append(("Run", status["last_run"], run_fields[cancelled_id]))
+        for path, kind in (("/api/chats", "Chat"),
+                           (f"/api/chats/{chat_id}/reports", "ReportCard"),
+                           ("/api/saved-reports", "ReportCard")):
+            body, _ = await request("GET", path)
+            objects.extend((kind, row, chat_fields if kind == "Chat" else updated_fields)
+                           for row in (body["items"] if kind == "Chat" else body))
+        fields = {
+            "Chat": ("created_at", "updated_at", "last_message_at"),
+            "Message": ("created_at",),
+            "Run": ("created_at", "finished_at"),
+            "ReportCard": ("created_at", "generated_at", "saved_at"),
+            "Report": ("created_at", "generated_at", "saved_at"),
+        }
+        nullable = {"last_message_at", "finished_at", "saved_at"}
+        def assert_timestamp(kind, field, value, bounds):
+            self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+            instant = datetime.fromisoformat(value)
+            self.assertEqual(instant.tzinfo, timezone.utc)
+            self.assertTrue(bounds[0] <= instant <= bounds[1],
+                            f"{kind}.{field} is not the actual UTC instant: "
+                            f"{value} outside [{bounds[0].isoformat()}, {bounds[1].isoformat()}]")
+
+        for kind, obj, windows in objects:
+            for field in fields[kind]:
+                with self.subTest(kind=kind, field=field, object_id=obj.get("id")):
+                    self.assertIn(field, obj)
+                    if obj[field] is None and field in nullable:
+                        continue
+                    assert_timestamp(kind, field, obj[field], windows[field])
+            if "started_at" in obj:
+                assert_timestamp(kind, "started_at", obj["started_at"], windows["created_at"])
+            if kind == "Run" and obj["response"] is not None:
+                assert_timestamp("Run.response", "timestamp", obj["response"]["timestamp"], publication)
+                if obj["response"]["report"] is not None:
+                    for field in fields["ReportCard"]:
+                        value = obj["response"]["report"][field]
+                        if value is not None or field not in nullable:
+                            assert_timestamp("Run.response.report", field, value, published_fields[field])
 
     async def test_crud_search_pagination_and_validation(self):
         blank = await self.client.post("/api/chats", json={"title": "  \n  "})
