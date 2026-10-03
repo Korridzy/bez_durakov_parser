@@ -14,14 +14,14 @@
   --color-border-strong: #b9b5ab;
   --color-text: #1d1c1a;
   --color-text-muted: #5f5c55;
-  --color-text-faint: #8f8b82;
+  --color-text-faint: #6b675f;
   --color-accent: #0f6b6b;
   --color-accent-strong: #0a4f4f;
   --color-accent-soft: #dcecea;
   --color-accent-contrast: #ffffff;
   --color-success: #2b7a3f;
   --color-success-soft: #dff1e3;
-  --color-warning: #9a6300;
+  --color-warning: #956000;
   --color-warning-soft: #fbefd3;
   --color-danger: #b23a3a;
   --color-danger-soft: #f8e1e1;
@@ -1835,7 +1835,7 @@ p {
 .markdown ol,
 .markdown blockquote,
 .markdown pre,
-.markdown table {
+.markdown .markdown__table-wrap {
   margin: 0 0 var(--space-3);
 }
 
@@ -1895,12 +1895,14 @@ p {
   color: var(--color-text-muted);
 }
 
-.markdown table {
-  display: block;
+.markdown .markdown__table-wrap {
   max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown table {
   border-collapse: collapse;
   font-size: var(--text-sm);
-  overflow-x: auto;
 }
 
 .markdown th,
@@ -1909,6 +1911,7 @@ p {
   border: 1px solid var(--color-border);
   text-align: left;
   vertical-align: top;
+  white-space: nowrap;
 }
 
 .markdown th {

@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { Message, ReportCard } from "../api/types";
@@ -19,6 +19,19 @@ const REASONING_PARTIAL_LABEL = "Рассуждения (неполные)";
 const EMPTY_TITLE = "Задайте вопрос по данным";
 const EMPTY_TEXT =
   "Ответы, рассуждения и отчёты этого чата сохранятся и будут доступны после перезагрузки.";
+
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div
+      className="markdown__table-wrap"
+      tabIndex={0}
+      role="region"
+      aria-label="Таблица, прокручивается по горизонтали"
+    >
+      <table>{children}</table>
+    </div>
+  ),
+};
 
 function UserBubble({ content }: { content: string }) {
   return (
@@ -60,7 +73,7 @@ function AssistantBlock({ message, reportTitle }: { message: Message; reportTitl
             {isMarker ? REASONING_PARTIAL_LABEL : REASONING_LABEL}
           </summary>
           <div className="msg__reasoning-body markdown">
-            <Markdown remarkPlugins={[remarkGfm]}>{reasoning}</Markdown>
+            <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{reasoning}</Markdown>
           </div>
         </details>
       )}
@@ -70,7 +83,7 @@ function AssistantBlock({ message, reportTitle }: { message: Message; reportTitl
         </p>
       ) : (
         <div className="msg__body markdown">
-          <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{message.content}</Markdown>
         </div>
       )}
       {message.report_id === null ? null : (

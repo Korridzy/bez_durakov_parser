@@ -273,6 +273,32 @@ afterEach(() => {
 });
 
 describe("ChatView history", () => {
+  it("exposes an answer table as a named keyboard-focusable region", async () => {
+    getChat.mockResolvedValue(detail({
+      messages: [message({
+        id: "m-table",
+        role: "assistant",
+        content: "| Команда | Игр |\n| --- | ---: |\n| Первая | 130 |",
+      })],
+    }));
+    renderView();
+    await settle();
+
+    const table = within(screen.getByRole("log")).getByRole("table");
+    const region = table.parentElement;
+    expect(region).toHaveAttribute("role", "region");
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveAttribute("aria-label", expect.stringMatching(/\S/));
+    expect(region).toHaveAccessibleName();
+    expect(region?.parentElement?.closest(
+      'button, a[href], input, select, textarea, summary, [tabindex], [role="button"], [role="link"]',
+    )).toBeNull();
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent))
+      .toEqual(["Команда", "Игр"]);
+    expect(within(table).getAllByRole("cell").map((cell) => cell.textContent))
+      .toEqual(["Первая", "130"]);
+  });
+
   it("renders the history with a collapsed reasoning expander above the answer and a report chip", async () => {
     renderView();
     await settle();
