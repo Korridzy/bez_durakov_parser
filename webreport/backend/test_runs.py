@@ -1,6 +1,10 @@
 """Lifecycle tests for durable background chat turns."""
 import asyncio
+import json
 import os
+import random
+import string
+import subprocess
 import threading
 import sys
 import tempfile
@@ -9,7 +13,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from fastapi.encoders import jsonable_encoder
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import structlog
@@ -23,7 +27,9 @@ from chat_store import ChatStore
 from session_store import SessionIndex
 from agents.report_support import success
 from runs import (RunRegistry, RunNotFound, InvalidRequest, ModelUnavailable,
-                  Overloaded, ChatBusy, RequestConflict)
+                  Overloaded, ChatBusy, RequestConflict, derive_report_title)
+import report_title
+from report_title_work import ParseWork
 
 
 class FakeAgent:
@@ -180,6 +186,436 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card['title'], 'Report')
         self.assertEqual((await self.store.get_report(card['id']))['data'], [{'n': 1}])
         self.assertEqual((await self.store.list_messages(self.chat))[-1]['reasoning'], 'thinking')
+
+    async def test_report_titles_strip_markdown(self):
+        cases = [
+            ('```csv\nкоманда,очки\nА,10\n```', 'Вопрос', 'команда,очки'),
+            ('~~~csv\nкоманда,очки\n~~~', 'Вопрос', 'команда,очки'),
+            ('| --- | :---: |\n| | |\n| **Команда** | `Очки` |',
+             'Вопрос', 'Команда Очки'),
+            ('---\n***\n___\n# Итоги сезона', 'Вопрос', 'Итоги сезона'),
+            ('> ## **Итоги** _сезона_', 'Вопрос', 'Итоги сезона'),
+            ('## Итоги сезона ##', 'Вопрос', 'Итоги сезона'),
+            ('- *Итоги* **сезона**', 'Вопрос', 'Итоги сезона'),
+            ('- [x] **Итоги сезона**', 'Вопрос', 'Итоги сезона'),
+            ('1. Итоги `сезона`', 'Вопрос', 'Итоги сезона'),
+            ('2) ~~Итоги~~ __сезона__', 'Вопрос', 'Итоги сезона'),
+            ('[Итоги](https://example.org) ![сезона](image.png)',
+             'Вопрос', 'Итоги сезона'),
+            ('<h2>Итоги <em>сезона</em></h2>', 'Вопрос', 'Итоги сезона'),
+            ('##\n> - ** **\nИтоги сезона', 'Вопрос', 'Итоги сезона'),
+            ('```csv\n```\n~~~\n~~~', 'Покажи итоги', 'Покажи итоги'),
+            ('| --- | --- |\n| | |\n---', 'Покажи итоги', 'Покажи итоги'),
+            ('\n \t\n', 'Покажи итоги', 'Покажи итоги'),
+            ('**\n__\n<em></em>', 'Покажи итоги', 'Покажи итоги'),
+            ('<b>Итоги &amp; очки</b>', 'Вопрос', 'Итоги & очки'),
+            ('**' + 'Я' * 121 + '**', 'Вопрос', 'Я' * 120),
+            ('```\n```', 'Ж' * 121, 'Ж' * 120),
+            ('Итоги team_name: -5, 2 * 3', 'Вопрос', 'Итоги team_name: -5, 2 * 3'),
+        ]
+        for answer, question, expected in cases:
+            with self.subTest(answer=answer):
+                agent = FakeAgent()
+                agent.result = success(answer, [], [{'n': 1}], reasoning='thinking',
+                                       report_handle={'tool': 'read_rows', 'args': {}})
+                self.agent = agent
+                run = await self.submit(message=question)
+                done = await self.finish(run['request_id'])
+                self.assertEqual(done['state'], 'succeeded', done)
+                response = done['response']
+                assert response is not None
+                card = response['report']
+                self.assertEqual(card['title'], expected)
+                report = await self.store.get_report(card['id'])
+                assert report is not None
+                self.assertEqual(report['title'], expected)
+                self.assertEqual(report['question'], question)
+                self.assertEqual(report['data'], [{'n': 1}])
+                self.assertEqual((await self.store.list_messages(self.chat))[-1]['content'], answer)
+
+    async def test_report_titles_reviewer_matrix(self):
+        # Exact 55-input oracle attached to the todo-25 gate review.
+        q = 'Покажи итоги'
+        cases = [
+            ('f3-csv', '```csv\nкоманда,очки\nА,10\n```', q, 'команда,очки'),
+            ('fence-table', '```csv\n| a | b |\n|---|---|\n|1|2|\n```', q, 'a b'),
+            ('tilde-fence', '~~~csv\nкоманда,очки\n~~~', q, 'команда,очки'),
+            ('fence-only', '```csv\n```\n~~~\n~~~', q, q),
+            ('table-first', '| a | b |\n|---|---|\n|1|2|', q, 'a b'),
+            ('separator-first', '|---|:---:|\n| | |\n| a | b |', q, 'a b'),
+            ('setext', 'Итоги\n=====\nbody', q, 'Итоги'),
+            ('setext-dashes', 'Итоги\n-----\nbody', q, 'Итоги'),
+            ('atx-h1', '# Итоги', q, 'Итоги'),
+            ('atx-h2', '## Итоги ##', q, 'Итоги'),
+            ('atx-h3', '### Итоги', q, 'Итоги'),
+            ('blockquote', '> Итоги', q, 'Итоги'),
+            ('dash-list', '- Итоги', q, 'Итоги'),
+            ('star-list', '* Итоги', q, 'Итоги'),
+            ('plus-list', '+ Итоги', q, 'Итоги'),
+            ('number-list', '1. Итоги', q, 'Итоги'),
+            ('number-paren', '2) Итоги', q, 'Итоги'),
+            ('checkbox-x', '- [x] Итоги', q, 'Итоги'),
+            ('checkbox-blank', '- [ ] Итоги', q, 'Итоги'),
+            ('bold', '**Итоги**', q, 'Итоги'),
+            ('italic', '*Итоги* _сезона_', q, 'Итоги сезона'),
+            ('strike', '~~Итоги~~', q, 'Итоги'),
+            ('inline-code', '`Итоги`', q, 'Итоги'),
+            ('link', '[Итоги](https://example.org)', q, 'Итоги'),
+            ('image', '![Итоги](image.png)', q, 'Итоги'),
+            ('autolink-alone', '<https://example.org/results>', q, 'https://example.org/results'),
+            ('autolink-in-text', 'Результаты <https://example.org/results>', q,
+             'Результаты https://example.org/results'),
+            ('email-autolink', '<analyst@example.org>', q, 'analyst@example.org'),
+            ('html-tags', '<h2>Итоги <em>сезона</em></h2>', q, 'Итоги сезона'),
+            ('html-entities', '<b>Итоги &amp; очки &#x1F600;</b>', q, 'Итоги & очки 😀'),
+            ('rules', '---\n***\n___\nИтоги', q, 'Итоги'),
+            ('emoji-leading', '😀 **Итоги**', q, '😀 Итоги'),
+            ('cyrillic-combining', '## И\u0306тоги е\u0301жегодно', q, 'И\u0306тоги е\u0301жегодно'),
+            ('long-codepoints', '😀' * 121, q, '😀' * 120),
+            ('combining-boundary', 'а' * 119 + 'е\u0301', q, 'а' * 119 + 'е'),
+            ('whitespace', '\n \t\n', q, q),
+            ('empty', '', q, q),
+            ('none', None, q, None),
+            ('all-scaffolding', '```\n```\n|---|---|\n| | |\n---\n#\n>\n**\n<em></em>', q, q),
+            ('fallback-empty', '```\n```', '', ''),
+            ('fallback-long', '```\n```', 'Я' * 121, 'Я' * 120),
+            ('nested-markers', '**# x**', q, 'x'),
+            ('nested-emphasis', '***Итоги***', q, 'Итоги'),
+            ('underscores', 'snake_case team_name', q, 'snake_case team_name'),
+            ('math', '2*3*4', q, '2*3*4'),
+            ('link-parentheses', '[Итоги](https://example.org/a_(b))', q, 'Итоги'),
+            ('bare-url-parentheses', 'https://example.org/a_(b)', q, 'https://example.org/a_(b)'),
+            ('escaped-markers', r'\*Итоги\*', q, '*Итоги*'),
+            ('inline-triple-backticks', '```Итоги```', q, 'Итоги'),
+            ('mixed-inline-emphasis', '**Итоги _сезона_**', q, 'Итоги сезона'),
+            ('empty-checkbox', '- [x]\nИтоги', q, 'Итоги'),
+            ('encoded-html-text', '&lt;b&gt;Итоги&lt;/b&gt;', q, '<b>Итоги</b>'),
+            ('code-with-literal-stars', '`*Итоги*`', q, '*Итоги*'),
+            ('fenced-code-literal-heading', '```text\n# literal heading\n```', q, '# literal heading'),
+            ('setext-only', '===\n', q, q),
+        ]
+        for label, answer, question, expected in cases:
+            with self.subTest(case=label):
+                if answer is None:
+                    # The review identifies nullable answers as outside the str contract.
+                    self.assertRaises(AttributeError, derive_report_title, answer, question)
+                    continue
+                agent = FakeAgent()
+                agent.result = success(answer, [], [{'n': 1}], reasoning='thinking',
+                                       report_handle={'tool': 'read_rows', 'args': {}})
+                self.agent = agent
+                run = await self.submit(message=question)
+                done = await self.finish(run['request_id'])
+                self.assertEqual(done['state'], 'succeeded', done)
+                response = done['response']
+                assert response is not None
+                card = response['report']
+                self.assertEqual(card['title'], expected)
+                report = await self.store.get_report(card['id'])
+                assert report is not None
+                self.assertEqual(report['title'], expected)
+                self.assertEqual(report['question'], question)
+                self.assertEqual(report['data'], [{'n': 1}])
+                self.assertEqual((await self.store.list_messages(self.chat))[-1]['content'], answer)
+
+    async def test_report_titles_round_two_matrix(self):
+        cases = [
+            ('reference-full', '[Итоги][1]\n\n[1]: https://example.org/results', 'Итоги'),
+            ('reference-collapsed', '[Итоги][]\n\n[Итоги]: https://example.org', 'Итоги'),
+            ('reference-shortcut', '[Итоги]\n\n[Итоги]: https://example.org/results', 'Итоги'),
+            ('reference-missing', '[x][1]', '[x][1]'),
+            ('collapsed-missing', '[x][]', '[x][]'),
+            ('shortcut-missing', '[x]', '[x]'),
+            ('definition-only', '[x]: https://example.org', 'Покажи итоги'),
+            ('definition-first', '[x]: https://example.org\n\n[x]', 'x'),
+            ('reference-normalized', '[Итоги][A B]\n\n[a   b]: https://example.org', 'Итоги'),
+            ('shared-strong', '**Итоги *сезона***', 'Итоги сезона'),
+            ('shared-star-three', '***x***', 'x'),
+            ('shared-strong-inner', '**a *b***', 'a b'),
+            ('shared-emphasis-inner', '*a **b***', 'a b'),
+            ('nested-underscore-emphasis', '__Итоги _сезона_ клуба__', 'Итоги сезона клуба'),
+            ('link-inside-heading', '## [**Итоги**](https://example.org/a_(b)) ##', 'Итоги'),
+            ('footnote', 'Итоги[^1]\n\n[^1]: Источник', 'Итоги'),
+            ('footnote-definition-only', '[^1]: Источник', 'Покажи итоги'),
+            ('html-comment-single-line', '<!-- hidden -->\n# Видимый', 'Видимый'),
+            ('html-comment-multiline', '<!--\nnot visible\n-->\n# Итоги', 'Итоги'),
+            ('html-declaration', '<!DOCTYPE html>\n# Итоги', 'Итоги'),
+            ('html-cdata', '<![CDATA[\nnot visible\n]]>\n# Итоги', 'Итоги'),
+            ('html-processing', '<?instruction\nnot visible\n?>\n# Итоги', 'Итоги'),
+            ('html-script', '<script>\nnot visible\n</script>\n# Итоги', 'Итоги'),
+            ('html-style', '<style>\nnot visible\n</style>\n# Итоги', 'Итоги'),
+            ('html-type-six', '<div>\nnot visible\n</div>\n\n# Итоги', 'Итоги'),
+            ('html-type-seven', '<custom-tag>\nnot visible\n</custom-tag>\n\n# Итоги', 'Итоги'),
+            ('html-closing-start', '</div>\nnot visible\n\n# Итоги', 'Итоги'),
+            ('html-empty-block', '<div></div>\nnot visible\n\n# Итоги', 'Итоги'),
+            ('footnote-continuation', '[^1]: source\n    hidden\n\n# Итоги', 'Итоги'),
+            ('definition-cannot-interrupt', '[x]\n[x]: url', '[x]'),
+            ('html-no-blank', '<div>\n# not visible\n</div>\n# still hidden', 'Покажи итоги'),
+            ('unclosed-comment', '<!--\n# not visible', 'Покажи итоги'),
+            ('setext-after-paragraph', 'Первый абзац\n\nИтоги\n=====', 'Первый абзац'),
+            ('table-escaped-pipe', '| a\\|b | c |\n|---|---|', 'a|b c'),
+            ('task-list-link', '- [ ] [Итоги](https://example.org/a_(b))', 'Итоги'),
+            ('front-matter', '---\ntitle: **Служебное**\n---\n# Итоги', 'title: Служебное'),
+            ('math-escapes', r'Итоги \(2*3*4\)', 'Итоги (2*3*4)'),
+            ('crlf', ' \r\n### Итоги\r\nДалее', 'Итоги'),
+            ('unicode-line-separators', '\u0085\u2028## Итоги\u2028Далее', 'Итоги'),
+            ('zero-width-prefix', '\u200b# Итоги', '\u200b# Итоги'),
+            ('rtl-mark', '\u200f**مرحبا**', '\u200fمرحبا'),
+            ('very-long-single-token', 'Слово' * 100000, 'Слово' * 24),
+            ('ten-thousand-lines', '<!-- hidden -->\n' * 10000 + '## Итоги', 'Итоги'),
+            ('fifty-thousand-stars', '*' * 50000, 'Покажи итоги'),
+            ('twenty-thousand-open-brackets', '[' * 20000, '[' * 120),
+            ('null-bytes', '\x00## Итоги\x00', '\x00## Итоги\x00'),
+            ('linked-image', '[![Logo](logo.png)](https://example.org/results)', 'Logo'),
+            ('nested-underscore-and-intraword', '**snake_case _и_ words__with__underscores**',
+             'snake_case и words__with__underscores'),
+        ]
+        for label, answer, expected in cases:
+            with self.subTest(case=label):
+                agent = FakeAgent()
+                agent.result = success(answer, [], [{'n': 1}], reasoning='thinking',
+                                       report_handle={'tool': 'read_rows', 'args': {}})
+                self.agent = agent
+                run = await self.submit(message='Покажи итоги')
+                self.agent.release.set()
+                # Runtime-cost sanity only: ten times the reviewer's 28.7-second probe.
+                done = await asyncio.wait_for(self.registry.wait(run['request_id']), 300)
+                self.assertEqual(done['state'], 'succeeded', done)
+                response = done['response']
+                assert response is not None
+                self.assertEqual(response['report']['title'], expected)
+                report = await self.store.get_report(response['report']['id'])
+                assert report is not None
+                self.assertEqual(report['title'], expected)
+                self.assertEqual((await self.store.list_messages(self.chat))[-1]['content'], answer)
+
+    async def test_report_titles_round_three_matrix(self):
+        cases = [
+            ('late-251', '<!-- hidden -->\n' * 251 + '# Итоги', 'Итоги'),
+            ('late-10000', '<!-- hidden -->\n' * 10000 + '# Итоги', 'Итоги'),
+            ('blank-comment-5000', '\n<!-- hidden -->\n' * 2500 + '# Итоги', 'Итоги'),
+            ('long-bold', '**' + 'a' * 2100 + '**', 'a' * 120),
+            ('long-code', '`' + 'x' * 2100 + '`', 'x' * 120),
+            ('long-triple-code', '```' + 'x' * 2100 + '```', 'x' * 120),
+            ('long-reference', '[' + 'a' * 2100 + '][x]\n\n[x]: url', 'a' * 120),
+            ('large-bold', '**' + 'a' * 149996 + '**', 'a' * 120),
+            ('cyrillic-bold', '**' + 'я' * 2100 + '**', 'я' * 120),
+            ('cyrillic-code', '`' + 'ю' * 2100 + '`', 'ю' * 120),
+            ('cyrillic-large-bold', '**' + 'я' * 149996 + '**', 'я' * 120),
+            ('later-long-bold', '<!-- hidden -->\n' * 10000 + '**' + 'я' * 2100 + '**',
+             'я' * 120),
+        ]
+        for label, answer, expected in cases:
+            with self.subTest(case=label):
+                agent = FakeAgent()
+                agent.result = success(answer, [], [{'n': 1}], reasoning='thinking',
+                                       report_handle={'tool': 'read_rows', 'args': {}})
+                self.agent = agent
+                run = await self.submit(message='Покажи итоги')
+                self.agent.release.set()
+                done = await asyncio.wait_for(self.registry.wait(run['request_id']), 600)
+                self.assertEqual(done['state'], 'succeeded', done)
+                response = done['response']
+                assert response is not None
+                self.assertEqual(response['report']['title'], expected)
+                report = await self.store.get_report(response['report']['id'])
+                assert report is not None
+                self.assertEqual(report['title'], expected)
+                self.assertEqual((await self.store.list_messages(self.chat))[-1]['content'], answer)
+
+    def test_report_title_safety_fallback_boundaries(self):
+        wrappers = [
+            ('bold', '**', '**'), ('italic', '*', '*'),
+            ('strong-emphasis', '***', '***'), ('code', '`', '`'),
+            ('link', '[', '](https://example.org)'),
+            ('mixed', '**[`', '`](https://example.org)**'),
+        ]
+        for net in (200000, 1000000):
+            for delta in (-1, 0, 1, 2):
+                for label, opening, closing in wrappers:
+                    length = net + delta
+                    answer = opening + 'a' * (length - len(opening) - len(closing)) + closing
+                    with self.subTest(kind=label, net=net, delta=delta):
+                        self.assertEqual(derive_report_title(answer, 'Q'),
+                                         'Q' if length > 200000 else 'a' * 120)
+        for answer in ('**' + 'a' * 199997 + '**', '`' + 'x' * 199999 + '`',
+                       '**' + 'a' * 1000000 + '**'):
+            with self.subTest(reviewer_length=len(answer)):
+                self.assertEqual(derive_report_title(answer, 'Q'), 'Q')
+
+    def test_report_title_escaped_backtick_runs(self):
+        cases = [
+            (r'\`', '`'), (r'\\`', '\\`'), (r'\`\`', '``'),
+            (r'\``foo`', '`foo'), (r'\```foo``', '`foo'),
+            (r'\``Итоги`', '`Итоги'),
+            ('` a `b', 'ab'), ('a` b `', 'ab'), ('`` a`b ``c', 'a`bc'),
+        ]
+        for width in range(1, 6):
+            ticks = '`' * width
+            cases.extend([
+                ('\\' + '`' + ticks + 'foo' + ticks, '`foo'),
+                ('\\\\' + ticks + 'foo' + ticks, '\\foo'),
+                (ticks + 'foo\\' + ticks, 'foo\\'),
+                (ticks + 'foo' + ticks + '\\', 'foo\\'),
+                ('\\' + ticks + 'foo' + ticks, ticks + 'foo' + ticks),
+            ])
+        for answer, expected in cases:
+            with self.subTest(answer=answer):
+                self.assertEqual(derive_report_title(answer, 'Q'), expected)
+
+    def test_report_title_oracle_hostile_edges(self):
+        for repeats in (128, 256, 512):
+            with self.subTest(alternations=repeats):
+                self.assertEqual(derive_report_title('*_*_*_' * repeats, 'Q'), '_*' * 60)
+        for repeats in (31, 32, 33):
+            with self.subTest(destination_depth=repeats - 1):
+                self.assertEqual(derive_report_title('[a](' * repeats + ')' * repeats +
+                                                     ' "unterminated', 'Q'), 'a "unterminated')
+        for repeats in (5000, 10000, 20000):
+            with self.subTest(destination_depth=repeats - 1):
+                self.assertEqual(derive_report_title('[a](' * repeats + ')' * repeats +
+                                                     ' "unterminated', 'Q'), '[a](' * 30)
+
+    def test_report_title_inline_token_boundaries(self):
+        cases = [
+            ("<https://example.org/o'neil>", "https://example.org/o'neil"),
+            ("<o'neil@example.org>", "o'neil@example.org"),
+            ("&unknown **Итоги** &amp; очки", "&unknown Итоги & очки"),
+            ("&notanentity; **Итоги**", "&notanentity; Итоги"),
+            ("&#" + "9" * 5000 + ";", "&#" + "9" * 118),
+            ("&#12345678;", "&#12345678;"),
+            ("[**Итоги**](https://example.org/a_(b_(c)))", "Итоги"),
+            ("``Итоги `сезона` ``", "Итоги `сезона`"),
+            ("````Итоги````", "Итоги"),
+            (r"[Итоги](https://example.org/a_\(b\))", "Итоги"),
+            (r"\# Итоги \_сезона\_", "# Итоги _сезона_"),
+            ('<span title="x > y">**Итоги**</span>', "Итоги"),
+            ("`<b>*Итоги*</b>`", "<b>*Итоги*</b>"),
+            ("<https://example.org/a_(b)>", "https://example.org/a_(b)"),
+            ("~~~text\n# literal\n~~~~", "# literal"),
+        ]
+        for answer, expected in cases:
+            with self.subTest(answer=answer):
+                self.assertEqual(derive_report_title(answer, "Вопрос"), expected)
+
+    def test_report_title_parser_input_bounds(self):
+        for answer, inline_input, expected in [
+            ('[' * 20000, '[' * 20000, '[' * 120),
+            ('# ' + 'a' * 7000, 'a' * 7000, 'a' * 120),
+            ('**' + 'a' * 2100 + '**', '**' + 'a' * 2100 + '**', 'a' * 120),
+            ('**' + 'a' * 199996 + '**', '**' + 'a' * 199996 + '**', 'a' * 120),
+        ]:
+            with self.subTest(answer_length=len(answer)):
+                with patch.object(report_title, '_parse_answer', wraps=report_title._parse_answer) as blocks:
+                    with patch.object(report_title, 'inline_text', wraps=report_title.inline_text) as inlines:
+                        title = derive_report_title(answer, 'Question')
+                self.assertEqual(blocks.call_args.args[0], answer)
+                self.assertEqual(inlines.call_args.args[0], inline_input)
+                self.assertTrue(all(len(call.args[0]) <= 200000 for call in inlines.call_args_list))
+                self.assertEqual(title, expected)
+        with patch.object(report_title, 'inline_text', wraps=report_title.inline_text) as inlines:
+            self.assertEqual(derive_report_title('a' * 200100, 'Question'), 'a' * 120)
+        self.assertEqual(inlines.call_count, 0)
+        answer = '<!-- hidden -->\n' * 62500 + '# outside'
+        with patch.object(report_title, '_parse_answer', wraps=report_title._parse_answer) as blocks:
+            self.assertEqual(derive_report_title(answer, 'Question'), 'Question')
+        self.assertEqual(blocks.call_args.args[0], '<!-- hidden -->\n' * 62500)
+
+    def test_report_title_linear_operations(self):
+        families = [
+            ('brackets', '[', '', '[' * 120),
+            ('stars', '*', '', 'Question'),
+            ('underscores', '_', '', 'Question'),
+            ('backticks', '`', '', 'Question'),
+            ('angles', '<', '', '<' * 120),
+            ('images', '![', '', '![' * 60),
+            ('destinations', '[a](', '', '[a](' * 30),
+            ('quotes', '> ', 'Title', 'Title'),
+            ('lists', '- ', 'Title', 'Title'),
+            ('unmatched-emphasis', '**a ', '', ('**a ' * 30).rstrip()),
+            ('malformed-tags', '<a x="', '', ('<a x="' * 20)),
+        ]
+        for label, fragment, suffix, expected in families:
+            counts = []
+            for size in (5000, 20000):
+                answer = fragment * size + suffix
+                work = ParseWork()
+                title = derive_report_title(answer, 'Question', work)
+                with self.subTest(family=label, size=size):
+                    self.assertEqual(title, expected)
+                    self.assertLessEqual(work.total, 64 * len(answer))
+                    self.assertGreaterEqual(work.total, len(answer))
+                    self.assertLessEqual(len(title), 120)
+                    self.assertEqual(title, title.strip())
+                counts.append(work.total)
+                print('TITLE_OPERATIONS ' + json.dumps({
+                    'family': label, 'size': size, 'length': len(answer),
+                    'characters': work.characters, 'tokens': work.tokens,
+                    'delimiters': work.delimiters, 'count': work.total,
+                }))
+            with self.subTest(family=label, scaling=True):
+                self.assertGreaterEqual(counts[1] / counts[0], 3.8)
+                self.assertLessEqual(counts[1] / counts[0], 4.2)
+        counts = []
+        for size in (5000, 20000):
+            pieces, width, length = ['x '], 1, 2
+            while length + width + 2 <= size:
+                pieces.append('`' * width + 'x ')
+                length += width + 2
+                width += 1
+            answer = ''.join(pieces) + 'x' * (size - length)
+            work = ParseWork()
+            self.assertEqual(derive_report_title(answer, 'Question', work), answer[:120].rstrip())
+            self.assertLessEqual(work.total, 64 * len(answer))
+            counts.append(work.total)
+            print('TITLE_OPERATIONS ' + json.dumps({
+                'family': 'distinct-backtick-runs', 'size': size, 'length': len(answer),
+                'characters': work.characters, 'tokens': work.tokens,
+                'delimiters': work.delimiters, 'count': work.total,
+            }))
+        self.assertGreaterEqual(counts[1] / counts[0], 3.8)
+        self.assertLessEqual(counts[1] / counts[0], 4.2)
+
+    def test_report_title_stops_block_selection_and_emission(self):
+        work = ParseWork()
+        self.assertEqual(derive_report_title('**' + 'a' * 149996 + '**\n' +
+                                            'ignored\n' * 10000, 'Question', work), 'a' * 120)
+        self.assertEqual(work.lines, 1)
+        self.assertEqual(work.emitted, 120)
+        self.assertGreater(work.characters, 150000)
+
+    def test_report_title_pathological_inputs(self):
+        cases = [
+            ('[' * 20000, '[' * 120),
+            ('[' * 40000, '[' * 120),
+            ('*' * 50000, 'Question'),
+            ('Слово' * 100000, 'Слово' * 24),
+            ('<!-- hidden -->\n' * 10000 + '# visible', 'visible'),
+        ]
+        code = (
+            'import json, sys\n'
+            'from report_title import derive_report_title\n'
+            'answers = json.load(sys.stdin)\n'
+            'print(json.dumps([derive_report_title(answer, "Question") for answer in answers]))\n'
+        )
+        # Only a subprocess hang guard, not a wall-clock performance assertion.
+        result = subprocess.run(
+            [sys.executable, '-c', code], input=json.dumps([answer for answer, _ in cases]),
+            capture_output=True, text=True, check=True, timeout=600)
+        self.assertEqual(json.loads(result.stdout), [expected for _, expected in cases])
+
+    def test_report_title_generated_inputs(self):
+        rng = random.Random(25)
+        alphabet = string.printable + string.punctuation * 4
+        for case in range(512):
+            answer = ''.join(rng.choices(alphabet, k=rng.randrange(513)))
+            question = ''.join(rng.choices(alphabet, k=rng.randrange(257)))
+            for text in (answer, ''):
+                with self.subTest(case=case, answer=text, question=question):
+                    title = derive_report_title(text, question)
+                    self.assertIsInstance(title, str)
+                    self.assertLessEqual(len(title), 120)
+                    self.assertEqual(title, title.strip())
 
     async def test_report_retains_mysql_scalar_rows(self):
         rows = [{'day': date(2026, 10, 1), 'moment': datetime(2026, 10, 1, 12, 30),

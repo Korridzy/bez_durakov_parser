@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agents.report_support import failure
 from chat_store import ChatNotFound, Run, RunConflict, RequestConflict, RequestExists
 from request_context import derive_trace_id, new_request_id
+from report_title import derive_report_title as derive_report_title
 
 logger = logging.getLogger(__name__)
 RESEED_MAX_PAIRS = 20
@@ -224,10 +225,9 @@ class RunRegistry:
             report = None
             marked = result.get('report_handle') if result['success'] else None
             if marked is not None:
-                title = next((line.lstrip(' #*->\t').strip() for line in result['message'].splitlines()
-                              if line.lstrip(' #*->\t').strip()), message)
                 report = {
-                    'id': uuid4().hex, 'title': title[:120], 'question': message,
+                    'id': uuid4().hex, 'title': derive_report_title(result['message'], message),
+                    'question': message,
                     'tool': marked['tool'], 'args': marked['args'], 'data': result.get('data'),
                     'generated_at': result['timestamp'],
                 }
