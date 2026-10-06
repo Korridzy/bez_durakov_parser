@@ -217,6 +217,24 @@ agent_model = "deepseek-v4-flash-latest" # или "deepseek-v4-pro"
 
 `deepseek-v4-flash-latest` маршрутизируется к `~deepseek/deepseek-v4-flash-latest`, который всегда указывает на актуальную модель семейства DeepSeek V4 Flash. `deepseek-v4-pro` маршрутизируется к `deepseek/deepseek-v4-pro` через OpenRouter. Эти aliases доступны только в local overlay; отслеживаемый `agent_model = "gpt-4o"` не изменяется. После выбора модели выполните `make restart`.
 
+### OpenCode Zen GPT 6 Luna
+
+Для GPT 6 Luna добавьте ключ OpenCode Zen и выберите alias в `bd_shared/config.local.toml`:
+
+```toml
+[webreport]
+opencode_api_key = "your-opencode-key"
+agent_model = "opencode/gpt-6-luna"
+```
+
+LiteLLM отправляет запросы к `gpt-6-luna` через `https://opencode.ai/zen/v1/responses`, как указано в [документации OpenCode Zen](https://opencode.ai/docs/zen/#endpoints). Используется существующий ключ `opencode_api_key`. Alias `opencode/gpt-5.6-luna` также доступен; отслеживаемое значение `agent_model = "gpt-4o"` сохраняется. При пустом `agent_scope_gate_model` scope gate использует выбранную модель агента.
+
+После изменения ключа или модели выполните из корня репозитория:
+
+```bash
+make -C webreport restart
+```
+
 ### OpenCode Zen: бесплатные модели
 
 Для OpenCode Zen добавьте ключ и выберите один из proxy aliases в `bd_shared/config.local.toml`:
