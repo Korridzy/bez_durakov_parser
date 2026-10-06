@@ -12,18 +12,25 @@ import datetime
 import fcntl
 import io
 import ipaddress
+from html.parser import HTMLParser
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import NoReturn, Protocol, TextIO, TypeAlias
+from typing import NoReturn, Protocol, TextIO, TypeAlias, TypedDict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -40,6 +47,17 @@ RELEASE_MAX_BYTES = 1024 * 1024
 NETWORK_TIMEOUT = 30
 COMMAND_TIMEOUT = 120
 PULL_TIMEOUT = 1800
+APPLICATION_SERVICES = ("backend", "frontend", "data_collector")
+INFRA_NAMES = ("mysql", "litellm")
+SERVICES = (*INFRA_NAMES, *APPLICATION_SERVICES)
+BACKUP_ID_RE = re.compile(r"[0-9]{8}T[0-9]{6,12}Z-(?:v[0-9]+\.[0-9]+\.[0-9]+|pre-restore)")
+
+
+class Preparation(TypedDict):
+    backup_id: str
+    db_revision_before: str | None
+    db_revision_after: str
+    pending: list[str]
 
 # Codes are stable across the bootstrap, executor and later operational stages.
 EXIT_CODES = {
@@ -72,6 +90,60 @@ class Runner(Protocol):
 
 class Fetcher(Protocol):
     def fetch(self, url: str, *, limit: int, timeout: int) -> bytes: ...
+
+
+class Clock(Protocol):
+    def monotonic(self) -> float: ...
+    def sleep(self, seconds: float) -> None: ...
+    def now(self) -> datetime.datetime: ...
+
+
+class SystemClock:
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def now(self) -> datetime.datetime:
+        return datetime.datetime.now(datetime.timezone.utc)
+
+
+class LocalHTTP:
+    """Bounded, loopback-only transport, with no redirects or environment proxies."""
+
+    def request(self, method: str, url: str, *, body: dict[str, JSON] | None = None,
+                timeout: float = 10) -> tuple[int, dict[str, str], bytes]:
+        parsed = urllib.parse.urlsplit(url)
+        if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
+                or parsed.username or parsed.password or parsed.fragment):
+            raise DeployError(38, "smoke request must stay on the loopback origin")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method=method)
+        try:
+            response = opener.open(request, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            data = response.read(RELEASE_MAX_BYTES + 1)
+            if len(data) > RELEASE_MAX_BYTES:
+                raise DeployError(38, "smoke response exceeds size limit")
+            return response.code, dict(response.headers), data
+
+
+class Assets(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls: list[str] = []
+        self.html = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "html":
+            self.html = True
+        key = "src" if tag == "script" else "href" if tag == "link" else None
+        if key is not None:
+            self.urls.extend(value for name, value in attrs if name == key and value is not None)
 
 
 class SubprocessRunner:
@@ -191,7 +263,26 @@ class State:
             data = handle.read(RELEASE_MAX_BYTES + 1)
         if len(data) > RELEASE_MAX_BYTES:
             raise DeployError(23, "current deployment state exceeds size limit")
-        return json_object(data, 23, "current deployment state is invalid")
+        current = json_object(data, 23, "current deployment state is invalid")
+        for key in ("attempt", "last_successful"):
+            if key in current:
+                record = current[key]
+                tag = record.get("tag") if isinstance(record, dict) else None
+                if not isinstance(tag, str) or not TAG_RE.fullmatch(tag):
+                    raise DeployError(23, "current deployment record is invalid")
+        if "stage" in current and current["stage"] != "migration_started":
+            raise DeployError(23, "current deployment stage is invalid")
+        if "unaudited" in current:
+            pending = current["unaudited"]
+            if not isinstance(pending, list):
+                raise DeployError(23, "unaudited deployment outcomes are invalid")
+            for outcome in pending:
+                if (not isinstance(outcome, dict) or
+                        any(not isinstance(outcome.get(key), str)
+                            for key in ("attempt_id", "tag", "commit", "kind", "finished_at")) or
+                        outcome["kind"] not in ("deploy", "rollback")):
+                    raise DeployError(23, "unaudited deployment outcome is invalid")
+        return current
 
     def write_current(self, current: dict[str, JSON]) -> None:
         self.write_atomic(self.path / "current.json", (json.dumps(current, sort_keys=True) + "\n").encode())
@@ -201,6 +292,15 @@ class State:
             handle.write(json.dumps(event, sort_keys=True) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+
+    def read_history(self) -> list[dict[str, JSON]]:
+        events = []
+        with (self.path / "history.jsonl").open("rb") as handle:
+            for line in handle:
+                if len(line) > RELEASE_MAX_BYTES:
+                    raise DeployError(23, "deployment history event exceeds size limit")
+                events.append(json_object(line, 23, "deployment history is invalid"))
+        return events
 
     def write_atomic(self, path: Path, data: bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -223,10 +323,36 @@ class State:
                 tmp.unlink(missing_ok=True)
 
 
+def read_generated_env(path: Path) -> dict[str, str]:
+    """Read a webreport/generate_env.py file back into the values it was generated from.
+
+    The generator writes KEY='value' with each ' escaped as \\' and nothing else changed, or
+    a plain KEY=value. Lines end only at \\n, since a value may hold other line separators.
+    """
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        key, separator, value = line.partition("=")
+        if not separator or key.startswith("#"):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] == "'":
+            value = value[1:-1].replace("\\'", "'")
+        values[key.strip()] = value
+    return values
+
+
 class Executor:
-    def __init__(self, root: Path, env: Mapping[str, str], runner: Runner, fetcher: Fetcher):
+    def __init__(self, root: Path, env: Mapping[str, str], runner: Runner, fetcher: Fetcher, *,
+                 clock: Clock | None = None, output: Callable[[str], None] = print):
         self.root, self.env, self.runner, self.fetcher = root, dict(env), runner, fetcher
         self.state = State(root, env)
+        self.pin_file: Path | None = None
+        self.metadata: rm.ReleaseMetadata | None = None
+        self.step = "preflight"
+        self.clock = clock or SystemClock()
+        self.http = LocalHTTP()
+        self.emit = output
+        self.attempt_record: dict[str, JSON] = {}
 
     def command(self, argv: Sequence[str], code: int, message: str, *,
                 input: str | None = None, timeout: int = COMMAND_TIMEOUT) -> str:
@@ -337,24 +463,21 @@ class Executor:
             pins[name] = {"image": ref}
         pin_file = release_dir / "compose.release.yml"
         self.state.write_atomic(pin_file, (json.dumps({"services": pins}, indent=2) + "\n").encode())
-        heads = self.command(["make", "-s", "-C", str(self.root / "webreport"), "release-run",
+        heads = self.command(["make", "-s", "--no-print-directory", "-C", str(self.root / "webreport"), "release-run",
                               f"RELEASE_COMPOSE={pin_file}", "SERVICE=backend",
                               "CMD=alembic -c /alembic/alembic.ini heads"], 21, "release Alembic heads failed")
         if not re.fullmatch(re.escape(metadata.alembic_revision) + r" \(head\)\s*", heads.strip()):
             raise DeployError(21, "release image must have exactly the metadata Alembic head")
         self.state.write_atomic(cached, data)
+        self.pin_file, self.metadata = pin_file, metadata
         return metadata
 
     def mysql_command(self, client: str, arguments: Sequence[str], *, input: str | None = None,
                       timeout: int = COMMAND_TIMEOUT, code: int = 31) -> subprocess.CompletedProcess[str]:
         """Run mysql/mysqldump with env-only credentials, database and optional restore input."""
-        values: dict[str, str] = {}
         try:
-            for line in (self.root / "webreport" / ".env.mysql").read_text().splitlines():
-                key, sep, value = line.partition("=")
-                if sep:
-                    values[key.strip()] = value.strip().strip("'\"")
-        except OSError:
+            values = read_generated_env(self.root / "webreport" / ".env.mysql")
+        except (OSError, UnicodeError):
             raise DeployError(code, "generated MySQL environment is unavailable") from None
         database, password = values.get("MYSQL_DATABASE"), values.get("MYSQL_ROOT_PASSWORD")
         if not database or password is None:
@@ -381,6 +504,895 @@ class Executor:
         if not REVISION_RE.fullmatch(revision):
             raise DeployError(31, "live database has an invalid or multiple revision result")
         return revision
+
+    def now(self) -> datetime.datetime:
+        return self.clock.now()
+
+    def release_make(self, target: str, *, services: Sequence[str] = (), cmd: Sequence[str] = (),
+                     run_args: Sequence[str] = (), compose_args: Sequence[str] = (),
+                     code: int = 4, timeout: int = COMMAND_TIMEOUT) -> str:
+        """Use Make's allowlisted wrapper, without directory chatter in parsed output."""
+        if any(name not in SERVICES for name in services):
+            raise DeployError(2, "service is not allowlisted")
+        if target == "release-up" and any(name not in APPLICATION_SERVICES for name in services):
+            raise DeployError(2, "application release cannot recreate infrastructure")
+        argv = ["make", "-s", "--no-print-directory", "-C", str(self.root / "webreport"), target]
+        if self.pin_file is not None:
+            argv.append(f"RELEASE_COMPOSE={self.pin_file}")
+        elif target == "release-run":
+            argv.append("ALLOW_DEV_COMPOSE=1")
+        if services:
+            key = "SERVICE" if target == "release-run" else "SERVICES"
+            if key == "SERVICE" and len(services) != 1:
+                raise DeployError(2, "release-run requires one service")
+            argv.append(f"{key}={' '.join(services)}")
+        if cmd:
+            argv.append("CMD=" + shlex.join(cmd))
+        if run_args:
+            argv.append("RUN_ARGS=" + shlex.join(run_args))
+        if compose_args:
+            key = "CONFIG_ARGS" if target == "release-config" else "ARGS"
+            argv.append(key + "=" + shlex.join(compose_args))
+        return self.command(argv, code, f"{self.step}: {target} failed or timed out", timeout=timeout)
+
+    def config(self) -> dict[str, JSON]:
+        """Read only operational settings; never print private overlay contents."""
+        try:
+            with (self.root / "bd_shared" / "config.toml").open("rb") as handle:
+                config = tomllib.load(handle)
+            overlay = self.root / "bd_shared" / "config.local.toml"
+            if overlay.is_file():
+                with overlay.open("rb") as handle:
+                    local = tomllib.load(handle)
+                for key, value in local.items():
+                    if isinstance(value, dict) and isinstance(config.get(key), dict):
+                        config[key].update(value)
+                    else:
+                        config[key] = value
+            return config
+        except (OSError, ValueError):
+            raise DeployError(4, "deployment configuration is unreadable or invalid") from None
+
+    def store_paths(self) -> dict[str, Path]:
+        vm = Path(self.env.get("BD_VM_DIR") or str(self.root / "vm")).resolve()
+        web = self.config().get("webreport", {})
+        if not isinstance(web, dict):
+            raise DeployError(4, "webreport configuration must be a table")
+        paths = {}
+        for name, default in (("checkpoint", "checkpoints.db"), ("archive", "conversations.db"), ("chats", "chats.db")):
+            value = self.env.get(f"BD_{name.upper()}_DB_PATH") or web.get(f"{name}_db_path", "/data/" + default)
+            if not isinstance(value, str) or re.search(r"[$`\n\r\x00]", value):
+                raise DeployError(4, "SQLite store path is invalid")
+            path = Path(value)
+            if not path.is_absolute() or ".." in path.parts or not path.is_relative_to("/data") or path == Path("/data"):
+                raise DeployError(4, "SQLite store must be inside the /data bind mount")
+            paths[name] = vm / "backend" / "checkpoints" / path.relative_to("/data")
+        if len(set(paths.values())) != 3:
+            raise DeployError(4, "SQLite stores must use distinct files")
+        return paths
+
+    def containers(self, *, code: int = 4) -> list[dict[str, JSON]]:
+        raw = self.release_make("compose", compose_args=["ps", "-a", "--format", "json"], code=code).strip()
+        try:
+            values = json.loads(raw) if raw.startswith("[") else [json.loads(line) for line in raw.splitlines()]
+        except (ValueError, RecursionError):
+            raise DeployError(code, f"{self.step}: invalid container listing") from None
+        if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
+            raise DeployError(code, f"{self.step}: invalid container listing")
+        return values
+
+    def container_ids(self, *, code: int = 4) -> dict[str, str]:
+        ids: dict[str, str] = {}
+        for item in self.containers(code=code):
+            name, identifier = item.get("Service"), item.get("ID")
+            if name in SERVICES and isinstance(name, str) and isinstance(identifier, str) and identifier:
+                if name in ids:
+                    raise DeployError(code, "one backend/container per service is required")
+                ids[name] = identifier
+        return ids
+
+    def preflight(self, meta: rm.ReleaseMetadata, flags: argparse.Namespace) -> dict[str, str]:
+        self.step = "preflight"
+        self.metadata = meta
+        self.pin_file = self.state.path / "releases" / meta.version / "compose.release.yml"
+        if not (self.root / "bd_shared" / "config.local.toml").is_file():
+            raise DeployError(4, "bd_shared/config.local.toml must exist as a file")
+        version = self.command(["docker", "compose", "version", "--short"], 4, "Docker Compose version unavailable").strip()
+        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", version)
+        if match is None or tuple(int(part) for part in match.groups()) < (2, 24, 4):
+            raise DeployError(4, "Docker Compose >= 2.24.4 is required")
+        self.release_make("generate-env")
+        self.release_make("release-config", compose_args=["-q"])
+        ids = self.container_ids()
+        pins = json_object(self.pin_file.read_bytes(), 4, "release pins are invalid").get("services")
+        for name in ("mysql", "litellm"):
+            if name not in ids:
+                raise DeployError(4, "mysql/litellm image differs from the release pin or is missing; run the documented infra procedure")
+            pin = pins.get(name) if isinstance(pins, dict) else None
+            ref = pin.get("image") if isinstance(pin, dict) else None
+            if not isinstance(ref, str) or not DIGEST_REF_RE.fullmatch(ref):
+                raise DeployError(4, "infrastructure pin is invalid")
+            self.command(["docker", "pull", ref], 4, "infrastructure pin pull failed", timeout=PULL_TIMEOUT)
+            running = self.command(["docker", "container", "inspect", ids[name], "--format", "{{.Image}}"],
+                                   4, "infrastructure container inspection failed").strip()
+            pinned = self.command(["docker", "image", "inspect", ref, "--format", "{{.Id}}"],
+                                  4, "infrastructure image inspection failed").strip()
+            if not running or running != pinned:
+                raise DeployError(4, "mysql/litellm image differs from the release pin or is missing; run the documented infra procedure")
+        if "backend" not in ids:
+            self.emit("First install: no backend container")
+        self.store_paths()
+        vm = Path(self.env.get("BD_VM_DIR") or str(self.root / "vm"))
+        try:
+            if vm.exists() and not os.access(vm, os.R_OK | os.X_OK):
+                raise DeployError(4, "BD_VM_DIR is unreadable")
+            used = 0
+            for output in (
+                self.release_make("release-run", services=["backend"], cmd=["du", "-sb", "/data"]),
+                self.command(["docker", "compose", "--project-directory", str(self.root / "webreport"),
+                              "-f", str(self.root / "webreport/docker-compose.yml"), "exec", "-T",
+                              "mysql", "du", "-sb", "/var/lib/mysql"], 4, "BD_VM_DIR mysql data size is unreadable"),
+            ):
+                used += int(output.split()[0])
+            if shutil.disk_usage(self.state.path).free < 2 * used:
+                raise DeployError(4, "free disk must be at least twice the MySQL and SQLite data size")
+        except (OSError, ValueError, IndexError):
+            raise DeployError(4, "BD_VM_DIR data size or free disk is unreadable") from None
+        for module in ("agent.knowledge_cli", "agent.tools_cli"):
+            self.release_make("release-run", services=["backend"], cmd=["python", "-m", module])
+        fetch = self.config().get("xlsm_fetch", {})
+        if not isinstance(fetch, dict):
+            raise DeployError(4, "collector configuration must be a table")
+        try:
+            time_value, timezone_value = fetch.get("start_time", "20:00"), fetch.get("timezone", "Europe/Belgrade")
+            if not isinstance(time_value, str) or not isinstance(timezone_value, str):
+                raise DeployError(4, "collector schedule must contain strings")
+            hour, minute = (int(part) for part in time_value.split(":"))
+            now = self.now().astimezone(ZoneInfo(timezone_value))
+            start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            window = any(-600 <= (now - (start + datetime.timedelta(days=offset))).total_seconds() <= 1800
+                         for offset in (-1, 0, 1))
+        except (ValueError, TypeError, AttributeError, ZoneInfoNotFoundError):
+            raise DeployError(4, "collector schedule is invalid") from None
+        if window:
+            self.emit("WARNING: near the collector fetch window; --yes is required")
+            if not flags.yes:
+                raise DeployError(4, "collector fetch window requires --yes")
+        return {name: ids[name] for name in ("mysql", "litellm")}
+
+    def migration_plan(self, meta: rm.ReleaseMetadata) -> tuple[str | None, list[str]]:
+        self.step = "migration_plan"
+        current = self.live_db_revision()
+        if current == meta.alembic_revision:
+            return current, []
+        if current is None:
+            tables = self.mysql_command("mysql", ["-N", "-e", "SHOW TABLES"])
+            if tables.returncode or tables.stdout.strip():
+                raise DeployError(31, "unversioned nonempty database requires an explicit baseline")
+            self.emit("First install: empty database; full upgrade")
+        history = self.release_make("release-run", services=["backend"],
+                                    cmd=["alembic", "-c", "/alembic/alembic.ini", "history",
+                                         "-r", f"{current or 'base'}:{meta.alembic_revision}"], code=31)
+        edges = re.findall(r"^\s*(<base>|[A-Za-z0-9_]+)\s*->\s*([A-Za-z0-9_]+)\b", history, re.MULTILINE)
+        # Alembic prints newest first. Trace the ancestry rather than trusting
+        # success exit status or assuming a nonempty history means compatibility.
+        ancestor = meta.alembic_revision
+        pending = []
+        while ancestor != (current or "<base>"):
+            parents = [parent for parent, child in edges if child == ancestor]
+            if len(parents) != 1 or ancestor in pending:
+                raise DeployError(31, "live revision is not an ancestor of the release revision")
+            pending.append(ancestor)
+            ancestor = parents[0]
+        return current, list(reversed(pending))
+
+    def approve_migrations(self, pending: Sequence[str], flags: argparse.Namespace) -> None:
+        self.step = "migration_approval"
+        if not pending:
+            return
+        self.emit("Pending migrations: " + ", ".join(pending))
+        if flags.approve_migration:
+            return
+        if not sys.stdin.isatty():
+            raise DeployError(32, "pending migrations require --approve-migration without a TTY")
+        if input("Apply these migrations? [y/N] ").strip().lower() != "y":
+            raise DeployError(33, "migration declined")
+
+    def backup_path(self, identifier: str) -> Path:
+        if not BACKUP_ID_RE.fullmatch(identifier):
+            raise DeployError(40, "invalid backup id")
+        path = self.state.path / "backups" / identifier
+        if path.is_symlink() or path.resolve().parent != (self.state.path / "backups").resolve():
+            raise DeployError(40, "backup id escapes backup directory")
+        return path
+
+    def sqlite_command(self, operation: str, src: str, dst: str | None, folder: Path, *,
+                       code: int = 35) -> dict[str, JSON]:
+        cmd = ["python", "/sqlite_backup.py", operation, src]
+        if dst is not None:
+            cmd.append(dst)
+        raw = self.release_make("release-run", services=["backend"], cmd=cmd,
+                                run_args=["-v", f"{self.root}/deploy/sqlite_backup.py:/sqlite_backup.py:ro",
+                                          "-v", f"{folder}:/backup"], code=code, timeout=PULL_TIMEOUT)
+        result = json_object(raw.encode(), code, "SQLite helper returned invalid file information")
+        size = result.get("size")
+        if type(result.get("present")) is not bool or type(size) is not int or size < 0:
+            raise DeployError(code, "SQLite helper returned invalid file information")
+        digest = result.get("sha256")
+        if result["present"] and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise DeployError(code, "SQLite helper returned invalid checksum")
+        if not result["present"] and (result["size"] != 0 or digest is not None):
+            raise DeployError(code, "SQLite helper returned invalid absent-store information")
+        return result
+
+    def take_backup_set(self, label: str, *, db_revision_before: str | None = None) -> str:
+        """Quiesced snapshot, reusable by rollback's pre-restore safety copy."""
+        self.step = "backup"
+        folder: Path | None = None
+        created = False
+        try:
+            if label != "pre-restore":
+                valid_tag(label)
+            identifier = self.now().strftime("%Y%m%dT%H%M%S%fZ") + "-" + label
+            folder = self.backup_path(identifier)
+            folder.mkdir(mode=0o700)
+            created = True
+            result = self.mysql_command("mysqldump", [
+                "--single-transaction", "--quick", "--routines", "--triggers", "--events", "--hex-blob",
+                "--no-tablespaces", "--set-gtid-purged=OFF", "--add-drop-database", "--databases",
+            ], code=35, timeout=PULL_TIMEOUT)
+            if result.returncode or not result.stdout.strip():
+                raise DeployError(35, "MySQL backup failed")
+            data = result.stdout.encode()
+            self.state.write_atomic(folder / "mysql.sql", data)
+            files: dict[str, JSON] = {"mysql.sql": {"present": True, "sha256": rm.sha256_hex(data),
+                                                  "size": len(data), "store": "mysql"}}
+            vm_data = Path(self.env.get("BD_VM_DIR") or str(self.root / "vm")).resolve() / "backend/checkpoints"
+            for name, path in self.store_paths().items():
+                relative = path.relative_to(vm_data)
+                dest = name + ".db"
+                info = self.sqlite_command("backup", "/data/" + relative.as_posix(), "/backup/" + dest, folder)
+                files[dest] = {**info, "store": name, "source": "/data/" + relative.as_posix()}
+            manifest: dict[str, JSON] = {
+                "tag": self.metadata.version if self.metadata is not None else label,
+                "label": label, "created_at": self.now().isoformat(),
+                "db_revision_before": db_revision_before, "files": files,
+            }
+            self.state.write_atomic(folder / "manifest.json", (json.dumps(manifest, sort_keys=True) + "\n").encode())
+            if self.attempt_record:
+                self.attempt_record["backup_id"] = identifier
+            self.prune_backups()
+            return identifier
+        except (DeployError, OSError, KeyboardInterrupt):
+            message = "consistent backup failed"
+            # A collision belongs to an existing snapshot, not this attempt.
+            if created and folder is not None:
+                try:
+                    shutil.rmtree(folder)
+                except OSError:
+                    message += "; partial backup cleanup failed"
+            raise DeployError(35, message) from None
+
+    def prune_backups(self) -> None:
+        protected = None
+        for event in reversed(self.state.read_history()):
+            if (event.get("kind") == "deploy" and event.get("backup_id")
+                    and event.get("db_revision_before") != event.get("db_revision_after")):
+                protected = event["backup_id"]
+                break
+        folders = sorted((p for p in (self.state.path / "backups").iterdir()
+                          if p.is_dir() and not p.is_symlink() and BACKUP_ID_RE.fullmatch(p.name)
+                          and (p / "manifest.json").is_file()), reverse=True)
+        for folder in folders[5:]:
+            if folder.name != protected:
+                shutil.rmtree(folder)
+
+    def validate_backup_set(self, identifier: str) -> dict[str, JSON]:
+        """Validate every checksum before any restore; caller checks target revision."""
+        folder = self.backup_path(identifier)
+        manifest = json_object((folder / "manifest.json").read_bytes(), 40, "backup manifest is invalid")
+        files = manifest.get("files")
+        if not isinstance(files, dict) or set(files) != {"mysql.sql", "checkpoint.db", "archive.db", "chats.db"}:
+            raise DeployError(40, "backup manifest file set is invalid")
+        expected_paths = self.store_paths()
+        vm_data = Path(self.env.get("BD_VM_DIR") or str(self.root / "vm")).resolve() / "backend/checkpoints"
+        for name, record in files.items():
+            if not isinstance(record, dict) or (folder / name).is_symlink():
+                raise DeployError(40, "backup file record is invalid")
+            if name == "mysql.sql":
+                data = (folder / name).read_bytes()
+                actual: dict[str, JSON] = {"present": True, "size": len(data), "sha256": rm.sha256_hex(data)}
+            else:
+                store = name[:-3]
+                source = "/data/" + expected_paths[store].relative_to(vm_data).as_posix()
+                if record.get("source") != source or record.get("store") != store:
+                    raise DeployError(40, "backup store paths differ from configured stores")
+                actual = self.sqlite_command("describe", "/backup/" + name, None, folder, code=40)
+            if any(record.get(key) != actual[key] for key in ("present", "size", "sha256")):
+                raise DeployError(40, "backup checksum or size mismatch")
+        return manifest
+
+    def restore_backup_set(self, identifier: str) -> dict[str, JSON]:
+        """Restore only an explicitly named, validated set. Caller owns approval."""
+        manifest = self.validate_backup_set(identifier)
+        folder = self.backup_path(identifier)
+        result = self.mysql_command("mysql", [], input=(folder / "mysql.sql").read_text(),
+                                    code=40, timeout=PULL_TIMEOUT)
+        if result.returncode:
+            raise DeployError(40, "MySQL backup restore failed")
+        files = manifest["files"]
+        assert isinstance(files, dict)
+        for name in ("checkpoint.db", "archive.db", "chats.db"):
+            record = files[name]
+            assert isinstance(record, dict)
+            source = record["source"]
+            assert isinstance(source, str)
+            self.sqlite_command("restore", "/backup/" + name, source, folder, code=40)
+        return manifest
+
+    def quiesce_backup_migrate(self, meta: rm.ReleaseMetadata, current: str | None,
+                              pending: list[str]) -> Preparation:
+        self.step = "quiesce"
+        self.release_make("release-stop", services=["data_collector", "backend"], code=34, timeout=1500)
+        try:
+            backup_id = self.take_backup_set(meta.version, db_revision_before=current)
+        except (DeployError, OSError, KeyboardInterrupt) as failure:
+            message = failure.message if isinstance(failure, DeployError) else "consistent backup failed"
+            try:
+                self.release_make("release-start", services=["data_collector", "backend"], code=35)
+            except (DeployError, OSError, KeyboardInterrupt):
+                message += "; application services could not be restarted"
+            raise DeployError(35, message) from None
+        if pending:
+            self.step = "migration"
+            state = self.state.read_current()
+            state["stage"] = "migration_started"
+            state["migration_backup_id"] = backup_id
+            self.state.write_current(state)
+            if self.attempt_record:
+                self.attempt_record["db_revision_after"] = None
+            try:
+                self.release_make("release-run", services=["backend"],
+                                  cmd=["alembic", "-c", "/alembic/alembic.ini", "upgrade", meta.alembic_revision],
+                                  code=36, timeout=PULL_TIMEOUT)
+                actual_revision = self.live_db_revision()
+                if self.attempt_record:
+                    self.attempt_record["db_revision_after"] = actual_revision
+                if actual_revision != meta.alembic_revision:
+                    raise DeployError(36, "post-upgrade database revision differs from target")
+            except DeployError:
+                raise DeployError(36, "migration failed; marker retained, services stopped; explicitly restore the backup") from None
+            state.pop("stage", None)
+            state.pop("migration_backup_id", None)
+            self.state.write_current(state)
+        return {"backup_id": backup_id, "db_revision_before": current,
+                "db_revision_after": meta.alembic_revision, "pending": pending}
+
+    def prepare_deploy(self, meta: rm.ReleaseMetadata, flags: argparse.Namespace) -> Preparation:
+        if self.state.read_current().get("stage") == "migration_started":
+            raise DeployError(41, "migration_started marker exists; explicit backup restore is required")
+        self.preflight(meta, flags)
+        current, pending = self.migration_plan(meta)
+        self.approve_migrations(pending, flags)
+        return self.quiesce_backup_migrate(meta, current, pending)
+
+    def affected_services(self, meta: rm.ReleaseMetadata) -> list[str]:
+        self.step = "recreate_detection"
+        ids = self.container_ids(code=37)
+        affected = []
+        for name in APPLICATION_SERVICES:
+            if name not in ids:
+                affected.append(name)
+                continue
+            running = self.command(["docker", "container", "inspect", ids[name], "--format", "{{.Image}}"],
+                                   37, "recreate: container image inspection failed").strip()
+            pinned = self.command(["docker", "image", "inspect", meta.images[name], "--format", "{{.Id}}"],
+                                  37, "recreate: pinned image inspection failed").strip()
+            label = self.command(["docker", "container", "inspect", ids[name], "--format",
+                                  '{{index .Config.Labels "com.docker.compose.config-hash"}}'],
+                                 37, "recreate: container configuration inspection failed").strip()
+            expected = self.release_make("compose", compose_args=["config", "--hash=" + name], code=37).strip()
+            pieces = expected.split()
+            if len(pieces) != 2 or pieces[0] != name:
+                raise DeployError(37, "recreate: invalid Compose service configuration hash")
+            if not pinned or running != pinned or not label or label != pieces[1]:
+                affected.append(name)
+        return affected
+
+    def ports(self) -> tuple[str, str]:
+        try:
+            values = read_generated_env(self.root / "webreport/.env")
+            result = []
+            for key in ("WEBREPORT_BACKEND_PORT", "WEBREPORT_FRONTEND_PORT"):
+                value = self.env.get(key) or values.get(key)
+                if value is None or not value.isdecimal() or not 1 <= int(value) <= 65535:
+                    raise DeployError(38, f"{self.step}: generated HTTP port is invalid")
+                result.append("http://127.0.0.1:" + value)
+            return result[0], result[1]
+        except (OSError, UnicodeError):
+            raise DeployError(38, f"{self.step}: generated HTTP ports unavailable") from None
+
+    def request(self, method: str, url: str, *, statuses: Sequence[int] = (200,),
+                body: dict[str, JSON] | None = None, timeout: float = 10) -> bytes:
+        try:
+            status, _, data = self.http.request(method, url, body=body, timeout=timeout)
+        except (OSError, ValueError, urllib.error.URLError, DeployError):
+            raise DeployError(38, f"{self.step}: HTTP request failed or timed out") from None
+        if status not in statuses:
+            raise DeployError(38, f"{self.step}: unexpected HTTP status {status}")
+        return data
+
+    def request_json(self, method: str, url: str, *, statuses: Sequence[int] = (200,),
+                     body: dict[str, JSON] | None = None, timeout: float = 10) -> JSON:
+        data = self.request(method, url, statuses=statuses, body=body, timeout=timeout)
+        try:
+            return json.loads(data, object_pairs_hook=_pairs, parse_constant=_constant)
+        except (ValueError, RecursionError):
+            raise DeployError(38, f"{self.step}: invalid JSON response") from None
+
+    def health(self, *, timeout: float = 10) -> tuple[bool, str]:
+        backend, _ = self.ports()
+        try:
+            status, _, data = self.http.request("GET", backend + "/health", timeout=timeout)
+            health = json_object(data, 38, "invalid health response")
+        except (OSError, ValueError, urllib.error.URLError, DeployError):
+            return False, "database/agents/llm_proxy health response unavailable"
+        components = health.get("services")
+        if not isinstance(components, dict):
+            return False, "database/agents/llm_proxy component booleans missing"
+        failed = [key for key in ("database", "agents", "llm_proxy") if components.get(key) is not True]
+        good = status == 200 and health.get("status") == "healthy" and not failed
+        # Do not echo response text or attacker-controlled component keys.
+        return good, "database/agents/llm_proxy: " + (", ".join(failed) or "unexpected health status")
+
+    def wait_ready(self) -> None:
+        self.step = "readiness"
+        deadline = self.clock.monotonic() + 180
+        detail = "database/agents/llm_proxy unavailable"
+        while self.clock.monotonic() < deadline:
+            ready, detail = self.health(timeout=min(10, deadline - self.clock.monotonic()))
+            if ready:
+                return
+            remaining = deadline - self.clock.monotonic()
+            if remaining > 0:
+                self.clock.sleep(min(2, remaining))
+        raise DeployError(38, "readiness: backend not healthy within 180s; " + detail)
+
+    def recreate_and_smoke(self, meta: rm.ReleaseMetadata, flags: argparse.Namespace, *,
+                           before: Mapping[str, str] | None = None) -> list[str]:
+        if before is None:
+            before = {name: identifier for name, identifier in self.container_ids(code=37).items() if name in INFRA_NAMES}
+        affected = self.affected_services(meta)
+        self.step = "recreate_pull"
+        if affected:
+            self.release_make("release-pull", services=affected, code=37, timeout=PULL_TIMEOUT)
+        self.step = "recreate_backend"
+        self.release_make("release-up" if "backend" in affected else "release-start",
+                          services=["backend"], code=37)
+        self.wait_ready()
+        self.step = "recreate_frontend"
+        if "frontend" in affected:
+            self.release_make("release-up", services=["frontend"], code=37)
+        self.step = "recreate_collector"
+        self.release_make("release-up" if "data_collector" in affected else "release-start",
+                          services=["data_collector"], code=37)
+        return self.smoke(meta, before=before, llm_smoke=flags.llm_smoke)
+
+    def smoke(self, meta: rm.ReleaseMetadata | None, *, before: Mapping[str, str] | None = None,
+              llm_smoke: bool = False, steps: Sequence[str] | None = None) -> list[str]:
+        """Shared deploy/rollback/manual sequence. A subset is for explicit zero-spend QA."""
+        self.step = "smoke"
+        backend, frontend = self.ports()
+        if meta is None:
+            self.emit("dev smoke: no successful release state; using dev Compose")
+            self.pin_file = None
+        if before is None:
+            ids = self.container_ids(code=38)
+            before = {name: ids[name] for name in INFRA_NAMES if name in ids}
+        requested = list(steps) if steps is not None else [f"S{i}" for i in range(1, 8 + int(llm_smoke))]
+        if any(step not in {f"S{i}" for i in range(1, 9)} for step in requested):
+            raise DeployError(2, "invalid smoke step")
+        passed = []
+        for step in requested:
+            self.step = step
+            match step:
+                case "S1":
+                    ready, detail = self.health()
+                    if not ready:
+                        raise DeployError(38, "S1: backend health failed; " + detail)
+                case "S2":
+                    if meta is None:
+                        heads = self.release_make("release-run", services=["backend"],
+                                                  cmd=["alembic", "-c", "/alembic/alembic.ini", "heads"], code=38)
+                        match = re.fullmatch(r"([A-Za-z0-9_]{1,32}) \(head\)\s*", heads.strip())
+                        if match is None:
+                            raise DeployError(38, "S2: running backend must have one Alembic head")
+                        target = match[1]
+                    else:
+                        target = meta.alembic_revision
+                    try:
+                        revision = self.live_db_revision()
+                    except DeployError:
+                        raise DeployError(38, "S2: database revision unavailable") from None
+                    if revision != target:
+                        raise DeployError(38, "S2: live database revision differs from backend head")
+                case "S3":
+                    data = self.request("GET", frontend + "/")
+                    parser = Assets()
+                    try:
+                        parser.feed(data.decode("utf-8"))
+                    except UnicodeError:
+                        raise DeployError(38, "S3: frontend is not UTF-8 HTML") from None
+                    if not parser.html or not parser.urls:
+                        raise DeployError(38, "S3: frontend HTML or assets are missing")
+                    for asset in parser.urls:
+                        url = urllib.parse.urljoin(frontend + "/", asset)
+                        if urllib.parse.urlsplit(url).netloc != urllib.parse.urlsplit(frontend).netloc:
+                            raise DeployError(38, "S3: frontend asset leaves the frontend origin")
+                        self.request("GET", url)
+                case "S4":
+                    if self.request("GET", frontend + "/health").strip() != b"ok":
+                        raise DeployError(38, "S4: frontend health body is not ok")
+                case "S5":
+                    obj = self.request_json("GET", frontend + "/api/chats?limit=1")
+                    if (not isinstance(obj, dict) or not isinstance(obj.get("items"), list)
+                            or "next_cursor" not in obj
+                            or not (obj["next_cursor"] is None or isinstance(obj["next_cursor"], str))):
+                        raise DeployError(38, "S5: chat listing requires items and next_cursor")
+                case "S6":
+                    ids = self.container_ids(code=38)
+                    if any(name not in before or name not in ids or before[name] != ids[name] for name in INFRA_NAMES):
+                        raise DeployError(38, "S6: mysql/litellm container ids changed or are missing")
+                case "S7":
+                    if not any(item.get("Service") == "data_collector" and item.get("State") == "running"
+                               for item in self.containers(code=38)):
+                        raise DeployError(38, "S7: collector is not running")
+                case "S8":
+                    self.llm_smoke(frontend)
+            passed.append(step)
+            self.emit(step + " PASS")
+        return passed
+
+    def llm_smoke(self, frontend: str) -> None:
+        self.step = "S8"
+        try:
+            timeout_value = self.config().get("webreport", {})
+            question = (self.root / "deploy/smoke_question.txt").read_text(encoding="utf-8").strip()
+        except (DeployError, OSError, UnicodeError):
+            raise DeployError(38, "S8: smoke configuration or canned question unavailable") from None
+        if not isinstance(timeout_value, dict):
+            raise DeployError(38, "S8: agent timeout configuration invalid")
+        timeout = timeout_value.get("agent_timeout_seconds", 120)
+        if type(timeout) is not int or not 1 <= timeout <= 3600:
+            raise DeployError(38, "S8: agent timeout configuration invalid")
+        if not question:
+            raise DeployError(38, "S8: canned smoke question missing")
+        chat_id: str | None = None
+        report_id: str | None = None
+        saved = False
+        active = False
+        failure: DeployError | None = None
+        request_id = str(uuid.uuid4())
+        try:
+            chat = self.request_json("POST", frontend + "/api/chats", statuses=[201], body={"title": "Deployment smoke"})
+            chat_id = self.response_id(chat, "chat")
+            chat_url = frontend + "/api/chats/" + chat_id
+            # A lost/malformed response does not prove the server rejected the
+            # request. The generated request id lets cleanup cancel either case.
+            active = True
+            self.request_json("POST", chat_url + "/messages", statuses=[202],
+                              body={"request_id": request_id, "message": question})
+            deadline = self.clock.monotonic() + timeout + 30
+            while True:
+                remaining = deadline - self.clock.monotonic()
+                if remaining <= 0:
+                    raise DeployError(38, "S8: canned chat deadline expired")
+                obj = self.request_json("GET", chat_url + "/status", timeout=min(10, remaining))
+                run = obj.get("last_run") if isinstance(obj, dict) else None
+                state = run.get("state") if isinstance(run, dict) else None
+                if state in ("succeeded", "failed", "cancelled", "interrupted"):
+                    active = False
+                if self.clock.monotonic() > deadline:
+                    raise DeployError(38, "S8: canned chat deadline expired")
+                if not active:
+                    if state != "succeeded":
+                        raise DeployError(38, "S8: canned chat run did not succeed")
+                    break
+                if state not in ("running", "cancelling"):
+                    raise DeployError(38, "S8: run status response is invalid")
+                remaining = deadline - self.clock.monotonic()
+                if remaining <= 0:
+                    raise DeployError(38, "S8: canned chat deadline expired")
+                self.clock.sleep(min(2, remaining))
+            reports = self.request_json("GET", chat_url + "/reports")
+            if not isinstance(reports, list) or not reports:
+                raise DeployError(38, "S8: canned chat produced no report")
+            report_id = self.response_id(reports[0], "report")
+            report_url = frontend + "/api/reports/" + report_id
+            saved_report = self.request_json("PUT", report_url + "/saved")
+            if self.response_id(saved_report, "saved report") != report_id:
+                raise DeployError(38, "S8: saved report id differs")
+            saved = True
+            report = self.request_json("GET", report_url)
+            if self.response_id(report, "report") != report_id or not isinstance(report, dict) or "data" not in report:
+                raise DeployError(38, "S8: report content is missing")
+            updated = self.request_json("POST", report_url + "/update", statuses=range(200, 300))
+            if self.response_id(updated, "updated report") != report_id or not isinstance(updated, dict) or "data" not in updated:
+                raise DeployError(38, "S8: updated report content is missing")
+            old_version, new_version = report.get("version"), updated.get("version")
+            if type(old_version) is not int or type(new_version) is not int or new_version <= old_version:
+                raise DeployError(38, "S8: report Update did not advance its version")
+            saved_reports = self.request_json("GET", frontend + "/api/saved-reports")
+            if not isinstance(saved_reports, list) or not any(isinstance(item, dict) and item.get("id") == report_id
+                                                            for item in saved_reports):
+                raise DeployError(38, "S8: saved report listing does not contain smoke report")
+            self.request("DELETE", report_url + "/saved", statuses=[204])
+            saved = False
+        except DeployError as error:
+            failure = error
+            raise
+        finally:
+            self.step = "S8 cleanup"
+            cleanup_errors: list[str] = []
+            if chat_id is not None:
+                chat_url = frontend + "/api/chats/" + chat_id
+                if active:
+                    try:
+                        cancel_status, _, _ = self.http.request(
+                            "POST", chat_url + "/cancel", body={"request_id": request_id})
+                        if cancel_status not in (200, 202, 404):
+                            raise DeployError(38, "cancellation was not accepted")
+                        deadline = self.clock.monotonic() + 30
+                        while cancel_status != 404:
+                            remaining = deadline - self.clock.monotonic()
+                            if remaining <= 0:
+                                raise DeployError(38, "cancelled run did not terminate")
+                            obj = self.request_json("GET", chat_url + "/status", timeout=min(10, remaining))
+                            if self.clock.monotonic() > deadline:
+                                raise DeployError(38, "cancelled run did not terminate")
+                            run = obj.get("last_run") if isinstance(obj, dict) else None
+                            state = run.get("state") if isinstance(run, dict) else None
+                            if state in ("succeeded", "failed", "cancelled", "interrupted"):
+                                break
+                            self.clock.sleep(min(2, max(0, deadline - self.clock.monotonic())))
+                    except (OSError, ValueError, urllib.error.URLError, DeployError):
+                        cleanup_errors.append("cancel failed")
+                if saved and report_id is not None:
+                    try:
+                        self.request("DELETE", frontend + "/api/reports/" + report_id + "/saved", statuses=[204])
+                    except DeployError:
+                        cleanup_errors.append("unsave failed")
+                try:
+                    self.request("DELETE", chat_url, statuses=[204])
+                except DeployError:
+                    cleanup_errors.append("chat delete failed")
+                if not cleanup_errors:
+                    self.emit("S8 cleanup: smoke chat removed; report unsaved")
+            self.step = "S8"
+            if cleanup_errors:
+                message = "S8 cleanup: " + "; ".join(cleanup_errors)
+                if failure is not None:
+                    failure.message += "; secondary error: " + message
+                else:
+                    raise DeployError(38, message) from None
+
+    def response_id(self, obj: JSON, label: str) -> str:
+        identifier = obj.get("id") if isinstance(obj, dict) else None
+        if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identifier):
+            raise DeployError(38, "S8: invalid " + label + " id")
+        return identifier
+
+    def reconcile_attempts(self, *, new_attempt_id: str | None = None) -> None:
+        """Called under the deployment lock before a new attempt or dirty check."""
+        events = self.state.read_history()
+        current = self.state.read_current()
+        committed = current.get("last_successful")
+        starts: dict[str, dict[str, JSON]] = {}
+        terminal: set[str] = set()
+        successful: set[str] = set()
+        for event in events:
+            identifier = event.get("attempt_id")
+            if not isinstance(identifier, str) or identifier == new_attempt_id:
+                continue
+            if event.get("event") == "started":
+                starts[identifier] = event
+            elif event.get("event") in ("success", "failed"):
+                terminal.add(identifier)
+                if event.get("event") == "success":
+                    successful.add(identifier)
+        pending = current.get("unaudited", [])
+        assert isinstance(pending, list)
+        outcomes: dict[str, dict[str, JSON]] = {}
+        for outcome in pending:
+            assert isinstance(outcome, dict)
+            identifier = outcome["attempt_id"]
+            assert isinstance(identifier, str)
+            outcomes[identifier] = outcome
+        # Recover attempts committed before the unaudited list was introduced.
+        if isinstance(committed, dict):
+            identifier = committed.get("attempt_id")
+            if (isinstance(identifier, str) and identifier in starts and
+                    all(committed.get(key) == starts[identifier].get(key)
+                        for key in ("attempt_id", "tag", "commit"))):
+                outcomes.setdefault(identifier, committed)
+        for identifier, outcome in outcomes.items():
+            if identifier in terminal:
+                continue
+            record = dict(outcome)
+            record["event"] = "success"
+            try:
+                self.state.append_history(record)
+            except (DeployError, OSError, UnicodeError):
+                self.warn_audit("reconciliation could not append terminal success event")
+            else:
+                terminal.add(identifier)
+                successful.add(identifier)
+        self.prune_unaudited(successful)
+        for identifier, started in starts.items():
+            if identifier in terminal or identifier in outcomes:
+                continue
+            stamp = self.now().isoformat()
+            record = {**started, "event": "failed", "at": stamp, "finished_at": stamp,
+                      "step": "interrupted", "exit_code": None}
+            try:
+                self.state.append_history(record)
+            except (DeployError, OSError, UnicodeError):
+                self.warn_audit("reconciliation could not append terminal " + str(record["event"]) + " event")
+
+    def prune_unaudited(self, successful: set[str]) -> None:
+        """Remove recovery records only after their success audit is durable."""
+        try:
+            current = self.state.read_current()
+            pending = current.get("unaudited", [])
+            assert isinstance(pending, list)
+            retained: list[JSON] = []
+            for outcome in pending:
+                assert isinstance(outcome, dict)
+                identifier = outcome["attempt_id"]
+                assert isinstance(identifier, str)
+                if identifier not in successful:
+                    retained.append(outcome)
+            if retained == pending:
+                return
+            # A prior append may have written a visible line but failed its fsync.
+            with (self.state.path / "history.jsonl").open("rb") as handle:
+                os.fsync(handle.fileno())
+            current["unaudited"] = retained
+            self.state.write_current(current)
+        except (DeployError, OSError, UnicodeError):
+            self.warn_audit("could not prune durably audited committed outcomes")
+
+    def warn_audit(self, message: str) -> None:
+        try:
+            print("WARNING: secondary audit error: " + message, file=sys.stderr)
+        except OSError:
+            # A closed/full diagnostic destination cannot change the outcome.
+            pass
+
+    def begin_attempt(self, meta: rm.ReleaseMetadata, *, kind: str = "deploy",
+                      db_revision_before: str | None = None) -> dict[str, JSON]:
+        """Shared history contract for deploy/rollback; first service mutation follows."""
+        identifier = str(uuid.uuid4())
+        self.reconcile_attempts(new_attempt_id=identifier)
+        current = self.state.read_current()
+        stamp = self.now().isoformat()
+        digests: dict[str, JSON] = dict(meta.images)
+        record: dict[str, JSON] = {
+            "kind": kind, "tag": meta.version, "commit": meta.source_commit, "digests": digests,
+            "attempt_id": identifier,
+            "event": "started", "at": stamp, "started_at": stamp,
+            "db_revision_before": db_revision_before, "db_revision_after": db_revision_before,
+            "backup_id": None,
+        }
+        self.state.append_history(record)
+        self.attempt_record = record
+        current["attempt"] = {"tag": meta.version, "commit": meta.source_commit,
+                              "attempt_id": identifier, "started_at": stamp}
+        self.step = "attempt publication"
+        try:
+            self.state.write_current(current)
+        except (DeployError, OSError, UnicodeError, KeyboardInterrupt):
+            error = DeployError(23, "deployment attempt state publication failed")
+            self.finish_attempt(error=error)
+            raise error from None
+        return record
+
+    def finish_attempt(self, *, error: DeployError | None = None, smoke_steps: Sequence[str] = ()) -> None:
+        """Publication failure records its own failed terminal event, then raises 23."""
+        stamp = self.now().isoformat()
+        steps: list[JSON] = list(smoke_steps)
+        record: dict[str, JSON] = {
+            **self.attempt_record, "event": "failed" if error else "success", "at": stamp,
+            "finished_at": stamp, "smoke_steps": steps,
+        }
+        publication_error: DeployError | None = None
+        previous_tag: JSON = None
+        if error is None:
+            self.step = "publish-state"
+            try:
+                current = self.state.read_current()
+                previous = current.get("last_successful")
+                previous_tag = previous.get("tag") if isinstance(previous, dict) else None
+                current["last_successful"] = record
+                pending = current.get("unaudited", [])
+                assert isinstance(pending, list)
+                if ("unaudited" not in current and isinstance(previous, dict) and
+                        previous.get("kind") in ("deploy", "rollback") and
+                        all(isinstance(previous.get(key), str)
+                            for key in ("attempt_id", "tag", "commit", "kind", "finished_at"))):
+                    # The first new-format commit must retain the older recovery source.
+                    pending = [dict(previous)]
+                current["unaudited"] = [*pending, dict(record)]
+                self.state.write_current(current)
+            except (DeployError, OSError, UnicodeError, KeyboardInterrupt):
+                publication_error = DeployError(23, "publish-state: successful deployment state publication failed")
+                error = publication_error
+                record["event"] = "failed"
+        if error is not None:
+            record.update({"exit_code": error.exit_code, "step": self.step})
+        try:
+            self.state.append_history(record)
+        except (DeployError, OSError, UnicodeError):
+            if error is None:
+                self.warn_audit("missing terminal success event for committed attempt " +
+                                str(record["attempt_id"]))
+            else:
+                error.message += "; secondary error: failed to persist terminal failed history"
+        else:
+            if error is None:
+                identifier = record["attempt_id"]
+                assert isinstance(identifier, str)
+                self.prune_unaudited({identifier})
+        if publication_error is not None:
+            if isinstance(previous_tag, str):
+                self.emit("Recovery: make rollback VERSION=" + previous_tag)
+            raise publication_error from None
+
+    def deploy(self, meta: rm.ReleaseMetadata, flags: argparse.Namespace) -> None:
+        self.reconcile_attempts()
+        if self.state.read_current().get("stage") == "migration_started":
+            raise DeployError(41, "migration_started marker exists; explicit backup restore is required")
+        self.state.read_history()
+        before = self.preflight(meta, flags)
+        current, pending = self.migration_plan(meta)
+        self.approve_migrations(pending, flags)
+        previous = self.state.read_current().get("last_successful")
+        previous_tag = previous.get("tag") if isinstance(previous, dict) else None
+        self.begin_attempt(meta, db_revision_before=current)
+        try:
+            self.quiesce_backup_migrate(meta, current, pending)
+            steps = self.recreate_and_smoke(meta, flags, before=before)
+        except (DeployError, OSError, KeyboardInterrupt) as cause:
+            if isinstance(cause, DeployError):
+                error = cause
+            else:
+                code = 36 if self.step == "migration" else 37
+                error = DeployError(code, f"{self.step}: deployment interrupted or local I/O failed")
+            self.finish_attempt(error=error)
+            if self.step.startswith(("recreate", "readiness", "S")) and isinstance(previous_tag, str):
+                self.emit("Recovery: make rollback VERSION=" + previous_tag)
+            raise error from None
+        self.finish_attempt(smoke_steps=steps)
+        self.emit("Deploy " + meta.version + " success")
+
+    def smoke_metadata(self) -> rm.ReleaseMetadata | None:
+        current = self.state.read_current()
+        record = current.get("attempt") or current.get("last_successful")
+        if record is None:
+            return None
+        if not isinstance(record, dict) or not isinstance(record.get("tag"), str):
+            raise DeployError(23, "current deployment record cannot select smoke metadata")
+        tag = record["tag"]
+        assert isinstance(tag, str)
+        folder = self.state.path / "releases" / valid_tag(tag)
+        try:
+            meta = rm.loads((folder / "metadata.json").read_bytes())
+        except (OSError, rm.MetadataError):
+            raise DeployError(23, "cached smoke metadata is missing or invalid") from None
+        if meta.version != tag:
+            raise DeployError(23, "cached smoke metadata tag differs from current state")
+        self.metadata, self.pin_file = meta, folder / "compose.release.yml"
+        return meta
 
 
 class Parser(argparse.ArgumentParser):
@@ -423,8 +1435,11 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
     def emit(text: str, *, error: bool = False) -> None:
         print(text, file=sys.stderr if error else sys.stdout)
         if log is not None:
-            log.write(text + "\n")
-            log.flush()
+            try:
+                log.write(text + "\n")
+                log.flush()
+            except (OSError, UnicodeError):
+                print("Secondary error: deployment log write failed", file=sys.stderr)
 
     try:
         state.initialize()
@@ -441,11 +1456,19 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
             raise DeployError(2, "DATASET deployments are not supported by the executor")
         with state.lock():
             executor = Executor(root, environment, runner or SubprocessRunner(),
-                                fetcher or URLFetcher(allow_file=bool(environment.get("BD_DEPLOY_RELEASE_FILE"))))
+                                fetcher or URLFetcher(allow_file=bool(environment.get("BD_DEPLOY_RELEASE_FILE"))),
+                                output=emit)
+            if options.command in ("deploy", "rollback"):
+                executor.reconcile_attempts()
             if (options.command in ("deploy", "rollback") and state.read_current().get("stage") == "migration_started"
                     and not (options.command == "rollback" and options.restore_backup)):
                 raise DeployError(41, "migration_started marker exists; explicit backup restore is required")
             match options.command:
+                case "deploy":
+                    metadata = executor.select(options.tag)
+                    executor.deploy(metadata, options)
+                case "smoke":
+                    executor.smoke(executor.smoke_metadata(), llm_smoke=options.llm_smoke)
                 case "select":
                     metadata = executor.select(options.tag)
                     if environment.get("BD_DEPLOY_RELEASE_FILE"):
@@ -473,7 +1496,10 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
         return int(exit.code or 0)
     finally:
         if log is not None:
-            log.close()
+            try:
+                log.close()
+            except (OSError, UnicodeError):
+                print("Secondary error: deployment log close failed", file=sys.stderr)
 
 
 # --- verify-db-isolation (todo 16) ---
