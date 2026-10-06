@@ -103,6 +103,7 @@ test:
 	run poetry run python bd_shared/test_log_redaction.py; \
 	run poetry run python bd_shared/test_logging_setup.py; \
 	run env PYTHONPATH="$(CURDIR)" poetry run python webreport/test_generate_env.py; \
+	run poetry run python deploy/test_check_build_context.py; \
 	run $(MAKE) -C webreport test; \
 	run env PYTHONPATH="$(CURDIR)" bash -c 'set -e; cd webreport/data_collector; poetry run python test_entrypoint.py && poetry run python test_logging_jobs.py'; \
 	run poetry run python deploy/test_release_metadata.py; \
