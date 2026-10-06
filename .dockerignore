@@ -27,3 +27,7 @@ bd_shared/test_config.toml
 **/.ruff_cache/
 **/.coverage*
 **/htmlcov/
+webreport/ui/node_modules/
+webreport/ui/dist/
+webreport/ui/test-results/
+webreport/ui/playwright-report/

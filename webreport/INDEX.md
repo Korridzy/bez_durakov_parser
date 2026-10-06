@@ -48,7 +48,13 @@ webreport/
 ├── backend/agents/report_runtime.py      - LangGraph ReAct agent над найденными инструментами
 ├── backend/agent/toolmodule.py           - Загрузка модуля оператора и обнаружение инструментов
 ├── ../bd_shared/tools/bez_durakov.py     - Модуль инструментов этого развёртывания
-└── frontend/main.py                      - UI (Streamlit)
+├── backend/chat_store.py                 - Чаты, сообщения, runs, отчёты
+├── backend/runs.py                       - Фоновые запросы, отмена и архив
+├── backend/chat_routes.py                - Список, сообщения, status, cancel
+├── backend/report_routes.py              - Закладки и Update
+├── ui/src/                              - React/TypeScript UI
+├── ui/tests_e2e/                        - Офлайн Playwright
+└── ui/nginx.conf                        - SPA и /api/ proxy
 ```
 
 ### Конфигурация
@@ -80,7 +86,7 @@ webreport/
 make start
 # ИЛИ вручную
 poetry run python generate_env.py
-docker compose up -d
+docker compose up -d --build
 ```
 
 ### Остановка
@@ -94,8 +100,10 @@ docker compose down
 ```bash
 make logs                 # Просмотр логов
 docker compose ps         # Статус контейнеров
-python3 validate_setup.py # Проверка файлов
+poetry run python validate_setup.py # Проверка файлов
 ```
+
+UI образ содержит собранные assets, поэтому после изменений UI нужен `make restart`. `make test-ui` выполняет Vitest и сборку, `make test-e2e-setup` и `make test-e2e` обслуживают pinned Playwright в Docker.
 
 ### Доступ
 - **Frontend**: http://localhost:28501
@@ -107,13 +115,13 @@ python3 validate_setup.py # Проверка файлов
 ```
 Пользователь
     ↓ (вводит требования)
-Frontend (Streamlit)
+Frontend (React/nginx)
     ↓ (HTTP/REST)
 Backend (FastAPI, one replica)
     ↓
 LangGraph ReAct agent over discovered tools
     ↓                ↘
-LiteLLM `litellm:4000`   SQLite checkpoints и архив
+LiteLLM `litellm:4000`   SQLite checkpoints, архив и chats.db
     ↓                    `../vm/backend/checkpoints`
 operator tool module (dataset.tools_module)
     ↓
@@ -126,12 +134,13 @@ Backend performs the LiteLLM probe at startup. Without a reachable model it stay
 
 | Слой | Технология |
 |------|------------|
-| Frontend | Streamlit |
+| Frontend | React/nginx |
 | Backend | FastAPI |
 | Agents | LangGraph ReAct |
 | Model proxy | LiteLLM at `litellm:4000` |
 | Agent state | SQLite checkpoints |
 | Архив разговоров | Отдельный SQLite архив рядом с checkpoints |
+| Чаты и отчёты | chats.db, отдельный от checkpoints и архива |
 | Services | Python + Pandas |
 | ORM | SQLAlchemy |
 | Database | MySQL |
@@ -141,7 +150,7 @@ Backend performs the LiteLLM probe at startup. Without a reachable model it stay
 ```bash
 # Валидация файлов
 cd webreport
-python3 validate_setup.py
+poetry run python validate_setup.py
 
 # Проверка контейнеров
 docker compose ps
@@ -185,8 +194,8 @@ curl http://localhost:28000/health
 ✅ **Готов к использованию**
 
 Все компоненты реализованы и протестированы:
-- ✅ 28/28 проверок пройдено
-- ✅ Frontend (Streamlit)
+- Проверки файлов: `poetry run python validate_setup.py`; проверки поведения: `make test`, `make test-ui`, `make test-e2e`
+- ✅ Frontend (React/nginx)
 - ✅ Backend (FastAPI)
 - ✅ LangGraph agents over the operator's discovered tools
 - ✅ Operator tool module contract with a read-only injected engine

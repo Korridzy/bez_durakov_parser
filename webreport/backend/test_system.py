@@ -702,6 +702,8 @@ class TestSessionLogCorrelation(unittest.IsolatedAsyncioTestCase):
                 "admission_lock",
                 "agent_system",
                 "checkpoint_saver",
+                "chat_store",
+                "registry",
                 "pinned",
                 "sessions",
                 "tool_service",
@@ -710,7 +712,16 @@ class TestSessionLogCorrelation(unittest.IsolatedAsyncioTestCase):
         self.main.admission_lock = asyncio.Lock()
         self.main.pinned = {}
         self.main.sessions = session_store.SessionIndex(max_size=4, ttl=60)
+        self._chat_dir = tempfile.TemporaryDirectory()
         structlog.contextvars.clear_contextvars()
+
+    async def asyncSetUp(self):
+        await importlib.import_module("test_support").install_test_runtime(self.main, self._chat_dir.name)
+
+    async def asyncTearDown(self):
+        await self.main.registry.shutdown()
+        await self.main.chat_store.close()
+        self._chat_dir.cleanup()
 
     def tearDown(self):
         for name, value in self.previous.items():
@@ -720,7 +731,7 @@ class TestSessionLogCorrelation(unittest.IsolatedAsyncioTestCase):
     async def test_chat_binds_explicit_and_generated_session_ids(self):
         observed_session_ids = []
 
-        async def process_user_request(_message, session_id):
+        async def process_user_request(_message, session_id, history=()):
             observed_session_ids.append(
                 structlog.contextvars.get_contextvars().get("session_id")
             )
@@ -733,6 +744,7 @@ class TestSessionLogCorrelation(unittest.IsolatedAsyncioTestCase):
             }
 
         agent = AsyncMock()
+        agent.head_messages = AsyncMock(return_value=[])
         agent.process_user_request = AsyncMock(side_effect=process_user_request)
         saver = AsyncMock()
         saver.adelete_thread = AsyncMock()
@@ -838,6 +850,12 @@ class TestAPI(unittest.TestCase):
     def setUp(self):
         main_module = importlib.import_module("main")
         session_store = importlib.import_module("session_store")
+        self._main = main_module
+        self._saved_runtime = {
+            name: getattr(main_module, name)
+            for name in ("chat_store", "registry", "sessions", "pinned", "admission_lock")
+        }
+        self._chat_dir = tempfile.TemporaryDirectory()
 
         setattr(
             main_module,
@@ -849,6 +867,16 @@ class TestAPI(unittest.TestCase):
         )
         setattr(main_module, "pinned", {})
         setattr(main_module, "admission_lock", asyncio.Lock())
+        self.client.loop.run_until_complete(
+            importlib.import_module("test_support").install_test_runtime(main_module, self._chat_dir.name)
+        )
+
+    def tearDown(self):
+        self.client.loop.run_until_complete(self._main.registry.shutdown())
+        self.client.loop.run_until_complete(self._main.chat_store.close())
+        for name, value in self._saved_runtime.items():
+            setattr(self._main, name, value)
+        self._chat_dir.cleanup()
 
     @classmethod
     def tearDownClass(cls):
@@ -866,19 +894,30 @@ class TestAPI(unittest.TestCase):
         print(f"✅ API health check passed: {data.get('status')}")
 
     def test_openapi_lists_only_the_surviving_paths(self):
-        """Given the deleted endpoints, When the schema is read, Then four paths remain."""
+        """The schema lists exactly the legacy and new API paths."""
         main_module = importlib.import_module("main")
 
         self.assertEqual(
             sorted(main_module.app.openapi()["paths"]),
             [
                 "/api/chat",
+                "/api/chats",
+                "/api/chats/{chat_id}",
+                "/api/chats/{chat_id}/cancel",
+                "/api/chats/{chat_id}/messages",
+                "/api/chats/{chat_id}/reports",
+                "/api/chats/{chat_id}/status",
                 "/api/clear/{session_id}",
                 "/api/history/{session_id}",
+                "/api/reports/{report_id}",
+                "/api/reports/{report_id}/saved",
+                "/api/reports/{report_id}/update",
+                "/api/runs/{request_id}",
+                "/api/saved-reports",
                 "/health",
             ],
         )
-        print("✅ API surface: exactly the four surviving paths")
+        print("✅ API surface: exactly the 15 supported paths")
 
     def test_openapi_json_documents_an_optional_scope_verdict(self):
         """Given the served schema, When it is fetched, Then ChatResponse lists scope_verdict."""
@@ -895,7 +934,10 @@ class TestAPI(unittest.TestCase):
         main_module = importlib.import_module("main")
 
         class _GateRefusingAgent:
-            async def process_user_request(self, _message, session_id):
+            async def head_messages(self, _session_id):
+                return []
+
+            async def process_user_request(self, _message, session_id, history=()):
                 return {
                     "success": True,
                     "data": None,
@@ -1003,7 +1045,10 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            async def process_user_request(self, _msg, session_id):
+            async def head_messages(self, _session_id):
+                return []
+
+            async def process_user_request(self, _msg, session_id, history=()):
                 return {
                     "success": True,
                     "data": None,
@@ -1036,7 +1081,10 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            async def process_user_request(self, _msg, session_id):
+            async def head_messages(self, _session_id):
+                return []
+
+            async def process_user_request(self, _msg, session_id, history=()):
                 return {
                     "success": True,
                     "data": None,
@@ -1062,7 +1110,10 @@ class TestAPI(unittest.TestCase):
         import main as main_module
 
         class _StubAgent:
-            async def process_user_request(self, _msg, session_id):
+            async def head_messages(self, _session_id):
+                return []
+
+            async def process_user_request(self, _msg, session_id, history=()):
                 return {
                     "success": True,
                     "data": None,
@@ -1135,7 +1186,10 @@ class _LifecycleAgent:
         self.calls = []
         self.all_started = asyncio.Event()
 
-    async def process_user_request(self, user_message, session_id):
+    async def head_messages(self, _session_id):
+        return []
+
+    async def process_user_request(self, user_message, session_id, history=()):
         self.calls.append((user_message, session_id))
         if len(self.calls) >= self.expected_starts:
             self.all_started.set()
@@ -1176,6 +1230,9 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
             "admission_lock": self.main.admission_lock,
             "agent_system": self.main.agent_system,
             "checkpoint_saver": self.main.checkpoint_saver,
+            "chat_store": self.main.chat_store,
+            "registry": self.main.registry,
+            "tool_service": self.main.tool_service,
             "pinned": self.main.pinned,
             "sessions": self.main.sessions,
         }
@@ -1185,8 +1242,14 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
         self.saver = _LifecycleSaver()
         self.main.checkpoint_saver = self.saver
         self.main.agent_system = _LifecycleAgent()
+        self.main.tool_service = object()
+        self._chat_dir = tempfile.TemporaryDirectory()
+        await importlib.import_module("test_support").install_test_runtime(self.main, self._chat_dir.name)
 
     async def asyncTearDown(self):
+        await self.main.registry.shutdown()
+        await self.main.chat_store.close()
+        self._chat_dir.cleanup()
         for name, value in self.previous.items():
             setattr(self.main, name, value)
 
@@ -1319,11 +1382,7 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
 
     async def test_two_requests_keep_same_session_pinned_until_both_finish(self):
         first_release = asyncio.Event()
-        second_release = asyncio.Event()
-        agent = _LifecycleAgent(
-            releases={"first": first_release, "second": second_release},
-            expected_starts=2,
-        )
+        agent = _LifecycleAgent(releases={"first": first_release}, expected_starts=1)
         self.main.agent_system = agent
 
         first = asyncio.create_task(
@@ -1333,24 +1392,20 @@ class TestSessionLifecycleAPI(unittest.IsolatedAsyncioTestCase):
                 {"message": "first", "session_id": "shared"},
             )
         )
-        second = asyncio.create_task(
-            self._request(
-                "POST",
-                "/api/chat",
-                {"message": "second", "session_id": "shared"},
-            )
-        )
         await asyncio.wait_for(agent.all_started.wait(), timeout=1)
-        self.assertEqual(self.main.pinned["shared"], 2)
+        second_status, second_body = await self._request(
+            "POST",
+            "/api/chat",
+            {"message": "second", "session_id": "shared"},
+        )
+        self.assertEqual(second_status, 409)
+        self.assertEqual(second_body["detail"], "Чат занят, дождитесь ответа")
+        self.assertEqual(agent.calls, [("first", "shared")])
+        self.assertEqual(self.main.pinned["shared"], 1)
 
         first_release.set()
         first_status, _ = await first
         self.assertEqual(first_status, 200)
-        self.assertEqual(self.main.pinned["shared"], 1)
-
-        second_release.set()
-        second_status, _ = await second
-        self.assertEqual(second_status, 200)
         self.assertNotIn("shared", self.main.pinned)
 
     async def test_simultaneous_admissions_never_double_pick_or_overshoot(self):
@@ -2424,7 +2479,10 @@ class TestStartupInitialization(unittest.TestCase):
             created_agents.append(kwargs)
 
             class _Agent:
-                async def process_user_request(self, _message, session_id):
+                async def head_messages(self, _session_id):
+                    return []
+
+                async def process_user_request(self, _message, session_id, history=()):
                     return {
                         "success": True,
                         "data": None,

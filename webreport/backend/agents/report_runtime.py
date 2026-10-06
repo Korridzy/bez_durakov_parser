@@ -10,10 +10,12 @@ from typing import (
     Protocol,
     TypeGuard,
     TypedDict,
+    cast,
     final,
     runtime_checkable,
 )
 
+from langchain_core.messages import BaseMessage
 from bd_shared.logging_setup import adopt_third_party_loggers
 from agent.correlation import CorrelatedModelClient
 from agent.graph import (
@@ -214,8 +216,14 @@ class ReportAgentSystem:
             0 if gate is None else 1,
         )
 
+    async def head_messages(self, session_id: str) -> list[BaseMessage]:
+        checkpoint = await self._saver.aget_tuple(
+            {"configurable": {"thread_id": session_id}}
+        )
+        return cast(list[BaseMessage], list(_checkpoint_messages(checkpoint) or ()))
+
     async def process_user_request(
-        self, user_message: str, session_id: str
+        self, user_message: str, session_id: str, history: Sequence[BaseMessage] = ()
     ) -> ReportResponse:
         try:
             execution = self._execution
@@ -225,6 +233,7 @@ class ReportAgentSystem:
                 execution.graph,
                 execution.timeout_seconds,
                 execution.extra_steps,
+                history,
             )
         except Exception as error:
             logger.exception("Report request failed")
@@ -271,10 +280,11 @@ class ReportAgentSystem:
         graph: CompiledGraph,
         timeout_seconds: float,
         extra_steps: int,
+        history: Sequence[BaseMessage] = (),
     ) -> ReportResponse:
         try:
             result = await wait_for(
-                arun(graph, user_message, session_id, extra_steps=extra_steps),
+                arun(graph, user_message, session_id, extra_steps=extra_steps, history=history),
                 timeout_seconds,
             )
         except TimeoutError:
@@ -299,13 +309,16 @@ class ReportAgentSystem:
         query_trace = trace(turn_messages)
         payload = result["report_payload"]
         data = None
+        report_handle = None
         if payload is not None:
             name, args = _parse_handle(payload)
             data = await self._registry.execute_response(name, args)
+            report_handle = {"tool": name, "args": args}
         return success(
             extract_text(turn_messages[-1].content),
             query_trace,
             data,
             reasoning=current_turn_reasoning(result["messages"]),
             verdict=result.get("scope_verdict"),
+            report_handle=report_handle,
         )

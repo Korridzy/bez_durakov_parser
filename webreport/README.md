@@ -13,10 +13,10 @@
    - Маршрутизация запросов к агентам
    - Доступ к данным через сервисный слой
 
-2. **Frontend (Streamlit)** - пользовательский интерфейс
-   - Чат с AI-агентом
-   - Отображение отчётов
-   - Переключение между представлениями
+2. **Frontend (React + nginx)** - пользовательский интерфейс
+   - Чаты: список, поиск, история, отправка и остановка запроса
+   - Несколько отчётов каждого чата с таблицей, графиком, CSV и параметрами
+   - Сохранённые отчёты: закладки и обновление по исходным аргументам
 
 3. **Agents (LangGraph)** - ReAct агент с сохранением thread state
    - обращается к модели через `ChatLiteLLM` и внутренний LiteLLM proxy `litellm:4000`
@@ -40,14 +40,20 @@ webreport/
 │   │   ├── engine.py              # Builds the one engine, read-only per dialect
 │   │   └── tools_cli.py           # `make validate-tools` preflight
 │   ├── acceptance_fixture.py       # Dialect-neutral stand-in operator module for the lanes
-│   ├── main.py                     # FastAPI application and API routes
+│   ├── chat_store.py               # Чаты, сообщения, запуски и отчёты в chats.db
+│   ├── runs.py                     # Фоновые запросы и отмена
+│   ├── chat_routes.py              # CRUD чатов, сообщения, status и cancel
+│   ├── report_routes.py            # Отчёты, закладки и Update
+│   ├── api_errors.py               # Ошибки новых маршрутов
+│   ├── main.py                     # FastAPI application and legacy routes
 │   ├── start.py                    # Container launcher for Uvicorn/debugger
 │   ├── test_system.py              # Docker-based backend tests
 │   └── pyproject.toml              # Backend Poetry dependencies
-├── frontend/
-│   ├── main.py                     # Streamlit application
-│   ├── start.py                    # Container launcher for Streamlit/debugger
-│   └── pyproject.toml              # Frontend Poetry dependencies
+├── ui/
+│   ├── src/                        # React/TypeScript: chats, reports, saved, layout
+│   ├── tests_e2e/                  # Офлайн Playwright с API stub
+│   ├── package.json                # npm, Vitest, Vite
+│   └── nginx.conf                  # SPA и proxy /api/ на backend:8000
 ├── data_collector/
 │   ├── entrypoint.py               # APScheduler entrypoint
 │   ├── fetch_pipeline.py           # Manual/scheduled XLSM fetch pipeline
@@ -74,11 +80,7 @@ webreport/
 ### Зависимости
 
 У WebReport нет общего `requirements.txt`.
-Зависимости разделены по сервисам и описаны в Poetry-манифестах:
-
-- `backend/pyproject.toml`
-- `frontend/pyproject.toml`
-- `data_collector/pyproject.toml`
+Python зависимости описаны в `backend/pyproject.toml` и `data_collector/pyproject.toml`. React UI использует `ui/package.json` и `ui/package-lock.json`.
 
 При обычном Docker-запуске вручную устанавливать их не нужно: Docker-образы устанавливают зависимости во время сборки.
 
@@ -103,8 +105,9 @@ cd webreport
 - `[application]`: `debug`, `log_level`, `environment`, `log_format`, `default_game_date`
 - `[webreport]`:
   - Сеть и запуск: `backend_port`, `frontend_port`, `allowed_origins`, `debug`, `reload`, `backend_debug_port`, `frontend_debug_port`
-  - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`
+  - Агент и состояние: `agent_recursion_limit`, `agent_timeout_seconds`, `chat_request_timeout_seconds`, `agent_max_rows_per_fetch`, `agent_max_rows_per_run`, `checkpoint_ttl_seconds`, `checkpoint_db_path`, `chats_db_path`
   - Архив: `archive_enabled`, `archive_db_path`, `archive_retention_days`, `archive_store_reasoning`, `archive_reasoning_retention_days`, `archive_sweep_interval_seconds`
+  - Scope gate: `agent_scope_gate_model`, `agent_scope_gate_history_turns`
   - LiteLLM: `litellm_base_url`, `agent_model`, `probe_retry_attempts`, `probe_retry_delay_seconds`, `probe_request_timeout_seconds`, `llm_max_retries`, `llm_request_timeout_seconds`
   - Langfuse: `langfuse_host`, `langfuse_public_key`, `langfuse_secret_key`
   - Ключи провайдеров: `openai_api_key`, `openrouter_api_key`, `opencode_api_key`
@@ -115,12 +118,15 @@ cd webreport
     - `knowledge_max_topics = 50`
     - `knowledge_max_doc_bytes = 65536`
     - `knowledge_max_bytes_per_turn = 131072`
+    - `knowledge_max_scope_chars = 2000`
 - `[dataset]`:
   - `tools_module = "bd_shared.tools.bez_durakov"` — точка импорта модуля с фабрикой `build_service(engine)`
   - `knowledge_dir = "knowledge/bez_durakov"` — папка знаний, переехавшая сюда из `[webreport]`
 - `[xlsm_fetch]`: `google_drive_folder_url`, `modes`, `download_dir`, `start_time`, `interval_hours`, `timezone`
 
 `../bd_shared/config.toml` содержит отслеживаемые значения по умолчанию. Для конкретного сервера скопируйте `../bd_shared/config.local.toml.example` в `../bd_shared/config.local.toml`, установите права `0600` и добавляйте только изменяемые значения в те же секции. Значения в local-файле заменяют значения базового файла; списки, например `allowed_origins`, заменяются целиком.
+
+`chats_db_path = "/data/chats.db"` задаёт отдельное хранилище чатов и отчётов. `BD_CHATS_DB_PATH` имеет приоритет; `DATASET=<name>` задаёт `/data/chats-<name>.db`. Checkpoints, архив и чаты находятся в отдельных файлах под `../vm/backend/checkpoints`. `frontend_debug_port` и `chat_request_timeout_seconds` сохранены для старых overlay, но не используются после #112.
 
 ### Логирование
 
@@ -138,7 +144,7 @@ cd webreport
 В `modes` сейчас поддерживается только `browser_selenium`.
 `public_api` и `gdown` пока являются заглушками и должны считаться неподдерживаемыми.
 
-`generate_env.py` создаёт общий файл для интерполяции Docker Compose и отдельный env-файл для каждого сервиса. Все файлы создаются сразу с правами `0600`:
+`generate_env.py` создаёт общий файл для интерполяции Docker Compose и env-файлы для MySQL, backend, data collector и LiteLLM. nginx не использует env-файл. Все перечисленные файлы создаются сразу с правами `0600`:
 
 | Файл | Назначение |
 |---|---|
@@ -146,7 +152,6 @@ cd webreport
 | `.env.mysql` | `MYSQL_*` для контейнера MySQL |
 | `.env.backend` | `BD_DOCKER` и debug/reload backend |
 | `.env.data_collector` | `BD_DOCKER` и timezone data collector |
-| `.env.frontend` | URL backend и debug/reload frontend |
 | `.env.litellm` | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` и `LANGFUSE_HOST` для LiteLLM |
 
 Не редактируйте сгенерированные `.env*` вручную. Для изменения серверных настроек обновите `../bd_shared/config.local.toml`, затем снова выполните `make start`, `make mysql-start` из корня проекта или `make generate-env`.
@@ -162,7 +167,7 @@ MySQL применяет эти значения при первой иници�
 
 Для production замените их на реальные доверенные frontend URL и не используйте `*` вместе с credentialed CORS.
 
-`[webreport].reload` управляет автоматической перезагрузкой backend и frontend при изменении кода. Она всегда отключается при `[webreport].debug = true`.
+`[webreport].reload` управляет автоматической перезагрузкой только backend через Uvicorn при изменении кода. Она отключается при `[webreport].debug = true`. UI поставляется как собранные файлы в nginx образе без монтирования исходников, поэтому после изменений UI нужен `make restart` или `make rebuild`. Цель `make restart` пересобирает образ и заново создаёт контейнеры приложения.
 
 ### Запуск
 
@@ -224,7 +229,7 @@ agent_model = "opencode/big-pickle"
 
 Доступны: `opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, `opencode/laguna-s-2.1-free`, `opencode/ling-3.0-flash-free`, `opencode/north-mini-code-free` и `opencode/nemotron-3-ultra-free`. OpenCode помечает эти модели как временно бесплатные, поэтому при изменении каталога обновите конфигурацию. После изменения ключа или модели выполните `make restart`.
 
-LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state и отдельный архив разговоров в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
+LiteLLM доступен только внутри `webreport-network` как `litellm:4000`, без host port. Backend хранит checkpoint state, отдельный архив разговоров и chats.db в `../vm/backend/checkpoints`; игровые данные остаются в MySQL. Запускайте ровно один backend replica, горизонтальное масштабирование backend не поддерживается.
 
 ### Рассуждения модели
 
@@ -245,43 +250,58 @@ Host-порты берутся из секции `[webreport]` в `../bd_shared/
 
 ### Интерфейс пользователя
 
-Система имеет два представления, между которыми можно переключаться:
+«Чаты» содержит список с поиском, создание, переименование и удаление чатов. Сообщения, рассуждения и отчёты восстанавливаются после перезагрузки. Пока запрос выполняется, доступна кнопка остановки. Завершённый ответ с помеченными агентом данными автоматически становится отчётом, текстовый ответ не создаёт отчёт.
 
-#### 1. Чат с AI-агентом 💬
+Справа находятся отчёты выбранного чата. Их можно открыть и сохранить; вкладка «Сохранённые отчёты» показывает все закладки и кнопку «Обновить». Закладка не копирует отчёт: обновление меняет данные и дату в обоих местах. Аргументы инструмента зафиксированы при генерации, включая конкретную игру, которую исходный запрос назвал последней.
 
-- Введите требования к отчёту на естественном языке
-- Агент интерпретирует запрос и генерирует отчёт
-- История диалога сохраняется
-
-**Примеры запросов:**
-- "покажи все игры"
-- "топ 10 команд по очкам"
-- "статистика команды [название]"
-- "очки всех команд"
-
-#### 2. Отчёт 📊
-
-- Отображение данных в виде таблиц
-- Метрики и статистика
-- Визуализация (графики)
-- Экспорт в CSV
+На узких экранах список чатов и отчёты открываются в выдвижных панелях. При reduced motion индикатор выполнения статичен. Авторизации нет: все посетители этого развёртывания видят все чаты и сохранённые отчёты.
 
 ### API Endpoints
 
-#### Chat
-- `POST /api/chat` - отправить сообщение агенту
-- `GET /api/history/{session_id}` - получить историю диалога
-- `POST /api/clear/{session_id}` - очистить историю
+### Чаты и фоновые запросы
+
+| Метод и путь | Назначение |
+| --- | --- |
+| `POST /api/chats` | Создать чат, 201; необязательный `title` |
+| `GET /api/chats?q=&limit=50&cursor=` | Поиск по названию, вопросам и ответам, список `items` и `next_cursor`; limit 1-100 |
+| `GET /api/chats/{id}` | Чат, сообщения, карточки отчётов, `active_run` и `last_run` |
+| `PATCH /api/chats/{id}` | Переименовать: `{"title":"Название"}`, 1-80 символов после схлопывания пробелов |
+| `DELETE /api/chats/{id}` | Удалить чат, 204; сохранённые отчёты остаются с `chat_id=null` |
+| `POST /api/chats/{id}/messages` | `{"request_id":"<32 строчных hex>","message":"Вопрос"}`, 202 Run; повтор того же id и текста даёт 200 существующий Run |
+| `GET /api/chats/{id}/status` | `active_run` и `last_run` для polling |
+| `POST /api/chats/{id}/cancel` | `{"request_id":"<id запуска>"}`, 202 при остановке, 200 для завершённого запуска |
+| `GET /api/runs/{request_id}` | Состояние одного запуска |
+
+На чат допускается один активный запуск. Состояния: `running`, `cancelling`, `succeeded`, `failed`, `cancelled`, `interrupted`. В публичном Run поле `response.data` равно null; данные читаются из отчёта. Конфликт активного запуска даёт 409 `chat_busy`, повтор id с другим текстом или чатом даёт 409 `request_conflict`.
+
+### Отчёты и закладки
+
+| Метод и путь | Назначение |
+| --- | --- |
+| `GET /api/chats/{id}/reports` | Карточки отчётов чата, новые первыми |
+| `GET /api/reports/{id}` | Карточка и полные `data` |
+| `PUT /api/reports/{id}/saved` | Поставить закладку, 200, идемпотентно |
+| `DELETE /api/reports/{id}/saved` | Снять закладку, 204; отчёт остаётся в чате |
+| `GET /api/saved-reports` | Все закладки, по `saved_at` от новых к старым |
+| `POST /api/reports/{id}/update` | Повторить сохранённые tool/args без модели, 200 Report с новой датой и версией |
+
+Update выполняется в HTTP запросе с пределом `agent_timeout_seconds`. Занятый отчёт или активный запуск его чата дают 409 `report_busy`; ошибка инструмента даёт 502 `update_failed` и прежний отчёт в поле `report`. Неизвестный объект даёт 404 `not_found`. Новые ошибки имеют форму `{"error":{"code":"...","message":"..."}}`; стандартная валидация FastAPI сохраняет `detail`.
+
+### Совместимые маршруты
+
+`POST /api/chat` ожидает завершения фонового запуска и возвращает прежний ChatResponse с дополнительным необязательным `report`. Параллельный запрос в том же чате даёт 409 `detail="Чат занят, дождитесь ответа"`. Закрытие вкладки не обещает отмену запуска, для отмены нужен явный cancel.
+
+`GET /api/history/{session_id}` читает checkpoint историю. `POST /api/clear/{session_id}` удаляет checkpoint, сообщения и запуски, но оставляет чат и все его отчёты; при активном запуске возвращает 409. Ни один из этих маршрутов не удаляет архив.
 
 ## 🔧 Технический стек
 
 - **Python 3.11+**
 - **FastAPI** - REST API framework
-- **Streamlit** - UI framework
+- **React 19 + TypeScript 5 + Vite 6**, nginx раздаёт SPA и проксирует `/api/`
 - **LangGraph** - ReAct agent and checkpointed threads
 - **ChatLiteLLM** (`langchain-litellm`) - model client for the internal LiteLLM proxy
 - **LiteLLM** - internal model proxy at `litellm:4000`
-- **SQLite**. Checkpoint state и отдельный архив разговоров находятся в `../vm/backend/checkpoints`
+- **SQLite**. Checkpoint state, отдельный архив разговоров и chats.db находятся в `../vm/backend/checkpoints`
 - **SQLAlchemy** - ORM для работы с БД
 - **Pandas** - обработка данных
 - **Uvicorn** - ASGI сервер
@@ -322,14 +342,11 @@ Backend в Docker подключается к БД по имени хоста `m
 
 ### Frontend не может подключиться к Backend
 
-1. Проверьте статус контейнеров: `docker compose ps`
-2. Проверьте backend: `curl http://localhost:28000/health`
-3. Проверьте логи: `docker compose logs frontend`
-4. Проверьте переменную `API_BASE_URL` в `docker-compose.yml` — по умолчанию frontend обращается к `http://backend:8000`
-5. Проверьте, что backend отвечает из Compose-сети:
-   ```bash
-   docker compose exec frontend sh -lc 'python -c "import urllib.request; print(urllib.request.urlopen(\"http://backend:8000/health\").read().decode())"'
-   ```
+1. Проверьте контейнеры: `docker compose ps`.
+2. Проверьте backend: `curl -i http://localhost:28000/health`.
+3. Проверьте nginx и proxy: `curl -i http://localhost:28501/health` и `curl -i http://localhost:28501/api/chats`.
+4. Прочитайте `docker compose logs frontend`. Ошибка 502 от nginx означает проблему доступа к backend, а nginx `/health` проверяет только сам frontend.
+5. После изменений UI выполните `make restart`: исходники не монтируются, assets находятся в собранном образе. Правила proxy находятся в `ui/nginx.conf`, переменной `API_BASE_URL` у UI нет.
 
 ### Агенты не работают
 
@@ -373,7 +390,8 @@ make test           # Backend-набор плюс обе приёмочные п
 make test-postgres  # Только приёмочная полоса против одноразового PostgreSQL
 make validate-knowledge # Проверить папку знаний
 make validate-tools # Проверить модуль инструментов оператора
-make test-e2e-setup # Один раз: установить e2e-зависимости и Chromium
+make test-ui        # Сборка UI образа с Vitest и TypeScript/Vite
+make test-e2e-setup # Один раз: Playwright image и npm-зависимости в Docker
 make test-e2e       # Offline Playwright e2e против stub backend
 make fetch-data     # Ручной запуск XLSM fetch
 make fetch-data-log # Логи data_collector с последнего fetch
@@ -395,6 +413,10 @@ docker compose down -v              # Остановить и удалить vol
 ```
 
 ## 📝 Разработка
+
+### Разработка UI
+
+Редактируйте `ui/src/`. `make test-ui` собирает frontend образ и выполняет `npm test` и `npm run build` в нём. `make test-e2e-setup` подготавливает pinned Playwright `v1.55.0-noble`, а `make test-e2e` запускает офлайн Chromium проверки с API stub для обычного и reduced-motion режима. На хосте Node и Chromium не нужны. После изменений UI выполните `make restart`, даже если зависимости не менялись.
 
 ### Добавление новых методов запросов
 

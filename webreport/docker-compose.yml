@@ -103,14 +103,6 @@ services:
     container_name: webreport-frontend
     ports:
       - "${WEBREPORT_FRONTEND_PORT}:8501"
-    env_file:
-      - path: .env.frontend
-        required: false
-    volumes:
-      - ./frontend:/app
-      - ../bd_shared:/bd_shared:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
     networks:

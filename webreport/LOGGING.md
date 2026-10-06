@@ -7,7 +7,6 @@
 Имена сервисов:
 
 - `webreport-backend`
-- `webreport-frontend`
 - `webreport-data-collector`
 - `bd-parser-cli`
 - `bd-clear-database`
@@ -15,7 +14,7 @@
 
 Предпусковые CLI `agent/knowledge_cli.py` и `agent/tools_cli.py` печатают результат проверки. Они намеренно не инициализируют конвейер.
 
-Известно ограничение. Собственные логгеры фреймворка `Streamlit` не передаются корневому логгеру и сохраняют формат `Streamlit`. Через конвейер проходят только записи приложения фронтенда.
+React UI работает в браузере и не пишет серверные записи приложения. nginx использует собственные access/error logs, которые видны через `docker compose logs frontend`, отдельно от Python конвейера.
 
 ## Конфигурация
 
@@ -29,7 +28,7 @@
 | `log_rotation_max_size` | Максимальный размер одного файла Docker log |
 | `log_rotation_max_files` | Максимальное число файлов Docker log для контейнера |
 
-`generate_env.py` создаёт для бэкенда, фронтенда и сборщика данных переменные: `BD_LOG_LEVEL`, `BD_LOG_FORMAT`, `BD_ENVIRONMENT`, `BD_APP_VERSION`.
+`generate_env.py` создаёт для бэкенда и сборщика данных переменные: `BD_LOG_LEVEL`, `BD_LOG_FORMAT`, `BD_ENVIRONMENT`, `BD_APP_VERSION`.
 
 На производственном сервере `config.local.toml` задаёт `environment = "production"` и `log_format = "json"`. Команды `make restart` и `make start` заново создают файлы окружения. Поэтому `BD_APP_VERSION` получает короткий идентификатор текущего проверенного коммита.
 
@@ -66,6 +65,7 @@
 | `request_id` | Идентификатор HTTP запроса |
 | `trace_id` | Идентификатор trace, производный от `request_id` |
 | `session_id` | Идентификатор сессии чата |
+| `run_id` | Идентификатор фонового запуска, `runs.request_id` в chats.db |
 | `job_id` | Идентификатор запуска задания коллектора |
 | `job_name` | Имя задания коллектора |
 | `model` | Имя модели при вызове LiteLLM |
@@ -78,7 +78,7 @@
 
 Значение `X-Request-ID` принимается, если оно полностью соответствует `[A-Za-z0-9._-]{1,128}`. При отсутствии или недопустимом значении бэкенд создаёт новый идентификатор. Ответ всегда содержит заголовок `X-Request-ID`.
 
-Фронтенд создаёт один новый `X-Request-ID` для каждого вызова бэкенда. Бэкенд связывает `session_id` в `/api/chat`, `/api/history/{session_id}` и `/api/clear/{session_id}`.
+UI создаёт новый `X-Request-ID` для каждого HTTP вызова, nginx передаёт его backend. HTTP `request_id` отличается от id фонового запуска в JSON отправки сообщения: исполнитель связывает этот id как `run_id`, а чат как `session_id`. Архив получает HTTP `request_id` и `trace_id`. Legacy маршруты `/api/chat`, `/api/history/{session_id}` и `/api/clear/{session_id}` также связывают `session_id`.
 
 Если `request_id` состоит из 32 строчных шестнадцатеричных символов, `trace_id` совпадает с ним. Иначе `trace_id` равен первым 32 символам SHA-256 от UTF-8 представления `request_id`.
 
@@ -116,7 +116,7 @@ docker compose logs backend | grep <request_id>
 
 По замыслу логи не содержат личных данных. `session_id` создаётся случайным вызовом `uuid.uuid4()`, а идентичность пользователя в приложении отсутствует.
 
-Каждый перезапуск `Streamlit` опрашивает `/health`. Это создаёт одну запись `http_request` и одну запись `backend_request`. Такой объём на уровне `INFO` принят в пределах установленного ограничения.
+UI опрашивает `/api/chats/{id}/status` во время активного запроса раз в секунду, после ошибки соединения раз в три секунды. Backend пишет HTTP записи этих запросов; отдельного Python события `backend_request` от UI нет. nginx `/health` проверяет только frontend, готовность модели проверяет backend `/health`.
 
 ## Интеграция с внешними системами
 
@@ -143,6 +143,6 @@ Issue #108 добавляет постоянный архив разговоро
 | `webreport/backend/test_archive_cli.py` | `make -C webreport test` |
 | `webreport/backend/test_langfuse_proxy_contract.py` | `make -C webreport test-proxy-contract` и `make -C webreport test` |
 | `webreport/data_collector/test_logging_jobs.py` | Корневой `make test` |
-| `webreport/frontend/test_frontend_logging.py` | Корневой `make test` |
+| `webreport/ui/src/api/client.test.ts` | `make -C webreport test-ui` |
 
-`make -C webreport test` запускает проверки бэкенда, включая archive и correlation проверки. `make -C webreport test-proxy-contract` выполняет контрактную проверку внутри образа LiteLLM. Корневой `make test` дополнительно запускает проверки общего кода, сборщика данных и фронтенда.
+`make -C webreport test` запускает проверки бэкенда, включая archive и correlation проверки. `make -C webreport test-proxy-contract` выполняет контрактную проверку внутри образа LiteLLM. Корневой `make test` дополнительно запускает проверки общего кода и сборщика данных. UI проверяется отдельными `make -C webreport test-ui` и `make -C webreport test-e2e`.

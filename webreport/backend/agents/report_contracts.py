@@ -18,6 +18,7 @@ class ReportResponse(TypedDict):
     message: str
     reasoning: str | None
     verdict: str | None
+    report_handle: dict[str, object] | None
     error: NotRequired[str]
 
 

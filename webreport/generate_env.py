@@ -152,21 +152,6 @@ env_files: dict[str, dict[str, str]] = {
             cast(str, xlsm_fetch_config.get("timezone", "Europe/Belgrade"))
         ),
     },
-    ".env.frontend": {
-        "BD_LOG_LEVEL": log_level,
-        "BD_LOG_FORMAT": log_format,
-        "BD_ENVIRONMENT": environment,
-        "BD_APP_VERSION": app_version,
-        "API_BASE_URL": dotenv_quote("http://backend:8000"),
-        "CHAT_REQUEST_TIMEOUT_SECONDS": str(
-            cast(int, webreport_config["chat_request_timeout_seconds"])
-        ),
-        "WEBREPORT_DEBUG": debug,
-        "WEBREPORT_RELOAD": reload_enabled,
-        "WEBREPORT_FRONTEND_DEBUG_PORT": str(
-            cast(int, webreport_config.get("frontend_debug_port", 5679))
-        ),
-    },
     ".env.litellm": {
         "OPENAI_API_KEY": dotenv_quote(
             cast(str, webreport_config.get("openai_api_key", ""))
@@ -183,6 +168,8 @@ env_files: dict[str, dict[str, str]] = {
     },
 }
 
+# nginx consumes no environment file; remove settings from the former frontend.
+(env_directory / ".env.frontend").unlink(missing_ok=True)
 for env_file_name, env_values in env_files.items():
     write_env_file(env_file_name, env_values)
 write_litellm_settings()

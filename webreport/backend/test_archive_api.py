@@ -57,8 +57,11 @@ class StubAgentSystem:
         self.result = result
         self.calls: list[tuple[str, str]] = []
 
+    async def head_messages(self, _session_id: str) -> list[object]:
+        return []
+
     async def process_user_request(
-        self, user_message: str, session_id: str
+        self, user_message: str, session_id: str, history=()
     ) -> dict[str, object]:
         self.calls.append((user_message, session_id))
         if isinstance(self.result, BaseException):
@@ -98,6 +101,8 @@ class ArchiveRouteTests(unittest.IsolatedAsyncioTestCase):
                 "agent_system",
                 "archive",
                 "checkpoint_saver",
+                "chat_store",
+                "registry",
                 "pinned",
                 "sessions",
                 "tool_service",
@@ -110,10 +115,13 @@ class ArchiveRouteTests(unittest.IsolatedAsyncioTestCase):
         self.main.pinned = {}
         self.main.sessions = self.session_store.SessionIndex(max_size=4, ttl=60)
         self.main.tool_service = object()
+        await importlib.import_module("test_support").install_test_runtime(self.main, self.temp_dir.name)
         structlog.contextvars.clear_contextvars()
 
     async def asyncTearDown(self) -> None:
         structlog.contextvars.clear_contextvars()
+        await self.main.registry.shutdown()
+        await self.main.chat_store.close()
         await self.archive.close()
         for name, value in self.saved.items():
             setattr(self.main, name, value)

@@ -33,14 +33,12 @@ def main():
     all_checks.append(check_dir(os.path.join(base_dir, "backend"), "Backend directory"))
     all_checks.append(check_dir(os.path.join(base_dir, "backend", "agents"), "Backend agents directory"))
     all_checks.append(check_dir(os.path.join(base_dir, "..", "bd_shared", "tools"), "Default tool module directory"))
-    all_checks.append(check_dir(os.path.join(base_dir, "frontend"), "Frontend directory"))
     all_checks.append(check_dir(os.path.join(base_dir, "data_collector"), "Data collector directory"))
     print()
 
     # Check main files
     print("📄 Main Files:")
     all_checks.append(check_file(os.path.join(base_dir, "backend", "main.py"), "Backend API"))
-    all_checks.append(check_file(os.path.join(base_dir, "frontend", "main.py"), "Frontend App"))
     all_checks.append(check_file(os.path.join(base_dir, "backend", "agents", "report_runtime.py"), "Agent System"))
     all_checks.append(check_file(os.path.join(base_dir, "..", "bd_shared", "tools", "bez_durakov.py"), "Default tool module"))
     all_checks.append(check_file(os.path.join(base_dir, "data_collector", "entrypoint.py"), "Data collector entrypoint"))
@@ -50,12 +48,13 @@ def main():
     # Check configuration files
     print("⚙️ Configuration:")
     all_checks.append(check_file(os.path.join(base_dir, "backend", "pyproject.toml"), "Backend pyproject"))
-    all_checks.append(check_file(os.path.join(base_dir, "frontend", "pyproject.toml"), "Frontend pyproject"))
+    all_checks.append(check_file(os.path.join(base_dir, "ui", "package.json"), "UI package manifest"))
     all_checks.append(check_file(os.path.join(base_dir, "data_collector", "pyproject.toml"), "Data collector pyproject"))
     print()
 
     # Check Docker files and tools
     print("🐳 Docker & Tools:")
+    all_checks.append(check_file(os.path.join(base_dir, "ui", "nginx.conf"), "UI nginx config"))
     all_checks.append(check_file(os.path.join(base_dir, "docker-compose.yml"), "Docker Compose"))
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.backend"), "Dockerfile Backend"))
     all_checks.append(check_file(os.path.join(base_dir, "Dockerfile.data_collector"), "Dockerfile Data Collector"))

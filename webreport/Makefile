@@ -41,7 +41,13 @@ COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.ym
 CASE_FILE ?=
 ARCHIVE_USER = $(if $(filter command line,$(origin USER)),$(strip $(USER)))
 
-.PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
+# Keep this tag equal to the exact @playwright/test version in ui/package.json.
+PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.55.0-noble
+UI_E2E_RUN = docker run --rm --init --name sdae18-ui-e2e-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work --network none -e CI=1 $(PLAYWRIGHT_IMAGE)
+UI_E2E_RUN_WITH_NETWORK = docker run --rm --init --name sdae18-ui-e2e-setup-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work -e CI=1 $(PLAYWRIGHT_IMAGE)
+E2E_ARGS ?=
+
+.PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-ui test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
 
 help:
 	@echo "🎮 Web Reporting System - Docker Commands"
@@ -51,11 +57,11 @@ help:
 	@echo "  make generate-env - Generate Compose and service env files"
 	@echo "  make start DATASET=<name> - Start against the dataset in ../range/<name>"
 	@echo "                              (add DATASET_DIR=<abs path> when it lives elsewhere)"
-	@echo "  make start       - Start services with Docker Compose"
+	@echo "  make start       - Build the UI image and start services with Docker Compose"
 	@echo "  make stop        - Stop Docker containers"
 	@echo "  make validate-knowledge - Validate the configured knowledge folder"
 	@echo "  make validate-tools - Validate the configured operator tool module"
-	@echo "  make restart     - Validate, then recreate LiteLLM, backend, and frontend"
+	@echo "  make restart     - Validate, build the UI image, then recreate application services"
 	@echo "  make logs        - View logs"
 	@echo "  make build       - Build Docker images"
 	@echo "  make rebuild     - Validate, rebuild, and restart services"
@@ -64,8 +70,9 @@ help:
 	@echo "  make test                - Run the offline backend suite (no running stack needed)"
 	@echo "  make test-proxy-contract - Prove the LiteLLM Langfuse contract offline"
 	@echo "  make test-postgres       - Run the acceptance lane against a throwaway PostgreSQL"
-	@echo "  make test-e2e-setup      - One-time: install frontend dev deps and Chromium (needs network)"
-	@echo "  make test-e2e            - Run the offline stub-backed Playwright lane"
+	@echo "  make test-ui             - Build the frontend image with Vitest and TypeScript checks"
+	@echo "  make test-e2e-setup      - One-time: pull Playwright and install npm deps in Docker (needs network)"
+	@echo "  make test-e2e            - Run offline Chromium in Docker, both motion projects (no host Node)"
 	@echo ""
 	@echo "Conversation archive:"
 	@echo "  make archive-list [SESSION=<id>] [USER=<id>] [LIMIT=<n>]"
@@ -91,7 +98,7 @@ generate-env:
 
 start: generate-env
 	@echo "🐳 Starting services with Docker Compose..."
-	$(DOCKER_COMPOSE) up -d $(COMPOSE_SERVICES)
+	$(DOCKER_COMPOSE) up -d --build $(COMPOSE_SERVICES)
 	@echo ""
 	@echo "✅ Services started!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -139,7 +146,7 @@ test-live-scope-eval:
 
 restart: generate-env validate-knowledge validate-tools
 	@echo "🔄 Recreating LiteLLM, backend, and frontend..."
-	$(DOCKER_COMPOSE) up -d --force-recreate litellm backend frontend
+	$(DOCKER_COMPOSE) up -d --build --force-recreate litellm backend frontend
 	@echo "✅ Application services recreated"
 
 logs:
@@ -159,15 +166,19 @@ rebuild: generate-env validate-knowledge validate-tools
 
 test: generate-env
 	@echo "🧪 Running tests in Docker..."
-	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_reasoning.py && python /app/test_knowledge_cli.py && python /app/test_tools_cli.py && python /app/test_request_context.py && python /app/test_agent_correlation.py && python /app/test_archive_store.py && python /app/test_archive_api.py && python /app/test_archive_cli.py"
-	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CONFIG_FILE=test_config_sqlite.toml backend python /app/test_acceptance_swap.py
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CHATS_DB_PATH=/tmp/test-chats.db backend sh -c "python /app/test_system.py && python /app/test_agent.py && python /app/test_reasoning.py && python /app/test_knowledge_cli.py && python /app/test_tools_cli.py && python /app/test_request_context.py && python /app/test_agent_correlation.py && python /app/test_archive_store.py && python /app/test_archive_api.py && python /app/test_archive_cli.py && \
+	  python /app/test_chat_store.py && \
+	  python /app/test_runs.py && \
+	  python /app/test_chat_routes.py && \
+	  python /app/test_report_routes.py"
+	$(DOCKER_COMPOSE) run --rm --no-deps -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CHATS_DB_PATH=/tmp/test-chats.db -e BD_CONFIG_FILE=test_config_sqlite.toml backend python /app/test_acceptance_swap.py
 	$(MAKE) test-proxy-contract
 	$(MAKE) test-postgres
 	@echo ""
 
 test-proxy-contract: generate-env
 	@echo "🔭 Proving the LiteLLM Langfuse correlation contract offline..."
-	$(DOCKER_COMPOSE) run --rm --no-deps --entrypoint python -e LITELLM_LOCAL_MODEL_COST_MAP=True -v "$(abspath backend/test_langfuse_proxy_contract.py):/app/test_langfuse_proxy_contract.py:ro" litellm /app/test_langfuse_proxy_contract.py
+	$(DOCKER_COMPOSE) run --rm --no-deps --entrypoint python -e LITELLM_LOCAL_MODEL_COST_MAP=True -e BD_CHATS_DB_PATH=/tmp/test-chats.db -v "$(abspath backend/test_langfuse_proxy_contract.py):/app/test_langfuse_proxy_contract.py:ro" litellm /app/test_langfuse_proxy_contract.py
 
 test-postgres: generate-env
 	@echo "🐘 Running the PostgreSQL acceptance lane..."
@@ -175,20 +186,24 @@ test-postgres: generate-env
 	 $(COMPOSE_TEST) up -d --wait postgres_test; \
 	 status=$$?; \
 	 if [ $$status -eq 0 ]; then \
-	   $(COMPOSE_TEST) run --rm -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CONFIG_FILE=test_config_postgres.toml backend python /app/test_acceptance_swap.py; \
+	   $(COMPOSE_TEST) run --rm -e BD_CHECKPOINT_DB_PATH=/tmp/test-checkpoints.db -e BD_ARCHIVE_DB_PATH=/tmp/test-conversations.db -e BD_CHATS_DB_PATH=/tmp/test-chats.db -e BD_CONFIG_FILE=test_config_postgres.toml backend python /app/test_acceptance_swap.py; \
 	   status=$$?; \
 	 fi; \
 	 $(COMPOSE_TEST) rm -fsv postgres_test; \
 	 exit $$status
 
+test-ui:
+	$(DOCKER_COMPOSE) build frontend
+
 test-e2e-setup:
-	@echo "🎭 Installing frontend dev dependencies and Chromium (one-time, needs network)..."
-	cd frontend && PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring poetry install --with dev --no-root && poetry run playwright install chromium
+	@echo "🎭 Installing the pinned Playwright image and npm dependencies in Docker..."
+	docker pull $(PLAYWRIGHT_IMAGE)
+	$(UI_E2E_RUN_WITH_NETWORK) npm ci --no-audit --no-fund
 	@echo "✅ e2e lane ready. Run: make test-e2e"
 
 test-e2e:
 	@echo "🎭 Running the offline stub-backed Playwright lane..."
-	cd frontend && PYTHONPATH="$(abspath ..)" poetry run pytest tests_e2e -x -q
+	$(UI_E2E_RUN) npx --no-install playwright test $(E2E_ARGS)
 	@echo ""
 
 clean:
