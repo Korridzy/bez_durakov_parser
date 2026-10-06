@@ -15,10 +15,6 @@ RUN apt-get update && apt-get install -y \
 # Match the Poetry release used to generate the lock file.
 RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-# Create pyproject.toml placeholder to install dependencies
-# Code will be mounted as volume at runtime
-RUN mkdir -p /app
-
 # Copy locked dependency metadata from the build context.
 # We need to pre-install dependencies before mounting
 COPY webreport/backend/pyproject.toml webreport/backend/poetry.lock /tmp/
@@ -29,9 +25,20 @@ RUN poetry config virtualenvs.create false
 # Install dependencies
 RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
 
+# Application code, shared library and Alembic tooling. Development Compose
+# bind mounts shadow /app and /bd_shared, so these copies serve release images.
+COPY bd_shared /bd_shared
+COPY alembic.ini /alembic/alembic.ini
+COPY migrations /alembic/migrations
+COPY webreport/backend /app
+
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.source="https://github.com/Korridzy/bez_durakov_parser" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}"
+
 # Expose port
 EXPOSE 8000
 EXPOSE 5678
 
-# Run the backend (code will be mounted as volume)
+# Run the backend
 CMD ["python", "start.py"]
