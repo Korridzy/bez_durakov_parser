@@ -37,14 +37,30 @@ define dataset_preflight
 endef
 endif
 
+# Persistent host paths. Unset, Compose falls back to ../vm and ../xlsm_archive exactly as
+# before; a CI run or a second checkout points them at its own scratch directories.
+BD_VM_DIR ?=
+BD_XLSM_ARCHIVE_DIR ?=
+ifneq ($(strip $(BD_VM_DIR)),)
+export BD_VM_DIR
+endif
+ifneq ($(strip $(BD_XLSM_ARCHIVE_DIR)),)
+export BD_XLSM_ARCHIVE_DIR
+endif
+VM_DIR = $(if $(strip $(BD_VM_DIR)),$(BD_VM_DIR),../vm)
+
 COMPOSE_TEST = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.test.yml
 CASE_FILE ?=
 ARCHIVE_USER = $(if $(filter command line,$(origin USER)),$(strip $(USER)))
 
 # Keep this tag equal to the exact @playwright/test version in ui/package.json.
 PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.55.0-noble
-UI_E2E_RUN = docker run --rm --init --name sdae18-ui-e2e-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work --network none -e CI=1 $(PLAYWRIGHT_IMAGE)
-UI_E2E_RUN_WITH_NETWORK = docker run --rm --init --name sdae18-ui-e2e-setup-$$$$ -v "$(abspath ui)":/work -v webreport-ui-node-modules:/work/node_modules -w /work -e CI=1 $(PLAYWRIGHT_IMAGE)
+# Per-run names, so two runs on one host share neither a container name nor npm dependencies.
+# The defaults keep the shell PID suffix and the shared volume used so far.
+E2E_RUN_ID ?= $$$$
+E2E_NODE_MODULES_VOLUME ?= webreport-ui-node-modules
+UI_E2E_RUN = docker run --rm --init --name sdae18-ui-e2e-$(E2E_RUN_ID) -v "$(abspath ui)":/work -v $(E2E_NODE_MODULES_VOLUME):/work/node_modules -w /work --network none -e CI=1 $(PLAYWRIGHT_IMAGE)
+UI_E2E_RUN_WITH_NETWORK = docker run --rm --init --name sdae18-ui-e2e-setup-$(E2E_RUN_ID) -v "$(abspath ui)":/work -v $(E2E_NODE_MODULES_VOLUME):/work/node_modules -w /work -e CI=1 $(PLAYWRIGHT_IMAGE)
 E2E_ARGS ?=
 
 .PHONY: help generate-env validate-knowledge validate-tools archive-list archive-show archive-delete test-live-scope-eval test test-proxy-contract test-postgres test-ui test-e2e-setup test-e2e clean start stop restart logs build rebuild fetch-data fetch-data-log
@@ -93,7 +109,7 @@ help:
 
 generate-env:
 	$(dataset_preflight)
-	[ -d ../vm/backend/checkpoints ] || mkdir -p ../vm/backend/checkpoints
+	[ -d "$(VM_DIR)/backend/checkpoints" ] || mkdir -p "$(VM_DIR)/backend/checkpoints"
 	PYTHONPATH="$(abspath ..)" poetry run python generate_env.py
 
 start: generate-env
