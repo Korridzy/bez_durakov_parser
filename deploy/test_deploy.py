@@ -299,7 +299,7 @@ class ExecutorTest(unittest.TestCase):
         self.assertFailure(42, self.invoke(["rollback", TAG, "--restore-backup", "backup-id"]))
 
     def test_later_command_bodies_refuse_instead_of_claiming_success(self):
-        for args in (["deploy", TAG], ["rollback", TAG], ["smoke"], ["status"], ["verify-db-isolation"]):
+        for args in (["deploy", TAG], ["rollback", TAG], ["smoke"], ["status"]):
             with self.subTest(args=args):
                 self.assertFailure(42, self.invoke(args))
 

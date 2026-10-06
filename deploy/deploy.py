@@ -11,6 +11,7 @@ import contextlib
 import datetime
 import fcntl
 import io
+import ipaddress
 import json
 import os
 import re
@@ -20,7 +21,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn, Protocol, TextIO, TypeAlias
 
@@ -454,6 +455,8 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
                     if not options.tag:
                         raise DeployError(2, "no rollback target")
                     emit(options.tag)
+                case "verify-db-isolation":
+                    return verify_db_isolation(executor, options.container_probe, emit)
                 case _:
                     raise DeployError(42, "not implemented in this todo; operational stages belong to todos 12-16")
         return 0
@@ -471,6 +474,342 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
     finally:
         if log is not None:
             log.close()
+
+
+# --- verify-db-isolation (todo 16) ---
+# Read-only checks that the database and the application ports are reachable from this
+# host's loopback only. Rows never print an address other than 127.0.0.1: a binding that
+# is not loopback is described by kind, not by value.
+ISOLATION_SERVICES = ("mysql", "backend", "frontend")
+ISOLATION_TIMEOUT = 30
+PROBE_TIMEOUT = 60
+LISTEN_STATE = "0A"
+PROBE_MARKER_RE = re.compile(r"^probe-exit=([0-9]+)$", re.MULTILINE)
+HOST_KINDS = {"wildcard": "a wildcard address", "loopback": "a loopback address other than 127.0.0.1",
+              "other": "a non-loopback address", "invalid": "an unparsable address"}
+OFF_HOST_RECIPE = """\
+Off-host probe: run these from ANOTHER machine, never from this host.
+  nc -4 -z -w 3 <public-ipv4> {port}    expected: refused
+  nc -6 -z -w 3 <public-ipv6> {port}    expected: refused
+  nc -4 -z -w 3 <public-ipv4> 443       control, expected: connect (proves the path is open)
+Reading the result: connect = FAIL (the port is exposed), refused = PASS,
+timeout = filtered or inconclusive (confirm the control port connects, then retry)."""
+
+
+def classify_host(host: object) -> str:
+    """loopback, wildcard, other or invalid; an absent or empty host means every interface."""
+    if host is None:
+        return "wildcard"
+    if not isinstance(host, str):
+        return "invalid"
+    text = host.strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    text = text.partition("%")[0]
+    if text in ("", "*"):
+        return "wildcard"
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return "invalid"
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if address.is_unspecified:
+        return "wildcard"
+    return "loopback" if address.is_loopback else "other"
+
+
+def describe_host(host: object) -> str:
+    if host == "127.0.0.1":
+        return "127.0.0.1"
+    return HOST_KINDS[classify_host(host)]
+
+
+def parse_ss(text: str) -> list[tuple[str, int]]:
+    """Local (host, port) of every row of `ss -ltnH`; a row that cannot be read is an error."""
+    listeners = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if len(fields) < 4:
+            raise ValueError("short ss row")
+        host, sep, port = fields[3].rpartition(":")
+        if not sep or not host or not (port.isascii() and port.isdecimal()) or not 0 < int(port) <= 65535:
+            raise ValueError("invalid ss local address")
+        listeners.append((host[1:-1] if host.startswith("[") and host.endswith("]") else host, int(port)))
+    return listeners
+
+
+def parse_proc_tcp(text: str, *, v6: bool) -> list[tuple[str, int]]:
+    """Listening (host, port) pairs of /proc/net/tcp or tcp6; addresses are little-endian words."""
+    listeners = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields or fields[0] == "sl":
+            continue
+        if len(fields) < 4:
+            raise ValueError("short proc row")
+        address, _, port = fields[1].partition(":")
+        if fields[3].upper() != LISTEN_STATE:
+            continue
+        if v6:
+            if len(address) != 32:
+                raise ValueError("invalid proc address")
+            raw = b"".join(bytes.fromhex(address[i:i + 8])[::-1] for i in range(0, 32, 8))
+            host = str(ipaddress.IPv6Address(raw))
+        else:
+            if len(address) != 8:
+                raise ValueError("invalid proc address")
+            host = str(ipaddress.IPv4Address(bytes.fromhex(address)[::-1]))
+        listeners.append((host, int(port, 16)))
+    return listeners
+
+
+def read_proc_tcp(name: str) -> str:
+    return Path("/proc/net", name).read_text()
+
+
+def parse_port_bindings(text: str) -> list[tuple[str, str | None]]:
+    """(container port, HostIp) per published binding; a missing HostIp is None (all interfaces)."""
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        raise ValueError("port bindings are not JSON") from None
+    if data is None:
+        return []
+    if not isinstance(data, dict):
+        raise ValueError("port bindings are not an object")
+    bindings: list[tuple[str, str | None]] = []
+    for port, entries in data.items():
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            raise ValueError("port binding entries are not a list")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("port binding entry is not an object")
+            host = entry.get("HostIp")
+            if not (host is None or isinstance(host, str)):
+                raise ValueError("port binding host is not a string")
+            bindings.append((port, host))
+    return bindings
+
+
+def service_ports(config: dict[str, JSON], name: str) -> list[dict[str, JSON]] | None:
+    """Published port entries of one rendered service, or None when the service is absent."""
+    services = config.get("services")
+    if not isinstance(services, dict):
+        raise ValueError("services are not an object")
+    service = services.get(name)
+    if service is None:
+        return None
+    if not isinstance(service, dict):
+        raise ValueError("service is not an object")
+    ports = service.get("ports") or []
+    entries = [port for port in ports if isinstance(port, dict)] if isinstance(ports, list) else []
+    if not isinstance(ports, list) or len(entries) != len(ports):
+        raise ValueError("ports are malformed")
+    return entries
+
+
+class IsolationCheck:
+    def __init__(self, executor: Executor, container_probe: bool):
+        self.executor = executor
+        self.container_probe = container_probe
+        self.rows: list[tuple[str, str, str]] = []
+        self.required: tuple[str, ...] = ("mysql",)
+        self.published: list[tuple[str, int]] = []
+        self.image: str | None = None
+        port = executor.env.get("BD_MYSQL_HOST_PORT") or "3306"
+        self.mysql_port = int(port) if port.isascii() and port.isdecimal() else 3306
+
+    def add(self, status: str, check: str, detail: str) -> None:
+        self.rows.append((status, check, detail))
+
+    def run_command(self, argv: Sequence[str], timeout: int = ISOLATION_TIMEOUT) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return self.executor.runner.run(argv, cwd=self.executor.root, env=self.executor.env, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+    def compose_prefix(self) -> list[str] | None:
+        webreport = self.executor.root / "webreport"
+        files = [webreport / "docker-compose.yml"]
+        # An existing state file means release mode even when it is empty or corrupt: only
+        # its absence selects the dev files, so a damaged state can never approve dev mode.
+        release = (self.executor.state.path / "current.json").exists()
+        if release:
+            self.required = ISOLATION_SERVICES
+        try:
+            current = self.executor.state.read_current()
+        except (DeployError, OSError):
+            self.add("FAIL", "compose-config", "deployment state is unreadable; cannot choose the release files")
+            return None
+        if release:
+            last = current.get("last_successful")
+            tag = last.get("tag") if isinstance(last, dict) else None
+            pin = (self.executor.state.path / "releases" / tag / "compose.release.yml"
+                   if isinstance(tag, str) and TAG_RE.fullmatch(tag) else None)
+            if pin is None or not pin.is_file():
+                self.add("FAIL", "compose-config", "no recorded release pin file; cannot verify the release configuration")
+                return None
+            files += [webreport / "docker-compose.prod.yml", pin]
+        prefix = ["docker", "compose", "--project-directory", str(webreport)]
+        for file in files:
+            prefix += ["-f", str(file)]
+        return prefix
+
+    def check_config(self, prefix: list[str]) -> None:
+        result = self.run_command([*prefix, "config", "--format", "json"])
+        try:
+            if result is None or result.returncode:
+                raise DeployError(17, "unrendered")
+            config = json_object(result.stdout.encode(), 17, "invalid")
+        except DeployError:
+            self.add("FAIL", "compose-config",
+                     "could not render the compose configuration (run make -C webreport generate-env first)")
+            return
+        for name in ISOLATION_SERVICES:
+            required = name in self.required
+            try:
+                ports = service_ports(config, name)
+            except ValueError:
+                self.add("FAIL" if required else "INFO", "compose-config", f"{name} ports are malformed")
+                continue
+            if ports is None:
+                self.add("FAIL" if required else "INFO", "compose-config", f"{name} is not in the configuration")
+                continue
+            if not ports:
+                self.add("PASS" if required else "INFO", "compose-config", f"{name} publishes no host port")
+            for port in ports:
+                host, published = port.get("host_ip"), port.get("published")
+                digits = str(published)
+                number = int(digits) if digits.isascii() and digits.isdecimal() else None
+                status = "PASS" if host == "127.0.0.1" else "FAIL"
+                if not required:
+                    status = "INFO"
+                note = "" if required else " (not required in dev mode)"
+                self.add(status, "compose-config", f"{name} port {published} binds {describe_host(host)}{note}")
+                if required and number is not None:
+                    self.published.append((name, number))
+        services = config.get("services")
+        mysql = services.get("mysql") if isinstance(services, dict) else None
+        image = mysql.get("image") if isinstance(mysql, dict) else None
+        self.image = image if isinstance(image, str) and DIGEST_REF_RE.fullmatch(image) else None
+
+    def check_containers(self, prefix: list[str] | None) -> None:
+        for name in ISOLATION_SERVICES:
+            required = name in self.required
+            bad, skip = ("FAIL" if required else "INFO"), ("SKIP" if required else "INFO")
+            if prefix is None:
+                self.add("SKIP", "container-bindings", f"{name} not checked without the compose configuration")
+                continue
+            listing = self.run_command([*prefix, "ps", "-q", name])
+            if listing is None or listing.returncode:
+                self.add(bad, "container-bindings", f"{name} containers could not be listed")
+                continue
+            ids = listing.stdout.split()
+            if not ids:
+                self.add(skip, "container-bindings", f"{name} has no running container")
+            for container in ids:
+                result = self.run_command(["docker", "container", "inspect", container,
+                                           "--format", "{{json .HostConfig.PortBindings}}"])
+                try:
+                    if result is None or result.returncode:
+                        raise ValueError("inspect failed")
+                    bindings = parse_port_bindings(result.stdout)
+                except ValueError:
+                    self.add(bad, "container-bindings", f"{name} port bindings could not be read")
+                    continue
+                if not bindings:
+                    self.add("PASS" if required else "INFO", "container-bindings", f"{name} publishes no host port")
+                for port, host in bindings:
+                    status = ("PASS" if host == "127.0.0.1" else "FAIL") if required else "INFO"
+                    self.add(status, "container-bindings", f"{name} {port} binds {describe_host(host)}")
+
+    def listeners(self) -> list[tuple[str, int]] | None:
+        result = self.run_command(["ss", "-ltnH"])
+        if result is not None and result.returncode == 0 and result.stdout.strip():
+            try:
+                return parse_ss(result.stdout)
+            except ValueError:
+                pass
+        try:
+            found = parse_proc_tcp(read_proc_tcp("tcp"), v6=False)
+            try:
+                found += parse_proc_tcp(read_proc_tcp("tcp6"), v6=True)
+            except FileNotFoundError:
+                pass
+            return found
+        except (OSError, ValueError):
+            return None
+
+    def check_sockets(self) -> None:
+        ports = {port for _, port in self.published}
+        if "mysql" not in {name for name, _ in self.published}:
+            ports.add(self.mysql_port)
+        listeners = self.listeners()
+        if not listeners:
+            self.add("FAIL", "listening-sockets", "cannot enumerate listening TCP sockets, so isolation is not proven")
+            return
+        for port in sorted(ports):
+            kinds = [classify_host(host) for host, number in listeners if number == port]
+            if not kinds:
+                self.add("PASS", "listening-sockets", f"port {port} is not listening")
+            elif all(kind == "loopback" for kind in kinds):
+                self.add("PASS", "listening-sockets", f"port {port} listens on loopback only")
+            else:
+                worst = next(kind for kind in kinds if kind != "loopback")
+                self.add("FAIL", "listening-sockets", f"port {port} listens on {HOST_KINDS[worst]}")
+
+    def check_probe(self) -> None:
+        if self.image is None:
+            self.add("FAIL", "container-probe", "no digest-pinned mysql image in the configuration; cannot run the probe")
+            return
+        for name, port in self.published:
+            script = f'timeout 3 bash -c "</dev/tcp/host.docker.internal/{port}" 2>&1; echo probe-exit=$?'
+            result = self.run_command(["docker", "run", "--rm", "--pull", "never", "--network", "bridge",
+                                       "--add-host", "host.docker.internal:host-gateway", self.image,
+                                       "sh", "-c", script], PROBE_TIMEOUT)
+            output = result.stdout if result is not None and result.returncode == 0 else ""
+            marker = PROBE_MARKER_RE.search(output)
+            label = f"{name} port {port} through the host gateway"
+            if marker is None:
+                self.add("FAIL", "container-probe", f"{label}: the probe did not run to completion")
+                continue
+            code = int(marker.group(1))
+            if code == 0:
+                self.add("FAIL", "container-probe", f"{label}: connected, so the port is exposed")
+            elif code == 124:
+                self.add("FAIL", "container-probe", f"{label}: inconclusive, the connection timed out")
+            elif code == 1 and "Connection refused" in output:
+                self.add("PASS", "container-probe", f"{label}: refused")
+            else:
+                self.add("FAIL", "container-probe", f"{label}: the probe failed with exit {code}")
+
+    def run(self, emit: Callable[[str], None]) -> int:
+        prefix = self.compose_prefix()
+        if prefix is not None:
+            self.check_config(prefix)
+        self.check_containers(prefix)
+        self.check_sockets()
+        if self.container_probe:
+            self.check_probe()
+        for status, check, detail in self.rows:
+            emit(f"{status:<4} {check:<18} {detail}")
+        mysql_ports = [port for name, port in self.published if name == "mysql"]
+        emit(OFF_HOST_RECIPE.format(port=mysql_ports[0] if mysql_ports else self.mysql_port))
+        failed = sum(status == "FAIL" for status, _, _ in self.rows)
+        emit("RESULT: PASS" if not failed else f"RESULT: FAIL ({failed} failed)")
+        return 1 if failed else 0
+
+
+def verify_db_isolation(executor: Executor, container_probe: bool, emit: Callable[[str], None]) -> int:
+    return IsolationCheck(executor, container_probe).run(emit)
+
+
+# --- end verify-db-isolation ---
 
 
 if __name__ == "__main__":
