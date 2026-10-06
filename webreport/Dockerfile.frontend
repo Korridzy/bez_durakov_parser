@@ -8,6 +8,9 @@ COPY webreport/ui/public ./public
 RUN npm test && npm run build
 
 FROM nginx:1.28-alpine
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.source="https://github.com/Korridzy/bez_durakov_parser" org.opencontainers.image.revision="${SOURCE_COMMIT}"
+
 COPY webreport/ui/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /ui/dist /usr/share/nginx/html
 EXPOSE 8501

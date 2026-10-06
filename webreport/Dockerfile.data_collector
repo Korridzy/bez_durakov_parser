@@ -29,4 +29,12 @@ COPY webreport/data_collector/pyproject.toml webreport/data_collector/poetry.loc
 
 RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
 
+COPY bd_shared /bd_shared
+COPY webreport/data_collector /app
+COPY webreport/__init__.py /webreport/__init__.py
+RUN ln -s /app /webreport/data_collector
+
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.source="https://github.com/Korridzy/bez_durakov_parser" org.opencontainers.image.revision="${SOURCE_COMMIT}"
+
 CMD ["python", "entrypoint.py"]
