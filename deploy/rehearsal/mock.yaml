@@ -1,0 +1,11 @@
+# Used only in the disposable rehearsal clone, never in a deployed release.
+model_list:
+  - model_name: rehearsal-mock
+    litellm_params:
+      model: openai/rehearsal-mock
+      mock_response: "ok"
+      api_key: "rehearsal-not-a-key"
+general_settings:
+  dangerously_permit_weak_or_unset_master_key: true
+include:
+  - litellm_settings.generated.yaml

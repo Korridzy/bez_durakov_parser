@@ -18,7 +18,7 @@ override DEPLOY_ARGS_SAFE_INPUT := $(value DEPLOY_ARGS)
 unexport DEPLOY_ARGS
 export DEPLOY_ARGS_SAFE_INPUT
 
-.PHONY: help setup test lint upgrade-db upgrade-code deploy rollback deploy-status deploy-smoke deploy-verify-isolation webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test lint upgrade-db upgrade-code deploy rollback deploy-status deploy-smoke deploy-verify-isolation deploy-rehearsal webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -53,6 +53,7 @@ help:
 	@echo "  make deploy-status [DEPLOY_ARGS=--help] - Show deployment status"
 	@echo "  make deploy-smoke [DEPLOY_ARGS=--llm-smoke|--help] - Run deployment smoke checks"
 	@echo "  make deploy-verify-isolation [DEPLOY_ARGS=--container-probe|--help] - Verify database port isolation"
+	@echo "  make deploy-rehearsal - Run the disposable local release rehearsal (never on a server)"
 	@echo ""
 	@echo "Tip: make -C webreport help"
 
@@ -96,6 +97,9 @@ setup:
 	poetry env use "$$python_path"; \
 	poetry install --no-root; \
 	poetry run python -V
+
+deploy-rehearsal:
+	@bash deploy/rehearsal.sh
 
 lint:
 	@poetry run ruff check .
