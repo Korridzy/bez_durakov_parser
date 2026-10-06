@@ -2,6 +2,20 @@
 
 Веб-система для генерации отчётов по игровым данным с использованием AI-агентов.
 
+## Production releases
+
+Use [DEPLOYMENT.md](DEPLOYMENT.md) for server setup, release approval, deployment, rollback and isolation. Its [first-rollout checklist](DEPLOYMENT.md#first-rollout) is operator-only.
+
+Run these from the repository root on the server:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation DEPLOY_ARGS=--container-probe
+```
+
+`make deploy-status` currently exits 42 because its handler isn't implemented. Make reports any recipe failure as exit 2; see the guide for the real executor codes. The commands below describe development, not production updates. Don't run tests or rebuilds on the server. CI tests each pull request and `main` push; publishing a stable release promotes tested image digests, and the server pulls them.
+
 ## 🏗️ Архитектура
 
 Система построена на сервис-ориентированной архитектуре (SOA) и включает:
@@ -88,7 +102,7 @@ Backend использует `ChatLiteLLM` из `langchain-litellm` с диап�
 
 В манифесте backend зависимость дополнена маркером Python `<3.15`: буквальная строка без маркера не разрешалась при текущей верхней границе Python проекта. Диапазон версий пакета сохранён, а образ backend использует Python 3.11.
 
-LiteLLM proxy использует moving tag `main-stable`, а `langchain-litellm` является молодым community-пакетом. Поэтому обновляйте образы осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop.
+LiteLLM proxy закреплён digest, разрешённым из `main-stable`; `langchain-litellm` остаётся молодым community-пакетом. Обновляйте digest осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop. Для production смена runtime digest требует [инфраструктурной процедуры](DEPLOYMENT.md#infrastructure-procedure) перед deploy.
 
 ### Настройка конфигурации
 
@@ -134,6 +148,7 @@ cd webreport
 
 ### Документация
 
+- [DEPLOYMENT.md](DEPLOYMENT.md) covers releases, server-local deployment, restore and isolation.
 - [LOGGING.md](LOGGING.md) описывает общий конвейер логов.
 - [ARCHIVE.md](ARCHIVE.md) описывает постоянный архив разговоров, CLI, срок хранения и Langfuse.
 
@@ -362,7 +377,7 @@ Backend в Docker подключается к БД по имени хоста `m
 объявлена в отдельном файле `docker-compose.test.yml`, который рабочий стек никогда не
 загружает, и после прогона удаляется только сервис `postgres_test`.
 
-Нужен Docker Compose не ниже 2.24: полоса использует тег `!override` в `depends_on`, чтобы
+Нужен Docker Compose не ниже 2.24.4: полоса использует тег `!override` в `depends_on`, чтобы
 заменить карту зависимостей, а не дополнить её. На более старых версиях теги сливаются
 аддитивно, и полоса потянет за собой `mysql` и `litellm` из основного compose-файла. Проверить
 версию можно командой `docker compose version`.

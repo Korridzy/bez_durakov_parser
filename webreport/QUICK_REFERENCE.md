@@ -1,5 +1,18 @@
 # 🎮 ШПАРГАЛКА - Система веб-отчётов
 
+## Production commands
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) and its [first-rollout checklist](DEPLOYMENT.md#first-rollout). From the repository root:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation DEPLOY_ARGS=--container-probe
+```
+
+`make deploy-status` currently returns executor code 42. Make returns 2 for every recipe failure; read the JSON error on stderr for the real deployment code. The remaining start, restart, rebuild and test commands are development commands. Never run tests or rebuilds on the server.
+
 ## ⚡ Быстрый старт (2 команды)
 
 ```bash
@@ -281,9 +294,9 @@ docker compose up -d --build
 |------|----------|
 | INDEX.md | Оглавление |
 | README.md | Основная документация |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Релизы, deploy, rollback, restore и изоляция |
 | USER_GUIDE.md | Для пользователей |
 | ARCHITECTURE.md | Для разработчиков |
-| SUMMARY.md | Итоговая сводка |
 | QUICK_REFERENCE.md | Эта шпаргалка |
 | ARCHIVE.md | Архив разговоров, Langfuse и удаление |
 

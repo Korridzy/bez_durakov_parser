@@ -2,6 +2,20 @@
 
 ## 📋 Оглавление документации
 
+### Production releases
+
+[DEPLOYMENT.md](DEPLOYMENT.md) covers server setup, cutting a release, migration approval, rollback, restore, smoke, isolation and privacy. The [first-rollout checklist](DEPLOYMENT.md#first-rollout) is for the operator; the agent never contacts the server.
+
+From the repository root:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation
+```
+
+`make deploy-status` is accepted but currently exits 42. Start, stop, rebuild and test recipes elsewhere in this index are for development. Production uses the server-local executor and doesn't run tests or builds.
+
 ### 🚀 Начало работы
 1. **[README.md](README.md)** - Главная страница
    - Обзор системы
@@ -9,11 +23,10 @@
    - Установка и запуск
    - Основные возможности
 
-2. **[SUMMARY.md](SUMMARY.md)** - Итоговая сводка
-   - Что было создано
-   - Структура проекта
-   - Технологии
-   - Достижения
+2. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Шпаргалка
+   - Команды разработки и production
+   - Конфигурация
+   - API и диагностика
 
 ### 📖 Для пользователей
 3. **[USER_GUIDE.md](USER_GUIDE.md)** - Руководство пользователя
@@ -185,7 +198,7 @@ curl http://localhost:28000/health
 ### Для разработчиков
 1. [README.md](README.md) - Обзор
 2. [ARCHITECTURE.md](ARCHITECTURE.md) - Архитектура
-3. [SUMMARY.md](SUMMARY.md) - Детали реализации
+3. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Команды и диагностика
 4. Изучение кода
 5. Расширение функциональности
 

@@ -15,6 +15,7 @@ parser/
 ├── bd_shared/          # Core shared library: ORM models, config, game data structure, DB helpers
 ├── data_to_parse/      # Input XLSM files (gitignored)
 ├── doc/                # ORM docs, data structure docs
+├── deploy/             # Server-local executor, promotion, isolation and local rehearsal
 ├── examples/           # Analysis examples using ORM (four_buckets.py)
 ├── migrations/         # Alembic DB migrations (MySQL)
 ├── range/              # Utility scripts for statistics/calendars (gitignored)
@@ -39,6 +40,7 @@ parser/
 | Configuration | `bd_shared/config.toml` + `bd_shared/config.py` | TOML config loaded via `tomllib`. Override with `BD_CONFIG_FILE` env var. The `[dataset]` section names the operator tool module and the knowledge folder |
 | Operator knowledge | `bd_shared/knowledge/` + `webreport/backend/agent/knowledge.py` | `load_knowledge()` reads the manifest and topics; `read_knowledge` returns topic text on demand. `dataset.knowledge_dir` points at the folder. The manifest supplies the agent persona and dataset scope |
 | DB migrations | `migrations/versions/` | Alembic, MySQL-only. `make upgrade-db` to apply |
+| Releases and deployment | `deploy/`, `.github/workflows/`, [webreport/DEPLOYMENT.md](webreport/DEPLOYMENT.md) | CI tests PRs/main, publishes passing main candidates; release promotion keeps tested digests; server-local deploy, rollback and isolation |
 | Fetch XLSM | `webreport/data_collector/` | Dockerized service using APScheduler. `make fetch-data` triggers manual fetch. `make fetch-data-log` shows logs since last run |
 | Web reporting | `webreport/` | FastAPI + React/nginx + LangGraph through ChatLiteLLM and the internal LiteLLM proxy; separate subsystem with its own `AGENTS.md` |
 | Chats and reports | `webreport/backend/chat_store.py`, `runs.py`, `chat_routes.py`, `report_routes.py` | Durable transcripts, cancellable runs and saved report replay; `[webreport].chats_db_path` defaults to `/data/chats.db`, `BD_CHATS_DB_PATH` overrides it |
@@ -59,12 +61,14 @@ parser/
 - **Game data**: All game data flows through `BdGame` dataclass. Never access raw XLSM directly after parsing
 - **Imports**: Use `from bd_shared.db import Database` not `from bd_shared import *`
 - **Tests**: No test framework configured. Tests are standalone scripts (`test_alembic_migration.py`, `webreport/test_system.py`)
-- **No CI/CD**: No GitHub Actions. Manual deployment only
+- **CI and releases**: GitHub Actions runs the full root `make test` on PRs and main. Passing main pushes publish candidates; stable GitHub Releases promote the same digests. The server pulls through `deploy/deploy.sh`; GitHub never contacts it. See [DEPLOYMENT.md](webreport/DEPLOYMENT.md).
 - **Monorepo-ish**: Root + `webreport/` have separate `pyproject.toml`. No Poetry workspaces — managed via Docker Compose for web components
 - **Knowledge**: The configured folder is read once at backend startup, and its manifest supplies the agent persona and dataset scope
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
+- Never run `make test` or `make rebuild` on the server. Tests and builds belong to development and disposable CI runners.
+- Never add server identifiers or credentials to tracked files, shared logs, workflows, releases, artifacts or image labels.
 - **DO NOT** add SQLite support for game data, which remains MySQL-only (see issue-61). Backend-owned SQLite stores: checkpoints, the conversation archive and the chat/report store at `../vm/backend/checkpoints`; none is a game-data store. An operator may configure a webreport dataset with SQLite.
 - **DO NOT** access the game database directly from this repository's own web components — go through `bd_shared/db.py` and `bd_shared/db_helpers.py`. An operator's own tool module reaches its database directly by design.
 - **DO NOT** bypass `normalize_team_name()` when storing/comparing team names
@@ -80,8 +84,8 @@ make setup              # Create .venv, install Poetry deps
 make upgrade-db         # Run Alembic migrations (poetry run alembic upgrade head)
 make upgrade-code       # Pull from main, preserve config.toml
 make webreport-start    # Start full stack: MySQL + FastAPI + React/nginx (Docker)
-make webreport-start DATASET=ikar               # Serve the dataset in range/ikar instead
-make webreport-start DATASET=ikar DATASET_DIR=C:/ikar  # Same, dataset directory elsewhere
+make webreport-start DATASET=<name>             # Development: serve another dataset
+make webreport-start DATASET=<name> DATASET_DIR=<absolute-path> # Dataset stored elsewhere
 make webreport-stop     # Stop web stack
 make mysql-start        # Start MySQL container only
 make mysql-stop         # Stop MySQL container
@@ -97,6 +101,17 @@ cd webreport && make test-e2e                     # Offline Playwright chat/repo
 cd webreport && make restart                     # Build UI image and recreate application services after UI edits
 ```
 
+Release commands run from root; the executor doesn't support DATASET:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation DEPLOY_ARGS=--container-probe
+```
+
+`make deploy-status` currently exits 42 because its handler isn't implemented. Make collapses recipe failures to exit 2; deployment JSON stderr carries the executor code. Default local state, logs and backups are under `vm/deploy/`.
+
 ## NOTES
 
 - `env/` in root is a stale virtualenv (gitignored) — project uses `.venv/` via Poetry
@@ -111,7 +126,7 @@ cd webreport && make restart                     # Build UI image and recreate a
 - LiteLLM is internal-only at `litellm:4000`. The checkpoint-backed backend is limited to one replica.
 - ChatLiteLLM (`langchain-litellm >=0.7,<0.8`) is the backend model client. Its LiteLLM SDK is deliberately installed in the backend image, reversing the prior SDK-out-of-image rule. The manifest keeps that version range with a dependency-level Python `<3.15` marker because the literal range was not lockable under the project Python bound; the shipped image uses Python 3.11.
 - Reasoning round-trip is always on: `OutboundReasoningFilter` echoes reasoning only within the current user turn, while checkpoints retain all turns. `ChatResponse.reasoning` and `/api/history` carry it to the collapsed frontend labels «Рассуждения» and, for recovered failed requests, «Рассуждения (неполные)». No reasoning means no block.
-- Anthropic-style thinking models are unsupported because `thinking_blocks` do not round-trip. There is no configuration switch for this. LiteLLM's `main-stable` image tag and the young community package `langchain-litellm` can change behavior; the minor-range pin and AC-1 echo tripwire are the mitigations.
+- Anthropic-style thinking models are unsupported because `thinking_blocks` do not round-trip. There is no configuration switch for this. LiteLLM is digest-pinned from `main-stable`; future digest updates and the young community package `langchain-litellm` can change behavior. The minor-range pin and AC-1 echo tripwire are the mitigations.
 - Chats, messages (including reasoning), runs and reports live in `chats.db` with no TTL. Only one run per chat may be active. Stop before publication persists «Запрос отменён»; an already completed answer stays intact. A server restart marks unfinished runs interrupted. Checkpoint expiry does not remove the stored transcript. `/api/clear` removes transcript and runs but keeps the chat and reports. Deleting a chat keeps saved reports as orphans.
 - The conversation archive has its own SQLite file. Checkpoint TTL, LRU eviction, `/api/history`, and `/api/clear` do not modify archive rows. `archive_retention_days` and `archive_reasoning_retention_days` set the archive and reasoning retention windows. `0` keeps the applicable data forever.
 - LiteLLM uses `langfuse_otel` only when `langfuse_host`, `langfuse_public_key`, and `langfuse_secret_key` are all non-empty. Correlation uses `traceparent` and metadata.

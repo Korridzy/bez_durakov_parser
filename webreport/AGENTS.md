@@ -29,8 +29,10 @@ webreport/
 │   ├── package.json                   # npm dependencies and Vitest/Vite scripts
 │   └── nginx.conf                     # SPA serving and /api/ proxy
 ├── ARCHIVE.md                         # Archive storage and Langfuse operations
+├── DEPLOYMENT.md                      # Releases, server-local deploy, restore and isolation
+├── docker-compose.prod.yml            # Production mounts, loopback ports and no builds
 ├── docker-compose.yml                 # MySQL + backend + frontend on webreport-network
-├── Dockerfile.backend                 # Backend container (mounts bd_shared as /bd_shared)
+├── Dockerfile.backend                 # Packaged backend, bd_shared and Alembic; dev mounts shadow code
 ├── Dockerfile.frontend                # Frontend container
 ├── LOGGING.md                         # Logging, correlation, redaction, and collection guide
 ├── Makefile                           # start/stop/restart/logs/build/test/clean
@@ -56,6 +58,7 @@ webreport/
 | Background runs | `backend/runs.py` + `backend/chat_routes.py` | One active run per chat, status polling and cancellation |
 | Report Update | `backend/report_routes.py` | Replays stored tool/args, no model call |
 | Docker config | `docker-compose.yml` | `bd_shared` mounted read-only at `/bd_shared` |
+| Release deployment | `../deploy/`, `../.github/workflows/`, [DEPLOYMENT.md](DEPLOYMENT.md) | Tested main candidates promoted by stable release, server-local executor, digest pins, backups and explicit recovery |
 | Serve another dataset | `docker-compose.dataset.yml` + `Makefile` | `make start DATASET=<name>` binds `DATASET_DIR` at `/dataset`, points `BD_CONFIG_LOCAL_FILE` at its overlay, and starts only LiteLLM, backend and frontend |
 | Source config | `../bd_shared/config.toml` + `config.local.toml` | Tracked defaults plus ignored server-local overrides in the same sections. `[dataset]` holds `tools_module` and `knowledge_dir`. `[webreport]` sets `agent_scope_gate_model`, which falls back to `agent_model` when empty, and `agent_scope_gate_history_turns`, the number of prior turns the gate may read |
 | Generated env | `.env*` + `generate_env.py` | `.env` is Compose-only; each service gets its own file; LiteLLM receives OpenAI, OpenRouter, and OpenCode keys from `.env.litellm` |
@@ -63,6 +66,9 @@ webreport/
 
 ## CONVENTIONS
 
+- **CI and releases**: Root `make test` runs on disposable GitHub runners for PRs and main. Passing main candidates are promoted without rebuilding when a stable release is published. The server pulls; no GitHub job connects to it.
+- **Production**: `docker-compose.prod.yml` plus generated release pins removes application source mounts, requires the local config file, and disables backend reload/debug. One backend, loopback host ports, no DATASET executor support.
+- **Container names**: Compose derives `<project>-<service>-1`. The dev project name is the directory name, normally `webreport`, unless overridden. Use service names in commands.
 - **Data access**: this repository's `backend/agent/` and `backend/agents/` never reach the dataset themselves. They discover their tool surface from the object the operator's `build_service(engine)` returns, and the backend injects the one engine it built.
 - **Agent tools**: every public method of that object becomes a tool, named after the method, described by its docstring and parameterised by its type hints. A helper that should not be a tool takes a leading underscore, and a property is never a tool.
 - **Knowledge prompt**: The prompt is composed at startup, and the configured folder is read exactly once. Its manifest supplies the persona and scope. When knowledge is loaded, the scope gate runs before the agent.
@@ -83,6 +89,8 @@ webreport/
 
 ## ANTI-PATTERNS
 
+- Never run `make test` or `make rebuild` on the server; use the release executor.
+- Never add server identifiers or credentials to tracked files, shared logs, workflows, releases, artifacts or image labels.
 - **DO NOT** put dataset queries in `backend/agent/` or `backend/agents/` — they belong in the operator tool module
 - **DO NOT** add HTTP routes that read or delete archive rows.
 - **DO NOT** put archive tables in `checkpoints.db`.
@@ -90,7 +98,7 @@ webreport/
 - **DO NOT** call the model from Update.
 - **DO NOT** add SQLite support for game data, which remains MySQL-only. The three backend-owned stores are unrelated to the operator dataset, which may use SQLite.
 - **DO NOT** log message text.
-- **DO NOT** import `bd_shared` without the Docker mount path (`sys.path.insert(0, '/')` is already in service)
+- **DO NOT** import `bd_shared` without the container package path (`sys.path.insert(0, '/')` is already in service). Release images package it at `/bd_shared`; dev mounts shadow that copy.
 - **DO NOT** hardcode ports — always read from generated env vars or `bd_shared/config.toml`
 - **DO NOT** build a second engine anywhere in the backend. Startup builds exactly one, makes it read-only for MySQL, PostgreSQL and SQLite, and injects it.
 - **DO NOT** use broad Docker `COPY` patterns when explicit file/directory copies are sufficient; prefer narrow `COPY` instructions unless the image strictly needs the whole tree
@@ -114,6 +122,17 @@ make test-e2e-setup # Pull pinned Playwright image and install npm dependencies 
 make test-e2e   # Offline Chromium lane, normal and reduced motion
 make clean      # Remove __pycache__, .pyc files
 ```
+
+Production commands run from the repository root:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation DEPLOY_ARGS=--container-probe
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the operator checklist, migration approval, restore and exit codes. `make deploy-status` currently exits 42; Make itself returns 2 on recipe failures. State, audit, logs and backups default to `../vm/deploy/`.
 
 The `make test` chain includes `test_request_context.py`, `test_agent_correlation.py`, `test_archive_store.py`, `test_archive_api.py`, `test_archive_cli.py`, `test_chat_store.py`, `test_runs.py`, `test_chat_routes.py`, and `test_report_routes.py`; it also runs the SQLite and PostgreSQL acceptance lanes plus `make test-proxy-contract`.
 

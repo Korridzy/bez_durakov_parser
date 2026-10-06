@@ -1,5 +1,19 @@
 # 🎮 Система веб-отчётов - Быстрый старт
 
+## Production
+
+Start with [DEPLOYMENT.md](DEPLOYMENT.md), including the operator's [first-rollout checklist](DEPLOYMENT.md#first-rollout). The quick-start steps below are for development. Production uses tested release images, not local rebuilds.
+
+From the repository root on the server:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation
+```
+
+`make deploy-status` is wired but its handler currently exits 42. Don't run `make test` or rebuild on the server; read the guide for backups, migration approval and failure codes.
+
 ## ✅ Система создана и готова к использованию!
 
 Создана полнофункциональная web-система для генерации отчётов по игровым данным с использованием AI-агентов.
@@ -109,10 +123,11 @@ webreport/
 |----------|----------|----------|
 | **INDEX.md** | Все | Оглавление всей документации |
 | **README.md** | Все | Обзор и быстрый старт |
+| **[DEPLOYMENT.md](DEPLOYMENT.md)** | Оператор | Релизы, deploy, rollback и изоляция |
 | **USER_GUIDE.md** | Пользователи | Детальное руководство |
 | **ARCHITECTURE.md** | Разработчики | Архитектура системы |
 | **QUICK_REFERENCE.md** | Все | Шпаргалка |
-| **PROJECT_STATUS.md** | Все | Статус проекта |
+| **[LOGGING.md](LOGGING.md)** | Оператор | Логи и корреляция запросов |
 
 ---
 
