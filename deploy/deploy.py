@@ -280,7 +280,7 @@ class State:
                 if (not isinstance(outcome, dict) or
                         any(not isinstance(outcome.get(key), str)
                             for key in ("attempt_id", "tag", "commit", "kind", "finished_at")) or
-                        outcome["kind"] not in ("deploy", "rollback")):
+                        outcome["kind"] not in ("deploy", "rollback", "rollback-restore-after-dirty")):
                     raise DeployError(23, "unaudited deployment outcome is invalid")
         return current
 
@@ -699,7 +699,10 @@ class Executor:
             raise DeployError(33, "migration declined")
 
     def backup_path(self, identifier: str) -> Path:
-        if not BACKUP_ID_RE.fullmatch(identifier):
+        if len(identifier) > 160 or not BACKUP_ID_RE.fullmatch(identifier):
+            raise DeployError(40, "invalid backup id")
+        label = identifier.split("-", 1)[1]
+        if label != "pre-restore" and (len(label) > 128 or not TAG_RE.fullmatch(label)):
             raise DeployError(40, "invalid backup id")
         path = self.state.path / "backups" / identifier
         if path.is_symlink() or path.resolve().parent != (self.state.path / "backups").resolve():
@@ -725,7 +728,8 @@ class Executor:
             raise DeployError(code, "SQLite helper returned invalid absent-store information")
         return result
 
-    def take_backup_set(self, label: str, *, db_revision_before: str | None = None) -> str:
+    def take_backup_set(self, label: str, *, db_revision_before: str | None = None,
+                        identifier: str | None = None, protected_backup_id: str | None = None) -> str:
         """Quiesced snapshot, reusable by rollback's pre-restore safety copy."""
         self.step = "backup"
         folder: Path | None = None
@@ -733,7 +737,7 @@ class Executor:
         try:
             if label != "pre-restore":
                 valid_tag(label)
-            identifier = self.now().strftime("%Y%m%dT%H%M%S%fZ") + "-" + label
+            identifier = identifier or self.now().strftime("%Y%m%dT%H%M%S%fZ") + "-" + label
             folder = self.backup_path(identifier)
             folder.mkdir(mode=0o700)
             created = True
@@ -757,11 +761,12 @@ class Executor:
                 "tag": self.metadata.version if self.metadata is not None else label,
                 "label": label, "created_at": self.now().isoformat(),
                 "db_revision_before": db_revision_before, "files": files,
+                "dataset": self.env.get("DATASET", ""),
             }
             self.state.write_atomic(folder / "manifest.json", (json.dumps(manifest, sort_keys=True) + "\n").encode())
             if self.attempt_record:
                 self.attempt_record["backup_id"] = identifier
-            self.prune_backups()
+            self.prune_backups(protected_backup_ids=[identifier, *([protected_backup_id] if protected_backup_id else [])])
             return identifier
         except (DeployError, OSError, KeyboardInterrupt):
             message = "consistent backup failed"
@@ -773,7 +778,7 @@ class Executor:
                     message += "; partial backup cleanup failed"
             raise DeployError(35, message) from None
 
-    def prune_backups(self) -> None:
+    def prune_backups(self, *, protected_backup_ids: Sequence[str] = ()) -> None:
         protected = None
         for event in reversed(self.state.read_history()):
             if (event.get("kind") == "deploy" and event.get("backup_id")
@@ -784,23 +789,66 @@ class Executor:
                           if p.is_dir() and not p.is_symlink() and BACKUP_ID_RE.fullmatch(p.name)
                           and (p / "manifest.json").is_file()), reverse=True)
         for folder in folders[5:]:
-            if folder.name != protected:
+            if folder.name not in (protected, *protected_backup_ids):
                 shutil.rmtree(folder)
+
+    def backup_manifest(self, identifier: str) -> dict[str, JSON]:
+        """Bounded manifest parsing, including the dataset and timestamp boundary."""
+        folder = self.backup_path(identifier)
+        try:
+            path = folder / "manifest.json"
+            if path.is_symlink():
+                raise DeployError(40, "backup manifest must not be a symlink")
+            with path.open("rb") as handle:
+                data = handle.read(RELEASE_MAX_BYTES + 1)
+            if len(data) > RELEASE_MAX_BYTES:
+                raise DeployError(40, "backup manifest exceeds size limit")
+            manifest = json_object(data, 40, "backup manifest is invalid")
+            if manifest.get("dataset", "") != self.env.get("DATASET", ""):
+                raise DeployError(40, "backup dataset differs from the configured dataset")
+            tag, revision, stamp = (manifest.get(key) for key in ("tag", "db_revision_before", "created_at"))
+            if (not isinstance(tag, str) or not TAG_RE.fullmatch(tag) or
+                    not (revision is None or isinstance(revision, str) and REVISION_RE.fullmatch(revision)) or
+                    not isinstance(stamp, str)):
+                raise DeployError(40, "backup manifest header is invalid")
+            timestamp = datetime.datetime.fromisoformat(stamp)
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise DeployError(40, "backup timestamp must have a timezone")
+            # Emit a normalized timestamp, never arbitrary manifest text.
+            manifest["created_at"] = timestamp.isoformat()
+            return manifest
+        except (OSError, ValueError):
+            raise DeployError(40, "backup manifest is unavailable or invalid") from None
 
     def validate_backup_set(self, identifier: str) -> dict[str, JSON]:
         """Validate every checksum before any restore; caller checks target revision."""
         folder = self.backup_path(identifier)
-        manifest = json_object((folder / "manifest.json").read_bytes(), 40, "backup manifest is invalid")
+        manifest = self.backup_manifest(identifier)
         files = manifest.get("files")
         if not isinstance(files, dict) or set(files) != {"mysql.sql", "checkpoint.db", "archive.db", "chats.db"}:
             raise DeployError(40, "backup manifest file set is invalid")
+        try:
+            names = {path.name for path in folder.iterdir()}
+        except OSError:
+            raise DeployError(40, "backup directory is unavailable") from None
+        expected_names = {"manifest.json"} | {
+            name for name, record in files.items() if isinstance(record, dict) and record.get("present") is True
+        }
+        if names != expected_names:
+            raise DeployError(40, "backup directory files differ from the manifest")
         expected_paths = self.store_paths()
         vm_data = Path(self.env.get("BD_VM_DIR") or str(self.root / "vm")).resolve() / "backend/checkpoints"
         for name, record in files.items():
-            if not isinstance(record, dict) or (folder / name).is_symlink():
+            if (not isinstance(record, dict) or (folder / name).is_symlink() or
+                    type(record.get("present")) is not bool or type(record.get("size")) is not int):
                 raise DeployError(40, "backup file record is invalid")
             if name == "mysql.sql":
-                data = (folder / name).read_bytes()
+                try:
+                    data = (folder / name).read_bytes()
+                except OSError:
+                    raise DeployError(40, "MySQL backup is unavailable") from None
+                if not data.strip() or record.get("store") != "mysql":
+                    raise DeployError(40, "MySQL backup record is invalid")
                 actual: dict[str, JSON] = {"present": True, "size": len(data), "sha256": rm.sha256_hex(data)}
             else:
                 store = name[:-3]
@@ -1317,7 +1365,7 @@ class Executor:
                 pending = current.get("unaudited", [])
                 assert isinstance(pending, list)
                 if ("unaudited" not in current and isinstance(previous, dict) and
-                        previous.get("kind") in ("deploy", "rollback") and
+                        previous.get("kind") in ("deploy", "rollback", "rollback-restore-after-dirty") and
                         all(isinstance(previous.get(key), str)
                             for key in ("attempt_id", "tag", "commit", "kind", "finished_at"))):
                     # The first new-format commit must retain the older recovery source.
@@ -1394,6 +1442,167 @@ class Executor:
         self.metadata, self.pin_file = meta, folder / "compose.release.yml"
         return meta
 
+    def resolve_rollback_target(self, tag: str | None = None) -> str:
+        if tag is not None:
+            return valid_tag(tag)
+        current = self.state.read_current()
+        last, attempt = current.get("last_successful"), current.get("attempt")
+        if not isinstance(last, dict):
+            raise DeployError(2, "no rollback target")
+        last_tag = last["tag"]
+        assert isinstance(last_tag, str)
+        if isinstance(attempt, dict) and attempt["tag"] != last_tag:
+            return last_tag
+        for event in reversed(self.state.read_history()):
+            if event.get("event") == "success" and event.get("tag") != last_tag:
+                target = event.get("tag")
+                if not isinstance(target, str) or not TAG_RE.fullmatch(target):
+                    raise DeployError(23, "rollback history target is invalid")
+                return target
+        raise DeployError(2, "no rollback target")
+
+    def rollback_metadata(self, tag: str) -> rm.ReleaseMetadata:
+        """Cached metadata and exact five-image pins require no GitHub access."""
+        folder = self.state.path / "releases" / valid_tag(tag)
+        cached, pins = folder / "metadata.json", folder / "compose.release.yml"
+        if folder.is_symlink() or cached.is_symlink() or pins.is_symlink():
+            raise DeployError(23, "cached rollback release must not use symlinks")
+        if not cached.exists() or not pins.exists():
+            return self.select(tag)
+        try:
+            with cached.open("rb") as handle:
+                meta = rm.loads(handle.read(rm.MAX_BYTES + 1))
+            with pins.open("rb") as handle:
+                data = handle.read(RELEASE_MAX_BYTES + 1)
+            if len(data) > RELEASE_MAX_BYTES:
+                raise DeployError(23, "cached rollback pins exceed size limit")
+            obj = json_object(data, 23, "cached rollback pins are invalid")
+        except (OSError, rm.MetadataError):
+            raise DeployError(23, "cached rollback metadata is unavailable or invalid") from None
+        if meta.version != tag or meta.repository != (self.env.get("BD_DEPLOY_REPO") or rm.DEFAULT_REPOSITORY):
+            raise DeployError(23, "cached rollback metadata differs from target")
+        services = obj.get("services")
+        if set(obj) != {"services"} or not isinstance(services, dict) or set(services) != set(SERVICES):
+            raise DeployError(23, "cached rollback pin service set is invalid")
+        for name, pin in services.items():
+            ref = pin.get("image") if isinstance(pin, dict) else None
+            if (not isinstance(pin, dict) or set(pin) != {"image"} or
+                    not isinstance(ref, str) or not DIGEST_REF_RE.fullmatch(ref) or
+                    name in APPLICATION_SERVICES and ref != meta.images[name]):
+                raise DeployError(23, "cached rollback image pin is invalid")
+        self.metadata, self.pin_file = meta, pins
+        for ref in meta.images.values():
+            try:
+                inspection = self.command(["docker", "image", "inspect", ref, "--format", "{{json .}}"],
+                                          20, "rollback image inspection failed")
+            except DeployError:
+                self.command(["docker", "pull", ref], 18, "rollback image pull failed", timeout=PULL_TIMEOUT)
+                inspection = self.command(["docker", "image", "inspect", ref, "--format", "{{json .}}"],
+                                          20, "rollback image inspection failed")
+            inspected = json_object(inspection.encode(), 19, "rollback image inspection is invalid")
+            config = inspected.get("Config")
+            labels = config.get("Labels") if isinstance(config, dict) else None
+            if not isinstance(labels, dict) or labels.get("org.opencontainers.image.revision") != meta.source_commit:
+                raise DeployError(19, "rollback image revision label differs from source commit")
+        return meta
+
+    def suggested_backup(self, revision: str) -> str | None:
+        for folder in sorted((self.state.path / "backups").iterdir(), reverse=True):
+            if not BACKUP_ID_RE.fullmatch(folder.name):
+                continue
+            try:
+                manifest = self.backup_manifest(folder.name)
+            except DeployError:
+                continue
+            if manifest["db_revision_before"] == revision:
+                return folder.name
+        return None
+
+    def rollback(self, tag: str | None, flags: argparse.Namespace) -> None:
+        """Explicit restore is the only path through a different or dirty schema."""
+        if self.env.get("DATASET"):
+            raise DeployError(2, "DATASET deployments are not supported by the executor")
+        self.reconcile_attempts()
+        dirty = self.state.read_current().get("stage") == "migration_started"
+        identifier = flags.restore_backup
+        if identifier is not None:
+            self.backup_path(identifier)
+        if dirty and not identifier:
+            raise DeployError(41, "migration_started marker exists; explicit backup restore is required")
+        target = self.resolve_rollback_target(tag)
+        meta = self.rollback_metadata(target)
+        manifest = self.validate_backup_set(identifier) if identifier else None
+        if manifest is not None and manifest["db_revision_before"] != meta.alembic_revision:
+            raise DeployError(40, "backup revision differs from rollback target")
+        current = self.live_db_revision()
+        if not identifier and current != meta.alembic_revision:
+            suggested = self.suggested_backup(meta.alembic_revision)
+            message = "rollback schema differs from live database; explicit backup restore is required"
+            if suggested:
+                message += "; use --restore-backup " + suggested
+            raise DeployError(39, message)
+        before = self.preflight(meta, flags)
+        kind = "rollback-restore-after-dirty" if dirty and identifier else "rollback"
+        self.begin_attempt(meta, kind=kind, db_revision_before=current)
+        try:
+            if identifier:
+                assert manifest is not None
+                self.step = "restore_quiesce"
+                self.release_make("release-stop", services=["data_collector", "backend"], code=34, timeout=1500)
+                self.step = "restore_approval"
+                safety_id = self.now().strftime("%Y%m%dT%H%M%S%fZ") + "-pre-restore"
+                safety_path = self.backup_path(safety_id)
+                self.emit("Backup timestamp: " + str(manifest["created_at"]))
+                self.emit("all MySQL and SQLite writes after this time will be discarded; a safety copy is kept at " +
+                          str(safety_path))
+                if not flags.yes:
+                    if not sys.stdin.isatty() or input("Restore this backup? Type yes: ").strip() != "yes":
+                        raise DeployError(40, "backup restore requires --yes or interactive yes; services remain stopped")
+                self.take_backup_set("pre-restore", db_revision_before=current, identifier=safety_id,
+                                     protected_backup_id=identifier)
+                self.attempt_record.update({"backup_id": identifier, "safety_backup_id": safety_id,
+                                            "db_revision_after": None})
+                self.step = "restore"
+                state = self.state.read_current()
+                state["stage"] = "migration_started"
+                state["migration_backup_id"] = identifier
+                self.state.write_current(state)
+                self.restore_backup_set(identifier)
+                self.step = "restore_verification"
+                try:
+                    actual = self.live_db_revision()
+                except DeployError:
+                    raise DeployError(40, "restored database revision is unavailable") from None
+                self.attempt_record["db_revision_after"] = actual
+                heads = self.release_make("release-run", services=["backend"],
+                                          cmd=["alembic", "-c", "/alembic/alembic.ini", "heads"], code=40)
+                if (actual != meta.alembic_revision or not re.fullmatch(
+                        re.escape(meta.alembic_revision) + r" \(head\)\s*", heads.strip())):
+                    raise DeployError(40, "restored database or release image head differs from target")
+                state.pop("stage", None)
+                state.pop("migration_backup_id", None)
+                self.state.write_current(state)
+            steps = self.recreate_and_smoke(meta, flags, before=before)
+        except (DeployError, OSError, UnicodeError, KeyboardInterrupt, EOFError) as cause:
+            if isinstance(cause, DeployError):
+                error = cause
+            else:
+                code = 34 if self.step == "restore_quiesce" else 40 if self.step.startswith("restore") else 37
+                error = DeployError(code, f"{self.step}: rollback interrupted or local I/O failed")
+            self.finish_attempt(error=error)
+            try:
+                if identifier and self.step.startswith(("restore", "backup")):
+                    status = ("quiesce was incomplete; inspect application services"
+                              if self.step == "restore_quiesce" else "application services remain stopped")
+                    self.emit("Recovery: " + status + "; retry rollback with --restore-backup " + identifier + " --yes")
+                elif self.step.startswith(("recreate", "readiness", "S")):
+                    self.emit("Recovery: make rollback VERSION=" + target)
+            except (OSError, UnicodeError):
+                self.warn_audit("recovery output could not be written")
+            raise error from None
+        self.finish_attempt(smoke_steps=steps)
+        self.emit("Rollback " + meta.version + " success")
+
 
 class Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
@@ -1410,7 +1619,7 @@ def parser() -> Parser:
     deploy.add_argument("--llm-smoke", action="store_true")
     deploy.add_argument("--yes", action="store_true")
     rollback = commands.add_parser("rollback")
-    rollback.add_argument("tag", type=valid_tag)
+    rollback.add_argument("tag", nargs="?", type=valid_tag)
     rollback.add_argument("--restore-backup")
     rollback.add_argument("--yes", action="store_true")
     rollback.add_argument("--llm-smoke", action="store_true")
@@ -1461,12 +1670,14 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
             if options.command in ("deploy", "rollback"):
                 executor.reconcile_attempts()
             if (options.command in ("deploy", "rollback") and state.read_current().get("stage") == "migration_started"
-                    and not (options.command == "rollback" and options.restore_backup)):
+                    and not (options.command == "rollback" and options.restore_backup is not None)):
                 raise DeployError(41, "migration_started marker exists; explicit backup restore is required")
             match options.command:
                 case "deploy":
                     metadata = executor.select(options.tag)
                     executor.deploy(metadata, options)
+                case "rollback":
+                    executor.rollback(options.tag, options)
                 case "smoke":
                     executor.smoke(executor.smoke_metadata(), llm_smoke=options.llm_smoke)
                 case "select":
@@ -1475,9 +1686,7 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
                         emit("WARNING: BD_DEPLOY_RELEASE_FILE rehearsal override bypassed GitHub", error=True)
                     emit(rm.dumps(metadata).decode().rstrip())
                 case "resolve-rollback-target":
-                    if not options.tag:
-                        raise DeployError(2, "no rollback target")
-                    emit(options.tag)
+                    emit(executor.resolve_rollback_target(options.tag))
                 case "verify-db-isolation":
                     return verify_db_isolation(executor, options.container_probe, emit)
                 case _:

@@ -10,6 +10,7 @@ import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import shlex
 import subprocess
 import sqlite3
 import sys
@@ -306,10 +307,10 @@ class ExecutorTest(unittest.TestCase):
             self.assertFailure(41, self.invoke(args))
         self.assertEqual(self.runner.calls, [])
         self.assertEqual(self.fetcher.calls, [])
-        self.assertFailure(42, self.invoke(["rollback", TAG, "--restore-backup", "backup-id"]))
+        self.assertFailure(40, self.invoke(["rollback", TAG, "--restore-backup", "backup-id"]))
 
     def test_later_command_bodies_refuse_instead_of_claiming_success(self):
-        for args in (["rollback", TAG], ["status"]):
+        for args in (["status"],):
             with self.subTest(args=args):
                 self.assertFailure(42, self.invoke(args))
 
@@ -777,6 +778,33 @@ class OperationsTest(OperationalCase):
 
 
 class SQLiteBackupTest(unittest.TestCase):
+    def test_real_cli_restore_replaces_rows_and_removes_sidecars(self):
+        with tempfile.TemporaryDirectory(prefix="bdvrd-t15-sqlite-cli-") as folder:
+            src, snapshot = Path(folder) / "store.db", Path(folder) / "snapshot.db"
+            with sqlite3.connect(src) as conn:
+                conn.execute("CREATE TABLE records(id INTEGER)")
+                conn.execute("INSERT INTO records VALUES (13)")
+            helper = PROJECT_ROOT / "deploy/sqlite_backup.py"
+            backup_cmd = [sys.executable, str(helper), "backup", str(src), str(snapshot)]
+            saved = subprocess.run(backup_cmd, capture_output=True, text=True, timeout=30, check=False)
+            self.assertEqual(saved.returncode, 0, saved.stderr)
+            with sqlite3.connect(src) as conn:
+                conn.execute("UPDATE records SET id = 99")
+            for suffix in ("-wal", "-shm"):
+                Path(str(src) + suffix).write_bytes(b"stale")
+            restore_cmd = [sys.executable, str(helper), "restore", str(snapshot), str(src)]
+            restored = subprocess.run(restore_cmd, capture_output=True, text=True, timeout=30, check=False)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            self.assertTrue(json.loads(restored.stdout)["present"])
+            with sqlite3.connect(src) as conn:
+                self.assertEqual(conn.execute("SELECT id FROM records").fetchall(), [(13,)])
+                self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone(), ("ok",))
+            self.assertFalse(any(Path(str(src) + suffix).exists() for suffix in ("-wal", "-shm")))
+            print("SQLite CLI QA: " + shlex.join(restore_cmd))
+            print("SQLite CLI PASS: rows [(13,)] replaced [(99,)]; integrity ok; WAL/SHM absent")
+        self.assertFalse(Path(folder).exists())
+        print("SQLite CLI cleanup PASS: scratch directory removed; child processes exited")
+
     def test_real_backup_integrity_restore_and_sidecars(self):
         with tempfile.TemporaryDirectory(prefix="bdvrd-sqlite-") as folder:
             src, dst = Path(folder) / "store.db", Path(folder) / "copy.db"
@@ -1683,6 +1711,528 @@ class SmokeTest(OperationalCase):
         error = self.assertCode(38, lambda: self.executor.smoke(self.meta, before=self.before, llm_smoke=True))
         self.assertIn("S8", error.message)
         self.assertFalse(any(m == "POST" for m, p, b in self.server.calls))
+
+
+class RollbackRunner(OperationalRunner):
+    """Restore fake uses real SQLite files; MySQL is the only simulated store."""
+
+    def __init__(self):
+        super().__init__()
+        self.restore_revision = REVISION
+        self.missing_images = set()
+        self.restore_fault = ""
+
+    def run(self, argv, *, cwd, env, input=None, timeout=120):
+        if "mysql" in argv and input is not None and self.restore_fault:
+            self.calls.append((list(argv), cwd, dict(env), input, timeout))
+            if self.restore_fault == "interrupt":
+                raise KeyboardInterrupt
+            if self.restore_fault == "timeout":
+                raise subprocess.TimeoutExpired(argv, timeout, output="fixture-secret")
+            return subprocess.CompletedProcess(argv, 1, "plausible-success", "fixture-secret")
+        result = super().run(argv, cwd=cwd, env=env, input=input, timeout=timeout)
+        if result.returncode:
+            return result
+        if argv[:3] == ["docker", "image", "inspect"] and argv[3] in self.missing_images:
+            return subprocess.CompletedProcess(argv, 1, "", "fixture-secret")
+        if argv[:2] == ["docker", "pull"]:
+            self.missing_images.discard(argv[2])
+        if "mysql" in argv and input is not None:
+            self.db = self.restore_revision + "\n"
+        text = " ".join(argv)
+        if "/sqlite_backup.py describe" in text or "/sqlite_backup.py restore" in text:
+            args = shlex.split(next(a[4:] for a in argv if a.startswith("CMD=")))
+            mounts = shlex.split(next(a[9:] for a in argv if a.startswith("RUN_ARGS=")))
+            folder = Path(next(v[:-8] for v in mounts if v.endswith(":/backup")))
+            source = folder / Path(args[3]).name
+            if args[2] == "describe":
+                info = sqlite_backup.describe(source)
+            else:
+                dest = Path(env["BD_VM_DIR"]) / "backend/checkpoints" / Path(args[4]).relative_to("/data")
+                info = sqlite_backup.restore(source, dest)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(info), "")
+        return result
+
+
+class RollbackTest(OperationalCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+        self.runner = RollbackRunner()
+        self.env["COMPOSE_PROJECT_NAME"] = "bdvrd-t15"
+        self.executor = d.Executor(self.root, self.env, self.runner, self.executor.fetcher)
+        assert isinstance(self.executor.fetcher, FakeFetcher)
+        self.fetcher = self.executor.fetcher
+        self.executor.clock = FakeClock()
+        self.executor.metadata = self.meta
+        self.executor.pin_file = self.executor.state.path / "releases" / TAG / "compose.release.yml"
+        (self.executor.pin_file.parent / "metadata.json").write_bytes(metadata_bytes())
+        self.output = []
+        self.executor.emit = self.output.append
+        self.flags = d.parser().parse_args(["rollback", TAG, "--yes"])
+        self.addCleanup(self.assert_safe_commands)
+
+    def assert_safe_commands(self):
+        for argv, _, env, _, timeout in self.runner.calls:
+            self.assertNotIn("downgrade", " ".join(argv))
+            self.assertFalse(any(v in argv for v in ("down", "--remove-orphans", "--force-recreate", "--build")))
+            self.assertNotIn("fixture-secret", " ".join(argv))
+            self.assertGreater(timeout, 0)
+            if "mysql" in argv and ("mysqldump" in argv or "-uroot" in argv):
+                self.assertEqual(env["MYSQL_PWD"], "fixture-secret")
+            if argv[0] == "make":
+                self.assertIn("-s", argv)
+                self.assertIn("--no-print-directory", argv)
+        self.assertNotIn("fixture-secret", "\n".join(self.output))
+
+    def attach_http(self):
+        server = SmokeServer()
+        self.addCleanup(server.close)
+        (self.root / "webreport" / ".env").write_text(
+            f"WEBREPORT_BACKEND_PORT={server.backend_port}\nWEBREPORT_FRONTEND_PORT={server.frontend_port}\n")
+        (self.root / "deploy").mkdir(exist_ok=True)
+        (self.root / "deploy/smoke_question.txt").write_text("How many games were played?")
+        return server
+
+    def backup(self):
+        identifier = self.executor.take_backup_set(TAG, db_revision_before=REVISION)
+        self.runner.calls.clear()
+        return identifier
+
+    def restore_flags(self, identifier):
+        return d.parser().parse_args(["rollback", TAG, "--restore-backup", identifier, "--yes"])
+
+    def assert_backup_refused_before_mutation(self, identifier):
+        self.runner.calls.clear()
+        code, out, err = self.invoke(["rollback", TAG, "--restore-backup", identifier, "--yes"])
+        self.assertEqual(code, 40, (out, err))
+        self.assertEqual(json.loads(err)["error"], "E_RESTORE")
+        for argv, _, _, stdin, _ in self.runner.calls:
+            command = " ".join(argv)
+            self.assertFalse(any(stage in command for stage in
+                                 ("release-stop", "release-start", "release-up", "mysqldump",
+                                  "/sqlite_backup.py backup", "/sqlite_backup.py restore", " upgrade ")),
+                             command)
+            self.assertFalse("mysql" in argv and stdin is not None, command)
+        self.assertEqual(self.executor.state.read_history(), [])
+        self.assertNotIn("success", out.lower())
+
+    def invoke(self, args):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(d.Executor, "now", side_effect=self.executor.clock.now), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = d.main(args, root=self.root, env=self.env, runner=self.runner, fetcher=self.executor.fetcher)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_default_target_prefers_last_successful_after_failed_attempt(self):
+        self.executor.state.write_current({"attempt": {"tag": "v2.0.0"}, "last_successful": {"tag": TAG}})
+        self.assertEqual(self.invoke(["resolve-rollback-target"]), (0, TAG + "\n", ""))
+        self.assertEqual(self.runner.calls, [])
+
+    def test_default_target_uses_latest_different_success_not_failed_event(self):
+        self.executor.state.write_current({"attempt": {"tag": TAG}, "last_successful": {"tag": TAG}})
+        for event, tag in (("success", "v0.1.0"), ("success", "v0.2.0"), ("failed", "v0.3.0"), ("success", TAG)):
+            self.executor.state.append_history({"event": event, "tag": tag})
+        self.assertEqual(self.invoke(["resolve-rollback-target"]), (0, "v0.2.0\n", ""))
+
+    def test_explicit_target_wins_and_empty_history_has_no_target(self):
+        self.assertEqual(self.invoke(["resolve-rollback-target", TAG]), (0, TAG + "\n", ""))
+        code, out, err = self.invoke(["resolve-rollback-target"])
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(json.loads(err)["message"], "no rollback target")
+
+    def test_hostile_current_or_success_history_cannot_select_path(self):
+        for current in ('{"attempt":{"tag":"../x"}}', '{"last_successful":[]}', '{"stage":"healthy"}'):
+            (self.executor.state.path / "current.json").write_text(current)
+            self.assertEqual(self.invoke(["resolve-rollback-target"])[0], 23)
+        self.executor.state.write_current({"last_successful": {"tag": TAG}})
+        self.executor.state.append_history({"event": "success", "tag": "../x"})
+        self.assertEqual(self.invoke(["resolve-rollback-target"])[0], 23)
+
+    def test_equal_schema_uses_cached_digests_and_scoped_smoke(self):
+        self.attach_http()
+        self.runner.running_ids["frontend"] = "old-frontend"
+        code, out, err = self.invoke(["rollback", TAG, "--yes"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("Rollback " + TAG + " success", out)
+        self.assertEqual(self.fetcher.calls, [])
+        self.assertFalse(any(c[0][0] == "git" for c in self.runner.calls))
+        up = [cmd for cmd in self.commands() if "release-up" in cmd]
+        self.assertEqual(len(up), 1)
+        self.assertIn("SERVICES=frontend", up[0])
+        events = self.executor.state.read_history()
+        self.assertEqual([e["event"] for e in events], ["started", "success"])
+        self.assertEqual(events[-1]["kind"], "rollback")
+        self.assertEqual(events[-1]["smoke_steps"], [f"S{i}" for i in range(1, 8)])
+        self.assertEqual(self.executor.state.read_current()["last_successful"], events[-1])
+
+    def test_default_rollback_cli_selects_last_successful_and_honours_llm_smoke(self):
+        server = self.attach_http()
+        self.executor.state.write_current({"last_successful": {"tag": TAG}, "attempt": {"tag": "v2.0.0"}})
+        code, out, err = self.invoke(["rollback", "--yes", "--llm-smoke"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("S8 PASS", out)
+        self.assertIn(("DELETE", "/api/chats/chat-1", None), server.calls)
+
+    def test_cached_missing_image_is_pulled_by_digest(self):
+        self.attach_http()
+        ref = self.meta.images["frontend"]
+        self.runner.missing_images.add(ref)
+        self.executor.rollback(TAG, self.flags)
+        pulls = [c[0] for c in self.runner.calls if c[0][:2] == ["docker", "pull"]]
+        self.assertIn(["docker", "pull", ref], pulls)
+        self.assertFalse(any(["docker", "pull", self.meta.images[name]] in pulls for name in ("backend", "data_collector")))
+
+    def test_absent_cache_runs_existing_selection(self):
+        self.attach_http()
+        assert self.executor.pin_file is not None
+        (self.executor.pin_file.parent / "metadata.json").unlink()
+        self.executor.rollback(TAG, self.flags)
+        self.assertTrue(self.fetcher.calls)
+        self.assertTrue(any(c[0] == ["git", "show", f"{TAG}:webreport/docker-compose.yml"] for c in self.runner.calls))
+
+    def test_cached_pin_injection_and_wrong_metadata_refuse_before_stop(self):
+        pin = self.executor.pin_file
+        assert pin is not None
+        original = pin.read_bytes()
+        for changes in ({"backend": {"image": "backend:latest"}},
+                        {"backend": {"image": self.meta.images["backend"], "volumes": ["/:/host"]}},
+                        {"evil": {"image": "mysql:8"}}):
+            pins = json.loads(original)
+            pins["services"].update(changes)
+            pin.write_text(json.dumps(pins))
+            self.assertCode(23, lambda: self.executor.rollback(TAG, self.flags))
+        pin.write_bytes(original)
+        (pin.parent / "metadata.json").write_bytes(rm.dumps(replace(self.meta, version="v9.9.9")))
+        self.assertCode(23, lambda: self.executor.rollback(TAG, self.flags))
+        self.assertFalse(any("release-stop" in cmd for cmd in self.commands()))
+
+    def test_schema_refusal_suggests_newest_matching_backup(self):
+        first, newest = self.backup(), self.backup()
+        self.runner.db = "newer\n"
+        error = self.assertCode(39, lambda: self.executor.rollback(TAG, self.flags))
+        self.assertIn("--restore-backup " + newest, error.message)
+        self.assertNotIn("--restore-backup " + first, error.message)
+        self.assertFalse(any("release-stop" in cmd for cmd in self.commands()))
+
+    def test_dirty_image_only_refuses_before_images_or_network(self):
+        self.executor.state.write_current({"stage": "migration_started"})
+        self.assertCode(41, lambda: self.executor.rollback(TAG, self.flags))
+        self.assertEqual(self.runner.calls, [])
+
+    def test_hostile_backup_ids_refuse_before_any_commands(self):
+        for identifier in ("", "../x", "/tmp/x", "x\n", "20260101T000000Z-" + TAG + "\n",
+                           "20260101T000000Z-v01.0.0",
+                           "20260101T000000Z-v" + "1" * 300 + ".0.0"):
+            self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertEqual(self.runner.calls, [])
+
+    def test_manifest_checksum_revision_dataset_and_timestamp_refuse_before_quiesce(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        path = folder / "manifest.json"
+        original = json.loads(path.read_bytes())
+        for changes in ({"db_revision_before": "older"}, {"dataset": "other"}, {"created_at": "not-time"},
+                        {"files": {"mysql.sql": {}}}):
+            path.write_text(json.dumps(original | changes))
+            self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        path.write_text(json.dumps(original))
+        (folder / "mysql.sql").write_text("corrupted")
+        self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertFalse(any("release-stop" in cmd for cmd in self.commands()))
+        self.assertFalse(any(c[3] is not None and "mysql" in c[0] for c in self.runner.calls))
+
+    def test_same_size_backup_corruption_refuses_before_mutation(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        for name in ("mysql.sql", "checkpoint.db", "archive.db", "chats.db"):
+            with self.subTest(file=name):
+                path = folder / name
+                original = path.read_bytes()
+                corrupted = original[:-1] + bytes([original[-1] ^ 1])
+                self.assertEqual(len(corrupted), len(original))
+                self.assertNotEqual(corrupted, original)
+                try:
+                    path.write_bytes(corrupted)
+                    self.assert_backup_refused_before_mutation(identifier)
+                finally:
+                    path.write_bytes(original)
+
+    def test_wrong_manifest_digest_refuses_intact_backup_before_mutation(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        path = folder / "manifest.json"
+        original = path.read_bytes()
+        for name in ("mysql.sql", "checkpoint.db", "archive.db", "chats.db"):
+            with self.subTest(file=name):
+                manifest = json.loads(original)
+                record = manifest["files"][name]
+                digest = record["sha256"]
+                record["sha256"] = ("1" if digest[0] == "0" else "0") + digest[1:]
+                try:
+                    path.write_text(json.dumps(manifest))
+                    self.assert_backup_refused_before_mutation(identifier)
+                finally:
+                    path.write_bytes(original)
+
+    def test_missing_listed_backup_file_refuses_before_mutation(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        for name in ("mysql.sql", "checkpoint.db", "archive.db", "chats.db"):
+            with self.subTest(file=name):
+                path = folder / name
+                original = path.read_bytes()
+                try:
+                    path.unlink()
+                    self.assert_backup_refused_before_mutation(identifier)
+                finally:
+                    path.write_bytes(original)
+
+    def test_extra_unlisted_backup_file_refuses_before_mutation(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        (folder / "unlisted.sql").write_bytes(b"unlisted backup content")
+        self.assert_backup_refused_before_mutation(identifier)
+
+    def test_recorded_absent_sqlite_store_validates_without_creating_file(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        manifest_path = folder / "manifest.json"
+        original = manifest_path.read_bytes()
+        for name in ("checkpoint.db", "archive.db", "chats.db"):
+            with self.subTest(file=name):
+                path = folder / name
+                data = path.read_bytes()
+                manifest = json.loads(original)
+                manifest["files"][name].update({"present": False, "size": 0, "sha256": None})
+                try:
+                    path.unlink()
+                    manifest_path.write_text(json.dumps(manifest))
+                    validated = self.executor.validate_backup_set(identifier)
+                    records = validated["files"]
+                    assert isinstance(records, dict)
+                    record = records[name]
+                    assert isinstance(record, dict)
+                    self.assertIs(record["present"], False)
+                    self.assertFalse(path.exists())
+                finally:
+                    path.write_bytes(data)
+                    manifest_path.write_bytes(original)
+
+    def test_explicit_restore_orders_safety_mysql_sqlite_verify_then_recreate(self):
+        self.attach_http()
+        identifier = self.backup()
+        self.runner.db = "newer\n"
+        seen = []
+        def observe(command):
+            if "release-stop" in command:
+                self.assertEqual(self.executor.state.read_history()[-1]["event"], "started")
+            if "/sqlite_backup.py restore" in command:
+                self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+            if "release-start" in command or "release-up" in command:
+                self.assertNotIn("stage", self.executor.state.read_current())
+            seen.append(command)
+        self.runner.observer = observe
+        self.executor.rollback(TAG, self.restore_flags(identifier))
+        calls = self.runner.calls
+        mysql = next(i for i, c in enumerate(calls) if "mysql" in c[0] and c[3] is not None)
+        safety = next(i for i, c in enumerate(calls) if "mysqldump" in c[0])
+        sqlite = [i for i, c in enumerate(calls) if "/sqlite_backup.py restore" in " ".join(c[0])]
+        self.assertLess(safety, mysql)
+        self.assertEqual(len(sqlite), 3)
+        self.assertLess(mysql, min(sqlite))
+        self.assertTrue(any("heads" in " ".join(c[0]) for c in calls[max(sqlite) + 1:]))
+        event = self.executor.state.read_history()[-1]
+        self.assertEqual(event["backup_id"], identifier)
+        safety_id = event["safety_backup_id"]
+        assert isinstance(safety_id, str)
+        self.assertTrue(safety_id.endswith("-pre-restore"))
+        self.assertEqual(event["db_revision_before"], "newer")
+        self.assertEqual(event["db_revision_after"], REVISION)
+        self.assertIn("all MySQL and SQLite writes after this time will be discarded; a safety copy is kept at ",
+                      "\n".join(self.output))
+        for name in ("checkpoints.db", "conversations.db", "chats.db"):
+            with sqlite3.connect(self.root / "vm/backend/checkpoints" / name) as conn:
+                self.assertEqual(conn.execute("SELECT id FROM fixture").fetchall(), [(7,)])
+
+    def test_dirty_restore_clears_marker_after_proof_and_records_recovery_kind(self):
+        self.attach_http()
+        identifier = self.backup()
+        self.runner.db = "newer\n"
+        self.executor.state.write_current({"stage": "migration_started", "migration_backup_id": "old-marker"})
+        self.executor.rollback(TAG, self.restore_flags(identifier))
+        state = self.executor.state.read_current()
+        self.assertNotIn("stage", state)
+        self.assertNotIn("migration_backup_id", state)
+        last = state["last_successful"]
+        assert isinstance(last, dict)
+        self.assertEqual(last["kind"], "rollback-restore-after-dirty")
+        self.assertEqual(state["unaudited"], [])
+
+    def test_mysql_failure_or_interrupt_retains_guard_and_never_reports_success(self):
+        identifier = self.backup()
+        for fault in ("failure", "interrupt", "timeout"):
+            with self.subTest(fault=fault):
+                self.runner.restore_fault = fault
+                code, out, err = self.invoke(["rollback", TAG, "--restore-backup", identifier, "--yes"])
+                self.assertEqual(code, 40, err)
+                self.assertNotIn("success", out.lower())
+                self.assertNotIn("fixture-secret", out + err)
+                self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+                self.assertFalse(any("release-up" in cmd for cmd in self.commands()))
+                self.assertEqual(self.executor.state.read_history()[-1]["exit_code"], 40)
+        self.runner.restore_fault = ""
+        self.assertEqual(self.invoke(["rollback", TAG, "--yes"])[0], 41)
+
+    def test_live_or_image_head_mismatch_keeps_services_stopped_and_marker(self):
+        identifier = self.backup()
+        for boundary in ("live", "heads"):
+            with self.subTest(boundary=boundary):
+                self.runner.restore_revision = "wrong" if boundary == "live" else REVISION
+                self.runner.heads = "wrong (head)" if boundary == "heads" else REVISION + " (head)"
+                self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+                self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+                self.assertFalse(any("release-start" in cmd or "release-up" in cmd for cmd in self.commands()))
+
+    def test_restore_decline_or_no_tty_cannot_write_databases(self):
+        identifier = self.backup()
+        flags = d.parser().parse_args(["rollback", TAG, "--restore-backup", identifier])
+        for tty, answer in ((False, "yes"), (True, "y"), (True, "no")):
+            with self.subTest(tty=tty, answer=answer), mock.patch("sys.stdin.isatty", return_value=tty), \
+                    mock.patch("builtins.input", return_value=answer):
+                self.assertCode(40, lambda: self.executor.rollback(TAG, flags))
+        self.assertFalse(any("mysqldump" in cmd or "/sqlite_backup.py restore" in cmd for cmd in self.commands()))
+        self.assertFalse(any(c[3] is not None and "mysql" in c[0] for c in self.runner.calls))
+
+    def test_safety_backup_failure_never_restores_and_preserves_dirty_marker(self):
+        identifier = self.backup()
+        self.executor.state.write_current({"stage": "migration_started"})
+        self.runner.fail = "mysqldump"
+        self.assertCode(35, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+        self.assertFalse(any("/sqlite_backup.py restore" in cmd for cmd in self.commands()))
+
+    def test_terminal_audit_failure_preserves_restore_error(self):
+        identifier = self.backup()
+        self.runner.restore_fault = "failure"
+        append = self.executor.state.append_history
+        def failed(event):
+            if event["event"] == "failed":
+                raise OSError(errno.ENOSPC, "fixture-secret")
+            append(event)
+        with mock.patch.object(self.executor.state, "append_history", side_effect=failed):
+            error = self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertIn("secondary", error.message)
+        self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+
+    def test_failed_recovery_output_cannot_mask_primary_restore_failure(self):
+        identifier = self.backup()
+        self.runner.restore_fault = "failure"
+        def broken_output(message):
+            if message.startswith("Recovery:"):
+                raise OSError(errno.ENOSPC, "fixture-secret")
+            self.output.append(message)
+        self.executor.emit = broken_output
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+
+    def test_interrupted_quiesce_has_no_restore_and_can_be_retried(self):
+        identifier = self.backup()
+        self.runner.interrupt = "release-stop"
+        self.assertCode(34, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertNotIn("stage", self.executor.state.read_current())
+        self.assertFalse(any(c[3] is not None and "mysql" in c[0] for c in self.runner.calls))
+        self.runner.interrupt = ""
+        self.attach_http()
+        self.executor.rollback(TAG, self.restore_flags(identifier))
+        self.assertEqual(self.executor.state.read_history()[-1]["event"], "success")
+
+    def test_interrupted_sqlite_restore_retains_dirty_guard_until_explicit_retry(self):
+        identifier = self.backup()
+        self.runner.db = "newer\n"
+        self.runner.interrupt = "/sqlite_backup.py restore /backup/archive.db"
+        self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertEqual(self.executor.state.read_current()["stage"], "migration_started")
+        self.assertCode(41, lambda: self.executor.rollback(TAG, self.flags))
+        self.runner.interrupt = ""
+        self.attach_http()
+        self.executor.rollback(TAG, self.restore_flags(identifier))
+        last = self.executor.state.read_history()[-1]
+        self.assertEqual(last["event"], "success")
+        self.assertEqual(last["kind"], "rollback-restore-after-dirty")
+
+    def test_dirty_recovery_commit_survives_failed_audit_then_reconciles(self):
+        self.attach_http()
+        identifier = self.backup()
+        self.executor.state.write_current({"stage": "migration_started"})
+        append = self.executor.state.append_history
+        def failed(event):
+            if event["event"] == "success":
+                raise OSError(errno.ENOSPC, "fixture-secret")
+            append(event)
+        err = io.StringIO()
+        with mock.patch.object(self.executor.state, "append_history", side_effect=failed), \
+                contextlib.redirect_stderr(err):
+            self.executor.rollback(TAG, self.restore_flags(identifier))
+        state = self.executor.state.read_current()
+        committed = state["last_successful"]
+        self.assertEqual(state["unaudited"], [committed])
+        self.assertNotIn("stage", state)
+        self.assertIn("success", "\n".join(self.output))
+        self.assertIn("WARNING", err.getvalue())
+        self.executor.reconcile_attempts()
+        self.assertEqual(self.executor.state.read_history()[-1], committed)
+        self.assertEqual(self.executor.state.read_current()["unaudited"], [])
+
+    def test_safety_pruning_keeps_explicit_older_restore_set(self):
+        self.attach_http()
+        identifier = self.backup()
+        backups = self.executor.state.path / "backups"
+        for i in range(6):
+            folder = backups / f"20260201T00000{i}Z-{TAG}"
+            folder.mkdir()
+            (folder / "manifest.json").write_text("{}")
+        self.executor.rollback(TAG, self.restore_flags(identifier))
+        self.assertTrue((backups / identifier / "mysql.sql").is_file())
+        event = self.executor.state.read_history()[-1]
+        self.assertEqual(event["event"], "success")
+        safety_id = event["safety_backup_id"]
+        assert isinstance(safety_id, str)
+        self.assertTrue((backups / safety_id / "mysql.sql").is_file())
+
+    def test_missing_duplicate_or_symlink_manifest_fails_before_stop(self):
+        identifier = self.backup()
+        folder = self.executor.backup_path(identifier)
+        path = folder / "manifest.json"
+        for content in (None, b'{"tag":"v1.2.3","tag":"v1.2.3"}', b"[]" ,
+                        b"x" * (d.RELEASE_MAX_BYTES + 1)):
+            with self.subTest(content=None if content is None else len(content)):
+                path.unlink(missing_ok=True)
+                if content is not None:
+                    path.write_bytes(content)
+                self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        path.unlink()
+        path.symlink_to(folder / "mysql.sql")
+        self.assertCode(40, lambda: self.executor.rollback(TAG, self.restore_flags(identifier)))
+        self.assertFalse(any("release-stop" in cmd for cmd in self.commands()))
+
+    def test_interactive_exact_yes_permits_restore(self):
+        self.attach_http()
+        identifier = self.backup()
+        flags = d.parser().parse_args(["rollback", TAG, "--restore-backup", identifier])
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch("builtins.input", return_value="yes"):
+            self.executor.rollback(TAG, flags)
+        self.assertEqual(self.executor.state.read_history()[-1]["event"], "success")
+
+    def test_failed_smoke_does_not_publish_rollback_success(self):
+        server = self.attach_http()
+        previous: dict[str, d.JSON] = {"tag": "v0.1.0"}
+        self.executor.state.write_current({"last_successful": previous})
+        server.chat_list.pop("next_cursor")
+        self.assertCode(38, lambda: self.executor.rollback(TAG, self.flags))
+        self.assertEqual(self.executor.state.read_current()["last_successful"], previous)
+        self.assertEqual(self.executor.state.read_history()[-1]["event"], "failed")
+        self.assertNotIn("success", "\n".join(self.output))
 
 
 class Response(io.BytesIO):
