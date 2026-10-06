@@ -1,0 +1,40 @@
+# Production overlay, applied on top of docker-compose.yml only when the Makefile is given
+# RELEASE_COMPOSE, the per-release pin file that supplies every service's image digest.
+# This file holds no digests and no host-specific values.
+#
+# Release images carry their own code, so the source mounts are dropped and nothing is
+# built or pulled implicitly: the executor pulls each pinned digest explicitly first.
+# Published ports bind to loopback; Traefik reaches the frontend over the Compose network.
+services:
+  mysql:
+    ports: !override
+      - "127.0.0.1:${BD_MYSQL_HOST_PORT:-3306}:3306"
+    pull_policy: never
+
+  litellm:
+    pull_policy: never
+
+  backend:
+    build: !reset null
+    pull_policy: never
+    ports: !override
+      - "127.0.0.1:${WEBREPORT_BACKEND_PORT}:8000"
+    volumes: !override
+      - ${BD_VM_DIR:-../vm}/backend/checkpoints:/data
+      - ../bd_shared/config.local.toml:/bd_shared/config.local.toml:ro
+    environment:
+      WEBREPORT_RELOAD: "false"
+      WEBREPORT_DEBUG: "false"
+
+  data_collector:
+    build: !reset null
+    pull_policy: never
+    volumes: !override
+      - ${BD_XLSM_ARCHIVE_DIR:-../xlsm_archive}:/app/xlsm_archive
+      - ../bd_shared/config.local.toml:/bd_shared/config.local.toml:ro
+
+  frontend:
+    build: !reset null
+    pull_policy: never
+    ports: !override
+      - "127.0.0.1:${WEBREPORT_FRONTEND_PORT}:8501"
