@@ -54,7 +54,8 @@ CASE_FILE ?=
 ARCHIVE_USER = $(if $(filter command line,$(origin USER)),$(strip $(USER)))
 
 # Keep this tag equal to the exact @playwright/test version in ui/package.json.
-PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.55.0-noble
+# mcr.microsoft.com/playwright:v1.55.0-noble, resolved 2026-10-06
+PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29
 # Per-run names, so two runs on one host share neither a container name nor npm dependencies.
 # The defaults keep the shell PID suffix and the shared volume used so far.
 E2E_RUN_ID ?= $$$$

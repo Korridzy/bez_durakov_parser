@@ -3,7 +3,7 @@
 # an empty diff and a developer's own services are untouched.
 services:
   postgres_test:
-    image: postgres:16-alpine
+    image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea # postgres:16-alpine, resolved 2026-10-06
     environment:
       POSTGRES_USER: fixture
       POSTGRES_PASSWORD: fixture

@@ -6,7 +6,7 @@ x-logging: &default-logging
 
 services:
   mysql:
-    image: mysql:8.0
+    image: mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b # mysql:8.0, resolved 2026-10-06
     restart: unless-stopped
     logging: *default-logging
     env_file:
@@ -21,7 +21,7 @@ services:
     command: --default-authentication-plugin=mysql_native_password
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    image: ghcr.io/berriai/litellm@sha256:20b5044b619055374061a6d5b7b08754cad75aeabbf82ddf4f69cc0cf80ddaf4 # ghcr.io/berriai/litellm:main-stable, image of 2026-08-22; later builds refuse to start without a master key
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     env_file:
       - path: .env.litellm
