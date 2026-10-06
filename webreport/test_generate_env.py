@@ -187,6 +187,71 @@ class GenerateEnvTests(unittest.TestCase):
                 for path in Path(temp_directory).glob(".env*")
             }
 
+    def _generate_with_git_responses(
+        self,
+        responses: list[subprocess.CompletedProcess[str] | FileNotFoundError],
+    ) -> tuple[dict[str, dict[str, str]], list[list[str]]]:
+        source_script = Path(__file__).with_name("generate_env.py")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            script = Path(temp_directory) / source_script.name
+            _ = shutil.copyfile(source_script, script)
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            try:
+                with patch("subprocess.run", side_effect=responses) as git_run:
+                    _ = runpy.run_path(str(script), run_name="__main__")
+                    commands = [call.args[0] for call in git_run.call_args_list]
+            finally:
+                _ = sys.path.pop(0)
+
+            generated = {
+                path.name: self._parse_env_file(path.read_text(encoding="utf-8"))
+                for path in Path(temp_directory).glob(".env*")
+            }
+            return generated, commands
+
+    def test_uses_exact_release_tag_for_app_version(self) -> None:
+        # Given: git reports an exact release tag for HEAD.
+        describe_command = ["git", "describe", "--tags", "--exact-match"]
+        tag_result = subprocess.CompletedProcess(
+            describe_command,
+            0,
+            stdout="v9.9.9\n",
+            stderr="",
+        )
+
+        # When: environment generation resolves the application version.
+        generated, commands = self._generate_with_git_responses([tag_result])
+
+        # Then: the tag is used after querying git's exact-tag description.
+        self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "v9.9.9")
+        self.assertEqual(commands, [describe_command])
+
+    def test_uses_short_sha_when_head_has_no_exact_release_tag(self) -> None:
+        # Given: HEAD has no exact tag and git supplies its short commit identifier.
+        describe_command = ["git", "describe", "--tags", "--exact-match"]
+        short_sha_command = ["git", "rev-parse", "--short", "HEAD"]
+        no_tag_result = subprocess.CompletedProcess(
+            describe_command,
+            128,
+            stdout="",
+            stderr="fatal: no tag exactly matches 'deadbeef'\n",
+        )
+        short_sha_result = subprocess.CompletedProcess(
+            short_sha_command,
+            0,
+            stdout="abc1234\n",
+            stderr="",
+        )
+
+        # When: environment generation resolves the application version.
+        generated, commands = self._generate_with_git_responses(
+            [no_tag_result, short_sha_result]
+        )
+
+        # Then: the short SHA is used after the exact-tag lookup finds no tag.
+        self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "abc1234")
+        self.assertEqual(commands, [describe_command, short_sha_command])
+
     def test_generates_application_logging_environment(self) -> None:
         # Given: git returns a short commit identifier.
         completed = subprocess.CompletedProcess(
@@ -238,11 +303,15 @@ class GenerateEnvTests(unittest.TestCase):
         self.assertEqual(generated[".env"]["BD_LOG_ROTATION_MAX_FILES"], "7")
 
     def test_uses_unknown_app_version_when_git_is_missing(self) -> None:
-        # Given: git cannot be started.
-        generated = self._generate_with_patched_git(error=FileNotFoundError("git"))
+        # Given: git cannot be started for the exact-tag lookup.
+        describe_command = ["git", "describe", "--tags", "--exact-match"]
+        generated, commands = self._generate_with_git_responses(
+            [FileNotFoundError("git")]
+        )
 
-        # Then: application environments use the documented fallback version.
+        # Then: application environments use the fallback after attempting tag lookup.
         self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "unknown")
+        self.assertEqual(commands, [describe_command])
 
     def test_uses_unknown_app_version_when_git_returns_nonzero(self) -> None:
         # Given: the directory is not a git repository.
