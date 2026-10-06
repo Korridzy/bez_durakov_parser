@@ -29,7 +29,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import NoReturn, Protocol, TextIO, TypeAlias, TypedDict
+from typing import Any, NoReturn, Protocol, TextIO, TypeAlias, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -228,6 +228,29 @@ def valid_tag(tag: str) -> str:
     if len(tag) > 128 or not TAG_RE.fullmatch(tag):
         raise DeployError(2, "tag must be vMAJOR.MINOR.PATCH")
     return tag
+
+
+def backup_id_valid(identifier: str) -> bool:
+    if len(identifier) > 160 or not BACKUP_ID_RE.fullmatch(identifier):
+        return False
+    label = identifier.split("-", 1)[1]
+    return label == "pre-restore" or (len(label) <= 128 and bool(TAG_RE.fullmatch(label)))
+
+
+def manifest_timestamp(manifest: Mapping[str, JSON], code: int) -> datetime.datetime:
+    """Backup manifest header contract shared by the executor (code 40) and status (code 23)."""
+    tag, revision, stamp = (manifest.get(key) for key in ("tag", "db_revision_before", "created_at"))
+    if (not isinstance(tag, str) or not TAG_RE.fullmatch(tag) or
+            not (revision is None or isinstance(revision, str) and REVISION_RE.fullmatch(revision)) or
+            not isinstance(stamp, str)):
+        raise DeployError(code, "backup manifest header is invalid")
+    try:
+        timestamp = datetime.datetime.fromisoformat(stamp)
+    except ValueError:
+        raise DeployError(code, "backup manifest header is invalid") from None
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise DeployError(code, "backup timestamp must have a timezone")
+    return timestamp
 
 
 class State:
@@ -699,10 +722,7 @@ class Executor:
             raise DeployError(33, "migration declined")
 
     def backup_path(self, identifier: str) -> Path:
-        if len(identifier) > 160 or not BACKUP_ID_RE.fullmatch(identifier):
-            raise DeployError(40, "invalid backup id")
-        label = identifier.split("-", 1)[1]
-        if label != "pre-restore" and (len(label) > 128 or not TAG_RE.fullmatch(label)):
+        if not backup_id_valid(identifier):
             raise DeployError(40, "invalid backup id")
         path = self.state.path / "backups" / identifier
         if path.is_symlink() or path.resolve().parent != (self.state.path / "backups").resolve():
@@ -806,14 +826,7 @@ class Executor:
             manifest = json_object(data, 40, "backup manifest is invalid")
             if manifest.get("dataset", "") != self.env.get("DATASET", ""):
                 raise DeployError(40, "backup dataset differs from the configured dataset")
-            tag, revision, stamp = (manifest.get(key) for key in ("tag", "db_revision_before", "created_at"))
-            if (not isinstance(tag, str) or not TAG_RE.fullmatch(tag) or
-                    not (revision is None or isinstance(revision, str) and REVISION_RE.fullmatch(revision)) or
-                    not isinstance(stamp, str)):
-                raise DeployError(40, "backup manifest header is invalid")
-            timestamp = datetime.datetime.fromisoformat(stamp)
-            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
-                raise DeployError(40, "backup timestamp must have a timezone")
+            timestamp = manifest_timestamp(manifest, 40)
             # Emit a normalized timestamp, never arbitrary manifest text.
             manifest["created_at"] = timestamp.isoformat()
             return manifest
@@ -1604,6 +1617,139 @@ class Executor:
         self.emit("Rollback " + meta.version + " success")
 
 
+# --- status (todo 20) ---
+# Read-only view of the state dir. Only known scalar fields are copied out, so extra keys in
+# the state files are tolerated and never echoed.
+STATUS_HISTORY_EVENTS = 10
+LAST_SUCCESSFUL_FIELDS = ("tag", "commit", "db_revision_after", "finished_at")
+ATTEMPT_FIELDS = ("tag", "commit", "attempt_id", "started_at")
+HISTORY_FIELDS = ("tag", "kind", "event", "at", "exit_code", "step")
+
+
+def scalar(value: JSON) -> str | int | None:
+    return value if isinstance(value, (str, int)) and not isinstance(value, bool) else None
+
+
+def project(record: JSON, fields: Sequence[str]) -> dict[str, JSON] | None:
+    if not isinstance(record, dict):
+        return None
+    return {name: scalar(record.get(name)) for name in fields}
+
+
+def format_age(seconds: int) -> str:
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    if days:
+        return f"{days}d {hours}h"
+    return f"{hours}h {rest // 60}m" if hours else f"{rest // 60}m"
+
+
+def status_backup(folder: Path, now: datetime.datetime) -> dict[str, JSON]:
+    entry: dict[str, JSON] = {"id": folder.name, "tag": None, "db_revision_before": None,
+                              "created_at": None, "age_seconds": None, "complete": False}
+    manifest = folder / "manifest.json"
+    message = "backup manifest is invalid: " + folder.name
+    if manifest.is_symlink():
+        raise DeployError(23, message)
+    if not manifest.is_file():
+        # A backup in progress has no manifest yet; the manifest is written last.
+        return entry
+    with manifest.open("rb") as handle:
+        data = handle.read(RELEASE_MAX_BYTES + 1)
+    if len(data) > RELEASE_MAX_BYTES:
+        raise DeployError(23, message)
+    obj = json_object(data, 23, message)
+    try:
+        created = manifest_timestamp(obj, 23)
+    except DeployError as error:
+        raise DeployError(23, f"{message} ({error.message})") from None
+    entry.update({"tag": scalar(obj.get("tag")), "db_revision_before": scalar(obj.get("db_revision_before")),
+                  "created_at": created.isoformat(),
+                  "age_seconds": max(0, int((now - created).total_seconds())), "complete": True})
+    return entry
+
+
+def collect_status(state: State, now: datetime.datetime) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "state_dir": str(state.path), "initialized": False, "last_successful": None, "attempt": None,
+        "stage": None, "dirty": False, "unaudited": 0, "history_total": 0, "history": [],
+        "backups": [], "releases": [],
+    }
+    if not state.path.exists():
+        return report
+    if not state.path.is_dir():
+        raise DeployError(23, "deployment state path is not a directory")
+    current = state.read_current()
+    history = state.read_history() if (state.path / "history.jsonl").exists() else []
+    shown = history[-STATUS_HISTORY_EVENTS:]
+    for event in shown:
+        # Rollback target selection refuses a success event without a valid tag, so status does too.
+        tag = event.get("tag")
+        if event.get("event") == "success" and (not isinstance(tag, str) or not TAG_RE.fullmatch(tag)):
+            raise DeployError(23, "deployment history success event has an invalid tag")
+    unaudited = current.get("unaudited")
+    stage = current.get("stage")
+    report.update({
+        "initialized": True,
+        "last_successful": project(current.get("last_successful"), LAST_SUCCESSFUL_FIELDS),
+        "attempt": project(current.get("attempt"), ATTEMPT_FIELDS),
+        "stage": stage, "dirty": stage == "migration_started",
+        "unaudited": len(unaudited) if isinstance(unaudited, list) else 0,
+        "history_total": len(history),
+        "history": [project(event, HISTORY_FIELDS) for event in shown],
+    })
+    backups, releases = state.path / "backups", state.path / "releases"
+    if backups.is_dir():
+        folders = sorted((p for p in backups.iterdir()
+                          if BACKUP_ID_RE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()), reverse=True)
+        for folder in folders:
+            if not backup_id_valid(folder.name):
+                raise DeployError(23, "backup id is invalid: " + folder.name)
+        report["backups"] = [status_backup(folder, now) for folder in folders]
+    if releases.is_dir():
+        tags = [p.name for p in releases.iterdir() if TAG_RE.fullmatch(p.name) and p.is_dir()]
+        report["releases"] = sorted(tags, key=lambda tag: tuple(map(int, tag[1:].split("."))), reverse=True)
+    return report
+
+
+def format_status(report: dict[str, Any]) -> list[str]:
+    def text(value: object) -> str:
+        return "-" if value is None else str(value)
+
+    lines = ["Deployment state: " + report["state_dir"]]
+    if not report["initialized"]:
+        lines.append("No deployment state yet. This is a normal first-install state; the first deploy creates it.")
+        return lines
+    last, attempt = report["last_successful"], report["attempt"]
+    lines.append("Last successful: none" if last is None else
+                 f"Last successful: {text(last['tag'])} commit {text(last['commit'])} "
+                 f"db_revision_after={text(last['db_revision_after'])} finished {text(last['finished_at'])}")
+    lines.append("Current attempt: none" if attempt is None else
+                 f"Current attempt: {text(attempt['tag'])} started {text(attempt['started_at'])} "
+                 f"attempt_id={text(attempt['attempt_id'])}")
+    lines.append("Migration marker: " + ("none" if report["stage"] is None else str(report["stage"])
+                 + (" (DIRTY: restore a backup with rollback --restore-backup before deploying)"
+                    if report["dirty"] else "")))
+    lines.append(f"Unaudited outcomes: {report['unaudited']}")
+    lines.append(f"History (last {STATUS_HISTORY_EVENTS} of {report['history_total']}):")
+    for event in report["history"]:
+        extra = "".join(f" {name}={event[name]}" for name in ("exit_code", "step") if event[name] is not None)
+        lines.append("  " + " ".join(text(event[name]) for name in ("at", "tag", "kind", "event")) + extra)
+    lines.append(f"Backups ({len(report['backups'])}):")
+    for backup in report["backups"]:
+        detail = (f"db_revision_before={backup['db_revision_before'] or 'none'} age {format_age(backup['age_seconds'])}"
+                  if backup["complete"] else "incomplete (no manifest)")
+        lines.append(f"  {backup['id']} {detail}")
+    lines.append("Cached releases: " + (", ".join(report["releases"]) or "none"))
+    return lines
+
+
+def show_status(state: State, as_json: bool, emit: Callable[[str], None],
+                now: datetime.datetime | None = None) -> None:
+    report = collect_status(state, now or datetime.datetime.now(datetime.timezone.utc))
+    emit(json.dumps(report, sort_keys=True) if as_json else "\n".join(format_status(report)))
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         # argparse's default error echoes arbitrary arguments. Keep secrets out.
@@ -1625,7 +1771,7 @@ def parser() -> Parser:
     rollback.add_argument("--llm-smoke", action="store_true")
     resolve = commands.add_parser("resolve-rollback-target")
     resolve.add_argument("tag", nargs="?", type=valid_tag)
-    commands.add_parser("status")
+    commands.add_parser("status").add_argument("--json", action="store_true")
     isolation = commands.add_parser("verify-db-isolation")
     isolation.add_argument("--container-probe", action="store_true")
     smoke = commands.add_parser("smoke")
@@ -1651,10 +1797,16 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
                 print("Secondary error: deployment log write failed", file=sys.stderr)
 
     try:
+        args = list(sys.argv[1:] if argv is None else argv)
+        if args[:1] == ["status"]:
+            # Read-only report: it never initializes the state dir, takes the lock or writes a log.
+            with contextlib.redirect_stdout(help_output):
+                options = parser().parse_args(args)
+            show_status(state, options.json, emit)
+            return 0
         state.initialize()
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         # Only a validated tag may enter a log filename; invalid argv is never logged.
-        args = list(sys.argv[1:] if argv is None else argv)
         tag = args[1] if len(args) > 1 and TAG_RE.fullmatch(args[1]) and len(args[1]) <= 128 else "cli"
         log_path = state.path / "logs" / f"{stamp}-{tag}.log"
         log = log_path.open("x", encoding="utf-8")

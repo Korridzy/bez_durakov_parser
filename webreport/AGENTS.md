@@ -132,7 +132,7 @@ make deploy-smoke DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the operator checklist, migration approval, restore and exit codes. `make deploy-status` currently exits 42; Make itself returns 2 on recipe failures. State, audit, logs and backups default to `../vm/deploy/`.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the operator checklist, migration approval, restore and exit codes. `make deploy-status` prints a read-only state report; Make itself returns 2 on recipe failures. State, audit, logs and backups default to `../vm/deploy/`.
 
 The `make test` chain includes `test_request_context.py`, `test_agent_correlation.py`, `test_archive_store.py`, `test_archive_api.py`, `test_archive_cli.py`, `test_chat_store.py`, `test_runs.py`, `test_chat_routes.py`, and `test_report_routes.py`; it also runs the SQLite and PostgreSQL acceptance lanes plus `make test-proxy-contract`.
 

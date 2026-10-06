@@ -11,7 +11,7 @@ make deploy-smoke DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 
-`make deploy-status` currently returns executor code 42. Make returns 2 for every recipe failure; read the JSON error on stderr for the real deployment code. The remaining start, restart, rebuild and test commands are development commands. Never run tests or rebuilds on the server.
+`make deploy-status` prints a read-only state report (`DEPLOY_ARGS=--json` for JSON). Make returns 2 for every recipe failure; read the JSON error on stderr for the real deployment code. The remaining start, restart, rebuild and test commands are development commands. Never run tests or rebuilds on the server.
 
 ## ⚡ Быстрый старт (2 команды)
 

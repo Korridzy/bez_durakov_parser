@@ -14,7 +14,7 @@ make rollback DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation
 ```
 
-`make deploy-status` is accepted but currently exits 42. Start, stop, rebuild and test recipes elsewhere in this index are for development. Production uses the server-local executor and doesn't run tests or builds.
+`make deploy-status` prints a read-only report of the deployment state. Start, stop, rebuild and test recipes elsewhere in this index are for development. Production uses the server-local executor and doesn't run tests or builds.
 
 ### 🚀 Начало работы
 1. **[README.md](README.md)** - Главная страница

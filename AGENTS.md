@@ -110,7 +110,7 @@ make deploy-smoke DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 
-`make deploy-status` currently exits 42 because its handler isn't implemented. Make collapses recipe failures to exit 2; deployment JSON stderr carries the executor code. Default local state, logs and backups are under `vm/deploy/`.
+`make deploy-status` prints a read-only report of the executor state (`DEPLOY_ARGS=--json` for JSON) and takes no lock. Make collapses recipe failures to exit 2; deployment JSON stderr carries the executor code. Default local state, logs and backups are under `vm/deploy/`.
 
 ## NOTES
 

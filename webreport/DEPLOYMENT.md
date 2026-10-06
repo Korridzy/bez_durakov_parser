@@ -116,7 +116,7 @@ Before a new deploy or rollback, reconciliation appends missing success events f
 
 Backups keep the newest five complete sets, plus protected sets including the latest schema-changing deploy backup. They're not copied off the box. Arrange a private off-box backup process as a follow-up; local snapshots alone don't protect against loss of the server.
 
-`make deploy-status` is wired but currently returns `E_NOT_IMPLEMENTED` (42). Until its handler exists, inspect `current.json`, `history.jsonl` and the logs locally instead.
+`make deploy-status` prints a read-only report: the last successful release, the current attempt, the migration marker, the number of unaudited outcomes, the last 10 history events, each backup with its schema revision and age, and the cached release tags. Add `DEPLOY_ARGS=--json` for machine-readable output. It takes no lock and writes nothing, so it's safe to run during a deploy. A missing state directory is reported as a first install and exits 0. A corrupt `current.json`, history line or backup manifest gives an `E_STATE` (23) error and nothing is repaired.
 
 ### Exit codes and scripted use
 
@@ -167,7 +167,7 @@ Use `poetry run python deploy/deploy.py --help` and each subcommand's `--help` f
 | 39 | `E_ROLLBACK_SCHEMA` | Target and live schemas differ |
 | 40 | `E_RESTORE` | Backup validation, approval or restore failed |
 | 41 | `E_DEPLOYMENT_DIRTY` | Dirty migration marker requires explicit restore |
-| 42 | `E_NOT_IMPLEMENTED` | Accepted command lacks a handler, currently status |
+| 42 | `E_NOT_IMPLEMENTED` | Reserved for an accepted command without a handler; no command returns it now |
 
 ## Rollback and restore
 

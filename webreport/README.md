@@ -14,7 +14,7 @@ make rollback DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 
-`make deploy-status` currently exits 42 because its handler isn't implemented. Make reports any recipe failure as exit 2; see the guide for the real executor codes. The commands below describe development, not production updates. Don't run tests or rebuilds on the server. CI tests each pull request and `main` push; publishing a stable release promotes tested image digests, and the server pulls them.
+`make deploy-status` prints a read-only report of the deployment state. Make reports any recipe failure as exit 2; see the guide for the real executor codes. The commands below describe development, not production updates. Don't run tests or rebuilds on the server. CI tests each pull request and `main` push; publishing a stable release promotes tested image digests, and the server pulls them.
 
 ## 🏗️ Архитектура
 

@@ -50,7 +50,7 @@ help:
 	@echo "Release management:"
 	@echo "  make deploy VERSION=vX.Y.Z [DEPLOY_ARGS=...] - Deploy a versioned release"
 	@echo "  make rollback [VERSION=vX.Y.Z] [DEPLOY_ARGS=...] - Roll back to a release"
-	@echo "  make deploy-status [DEPLOY_ARGS=--help] - Reserved status command (currently exits 42)"
+	@echo "  make deploy-status [DEPLOY_ARGS=--json] - Read-only deployment state report"
 	@echo "  make deploy-smoke [DEPLOY_ARGS=--llm-smoke|--help] - Run deployment smoke checks"
 	@echo "  make deploy-verify-isolation [DEPLOY_ARGS=--container-probe|--help] - Verify database port isolation"
 	@echo "  make deploy-rehearsal - Run the disposable local release rehearsal (never on a server)"
@@ -239,12 +239,12 @@ deploy-status:
 		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
 		exit 2; \
 	fi; \
-	safe_args='$(filter --help,$(value DEPLOY_ARGS_SAFE_INPUT))'; \
+	safe_args='$(filter --help --json,$(value DEPLOY_ARGS_SAFE_INPUT))'; \
 	args=(); \
 	read -r -a args <<< "$$raw_args"; \
 	normalized_args="$${args[*]}"; \
 	if [[ "$$normalized_args" != "$$safe_args" ]]; then \
-		printf '%s\n' 'Usage: deploy-status only accepts --help' >&2; \
+		printf '%s\n' 'Usage: deploy-status only accepts --help and --json' >&2; \
 		exit 2; \
 	fi; \
 	exec deploy/deploy.sh status "$${args[@]}"

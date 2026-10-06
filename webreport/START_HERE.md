@@ -12,7 +12,7 @@ make rollback DEPLOY_ARGS="--llm-smoke"
 make deploy-verify-isolation
 ```
 
-`make deploy-status` is wired but its handler currently exits 42. Don't run `make test` or rebuild on the server; read the guide for backups, migration approval and failure codes.
+`make deploy-status` prints a read-only report of the deployment state. Don't run `make test` or rebuild on the server; read the guide for backups, migration approval and failure codes.
 
 ## ✅ Система создана и готова к использованию!
 

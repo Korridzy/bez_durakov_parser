@@ -309,11 +309,6 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(self.fetcher.calls, [])
         self.assertFailure(40, self.invoke(["rollback", TAG, "--restore-backup", "backup-id"]))
 
-    def test_later_command_bodies_refuse_instead_of_claiming_success(self):
-        for args in (["status"],):
-            with self.subTest(args=args):
-                self.assertFailure(42, self.invoke(args))
-
     def test_resolve_explicit_tag_and_no_target(self):
         self.assertEqual(self.invoke(["resolve-rollback-target", TAG]), (0, TAG + "\n", ""))
         self.assertFailure(2, self.invoke(["resolve-rollback-target"]))
@@ -445,6 +440,293 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(state.read_current(), {"last_successful": {"tag": TAG}})
         self.assertEqual(list(state.path.glob("*.tmp")), [])
         self.assertEqual((state.path / "current.json").stat().st_mode & 0o777, 0o600)
+
+
+class StatusTest(unittest.TestCase):
+    """Read-only report: no lock, no log, no directory creation, no secrets."""
+
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+        self.temp = tempfile.TemporaryDirectory(prefix="bdvrd-t20-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.state = self.root / "state"
+        self.env = {"BD_DEPLOY_STATE_DIR": str(self.state), "MYSQL_ROOT_PASSWORD": "env-secret-value"}
+
+    def invoke(self, args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = d.main(args, root=self.root, env=self.env)
+        return code, out.getvalue(), err.getvalue()
+
+    def snapshot(self):
+        if not self.state.exists():
+            return None
+        return {p.relative_to(self.state).as_posix(): (p.stat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
+                for p in sorted(self.state.rglob("*"))}
+
+    def assertStateError(self, result, message_part):
+        code, out, err = result
+        self.assertEqual((code, out), (23, ""), (out, err))
+        self.assertEqual(len(err.splitlines()), 1)
+        obj = json.loads(err)
+        self.assertEqual(obj["exit_code"], 23)
+        self.assertEqual(obj["error"], "E_STATE")
+        self.assertIn(message_part, obj["message"])
+        self.assertNotIn("Traceback", err)
+        return obj
+
+    def populate(self):
+        self.state.mkdir()
+        for name in ("releases", "backups", "logs"):
+            (self.state / name).mkdir()
+        outcome = {"attempt_id": "a-2", "tag": "v1.10.0", "commit": COMMIT, "kind": "deploy",
+                   "finished_at": "2026-10-02T09:00:00+00:00"}
+        (self.state / "current.json").write_text(json.dumps({
+            "last_successful": {**outcome, "db_revision_after": REVISION, "future_key": "extra-secret"},
+            "unaudited": [outcome], "future_top_level": {"token": "extra-secret"}}) + "\n")
+        events: list[dict[str, Any]] = [{"event": "started" if i % 2 == 0 else "success", "tag": f"v1.0.{i}", "kind": "deploy",
+                   "at": f"2026-09-{i + 1:02d}T10:00:00+00:00", "digests": {"backend": "x"}} for i in range(12)]
+        events[11] = {"event": "failed", "tag": "v1.0.11", "kind": "rollback", "at": "2026-09-12T10:00:00+00:00",
+                      "exit_code": 38, "step": "S3", "note": "extra-secret"}
+        (self.state / "history.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+        for ident, revision, created in (("20261001T100000000000Z-v1.9.0", "aaa111", "2026-10-01T10:00:00+00:00"),
+                                         ("20261002T090000000000Z-v1.10.0", None, "2026-10-02T09:00:00+00:00")):
+            folder = self.state / "backups" / ident
+            folder.mkdir()
+            (folder / "manifest.json").write_text(json.dumps({
+                "tag": ident.split("-")[-1], "created_at": created, "db_revision_before": revision,
+                "files": {"mysql.sql": {"sha256": "0" * 64}}, "dataset": ""}))
+        for tag in ("v1.9.0", "v1.10.0", "v1.2.3"):
+            (self.state / "releases" / tag).mkdir()
+        (self.state / "releases" / "not-a-tag").mkdir()
+
+    def test_missing_state_dir_is_a_clean_first_install_and_creates_nothing(self):
+        code, out, err = self.invoke(["status"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("first-install", out)
+        self.assertFalse(self.state.exists())
+        code, out, err = self.invoke(["status", "--json"])
+        self.assertEqual((code, err), (0, ""))
+        report = json.loads(out)
+        self.assertEqual((report["initialized"], report["state_dir"]), (False, str(self.state)))
+        self.assertEqual((report["last_successful"], report["history"], report["backups"], report["releases"]),
+                         (None, [], [], []))
+        self.assertFalse(self.state.exists())
+
+    def test_empty_initialized_state_reports_nothing_deployed_yet(self):
+        d.State(self.root, self.env).initialize()
+        before = self.snapshot()
+        code, out, err = self.invoke(["status", "--json"])
+        self.assertEqual((code, err), (0, ""))
+        report = json.loads(out)
+        self.assertEqual((report["initialized"], report["last_successful"], report["attempt"], report["dirty"],
+                          report["unaudited"], report["history_total"]), (True, None, None, False, 0, 0))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_healthy_state_json_reports_every_section(self):
+        self.populate()
+        code, out, err = self.invoke(["status", "--json"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.count("\n"), 1)
+        report = json.loads(out)
+        self.assertEqual(report["last_successful"], {
+            "tag": "v1.10.0", "commit": COMMIT, "db_revision_after": REVISION,
+            "finished_at": "2026-10-02T09:00:00+00:00"})
+        self.assertEqual((report["attempt"], report["stage"], report["dirty"], report["unaudited"]),
+                         (None, None, False, 1))
+        self.assertEqual(report["history_total"], 12)
+        self.assertEqual([e["tag"] for e in report["history"]], [f"v1.0.{i}" for i in range(2, 12)])
+        self.assertEqual(report["history"][-1], {"tag": "v1.0.11", "kind": "rollback", "event": "failed",
+                                                 "at": "2026-09-12T10:00:00+00:00", "exit_code": 38, "step": "S3"})
+        self.assertEqual(report["history"][0]["exit_code"], None)
+        self.assertEqual([b["id"] for b in report["backups"]],
+                         ["20261002T090000000000Z-v1.10.0", "20261001T100000000000Z-v1.9.0"])
+        self.assertEqual([b["db_revision_before"] for b in report["backups"]], [None, "aaa111"])
+        self.assertTrue(all(isinstance(b["age_seconds"], int) and b["age_seconds"] >= 0 for b in report["backups"]))
+        self.assertEqual(report["releases"], ["v1.10.0", "v1.9.0", "v1.2.3"])
+
+    def test_text_report_is_readable_and_never_echoes_unknown_keys_or_environment(self):
+        self.populate()
+        code, out, err = self.invoke(["status"])
+        self.assertEqual((code, err), (0, ""))
+        for expected in (str(self.state), "Last successful: v1.10.0", COMMIT, REVISION, "Unaudited outcomes: 1",
+                         "last 10 of 12", "v1.0.11 rollback failed exit_code=38 step=S3",
+                         "20261001T100000000000Z-v1.9.0 db_revision_before=aaa111",
+                         "20261002T090000000000Z-v1.10.0 db_revision_before=none",
+                         "Cached releases: v1.10.0, v1.9.0, v1.2.3"):
+            self.assertIn(expected, out)
+        self.assertNotIn("v1.0.1 ", out)
+        for secret in ("extra-secret", "env-secret-value"):
+            self.assertNotIn(secret, out + err)
+
+    def test_backup_age_is_computed_from_the_manifest_timestamp(self):
+        self.populate()
+        now = datetime.datetime(2026, 10, 3, 12, 30, tzinfo=datetime.timezone.utc)
+        report = d.collect_status(d.State(self.root, self.env), now)
+        self.assertEqual([b["age_seconds"] for b in report["backups"]], [86400 + 3 * 3600 + 1800, 2 * 86400 + 2 * 3600 + 1800])
+        self.assertEqual(d.format_age(2 * 86400 + 2 * 3600 + 1800), "2d 2h")
+        self.assertEqual(d.format_age(3 * 3600 + 120), "3h 2m")
+        self.assertEqual(d.format_age(59), "0m")
+        future = d.collect_status(d.State(self.root, self.env), now - datetime.timedelta(days=30))
+        self.assertEqual([b["age_seconds"] for b in future["backups"]], [0, 0])
+
+    def test_dirty_marker_and_current_attempt_are_visible(self):
+        self.populate()
+        current: dict[str, Any] = json.loads((self.state / "current.json").read_text())
+        current["stage"] = "migration_started"
+        current["attempt"] = {"tag": "v1.11.0", "commit": COMMIT, "attempt_id": "a-3",
+                              "started_at": "2026-10-03T08:00:00+00:00"}
+        (self.state / "current.json").write_text(json.dumps(current))
+        report = json.loads(self.invoke(["status", "--json"])[1])
+        self.assertEqual((report["stage"], report["dirty"]), ("migration_started", True))
+        self.assertEqual(report["attempt"], {"tag": "v1.11.0", "commit": COMMIT, "attempt_id": "a-3",
+                                             "started_at": "2026-10-03T08:00:00+00:00"})
+        code, out, err = self.invoke(["status"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("DIRTY", out)
+        self.assertIn("migration_started", out)
+        self.assertIn("Current attempt: v1.11.0", out)
+
+    def test_incomplete_backup_folder_is_listed_and_unrelated_names_are_ignored(self):
+        self.populate()
+        (self.state / "backups" / "20261003T000000000000Z-v1.11.0").mkdir()
+        (self.state / "backups" / "stray").mkdir()
+        (self.state / "backups" / "20261003T000000000000Z-v1.12.0").symlink_to(self.root)
+        report = json.loads(self.invoke(["status", "--json"])[1])
+        self.assertEqual(report["backups"][0]["id"], "20261003T000000000000Z-v1.11.0")
+        self.assertEqual((report["backups"][0]["complete"], report["backups"][0]["age_seconds"]), (False, None))
+        self.assertEqual(len(report["backups"]), 3)
+
+    def test_corrupt_current_json_is_a_structured_state_error_without_mutation(self):
+        self.populate()
+        for raw in (b"{", b"[]", b'{"last_successful":{"tag":"nope"}}', b'{"stage":"other"}',
+                    b'{"unaudited":"x"}', b'{"a":1,"a":2}', b"\xff", b"x" * (d.RELEASE_MAX_BYTES + 1)):
+            with self.subTest(raw=raw[:30]):
+                (self.state / "current.json").write_bytes(raw)
+                before = self.snapshot()
+                for args in (["status"], ["status", "--json"]):
+                    self.assertStateError(self.invoke(args), "deployment")
+                self.assertEqual(self.snapshot(), before)
+
+    def test_corrupt_history_line_is_a_structured_state_error_without_mutation(self):
+        self.populate()
+        history = self.state / "history.jsonl"
+        for line in (b"{broken\n", b"[]\n", b"\n", b'{"event":"success"'):
+            with self.subTest(line=line):
+                history.write_bytes(history.read_bytes().split(b"\n")[0] + b"\n" + line)
+                before = self.snapshot()
+                self.assertStateError(self.invoke(["status"]), "history")
+                self.assertEqual(self.snapshot(), before)
+
+    def test_corrupt_backup_manifest_is_a_structured_state_error_without_mutation(self):
+        self.populate()
+        manifest = self.state / "backups" / "20261001T100000000000Z-v1.9.0" / "manifest.json"
+        for raw in (b"{", b"[]", b'{"created_at":"yesterday","db_revision_before":null}',
+                    b'{"created_at":"2026-10-01T10:00:00","db_revision_before":null}',
+                    b'{"created_at":"2026-10-01T10:00:00+00:00","db_revision_before":7}'):
+            with self.subTest(raw=raw):
+                manifest.write_bytes(raw)
+                before = self.snapshot()
+                obj = self.assertStateError(self.invoke(["status", "--json"]), "backup manifest")
+                self.assertIn("20261001T100000000000Z-v1.9.0", obj["message"])
+                self.assertEqual(self.snapshot(), before)
+
+    def test_backup_manifest_header_follows_the_executor_rules_in_both_output_modes(self):
+        self.populate()
+        ident = "20261001T100000000000Z-v1.9.0"
+        manifest = self.state / "backups" / ident / "manifest.json"
+        good: dict[str, Any] = {"tag": "v1.9.0", "created_at": "2026-10-01T10:00:00+00:00", "db_revision_before": "aaa111"}
+        bad = [{**good, "db_revision_before": "not a revision"}, {**good, "db_revision_before": ""},
+               {**good, "db_revision_before": "r" * 33}, {**good, "db_revision_before": 7},
+               {**good, "tag": "not-a-tag"}, {**good, "tag": "v01.0.0"}, {**good, "tag": 5}, {**good, "tag": None},
+               {k: v for k, v in good.items() if k != "tag"}, {k: v for k, v in good.items() if k != "created_at"},
+               {**good, "created_at": 5}, {**good, "created_at": "2026-10-01T10:00:00"},
+               {**good, "created_at": "yesterday"}, {}]
+        for obj in bad:
+            for args in (["status"], ["status", "--json"]):
+                with self.subTest(manifest=obj, args=args):
+                    manifest.write_text(json.dumps(obj))
+                    before = self.snapshot()
+                    error = self.assertStateError(self.invoke(args), "backup manifest")
+                    self.assertIn(ident, error["message"])
+                    self.assertEqual(self.snapshot(), before)
+        for obj in (good, {**good, "db_revision_before": None}, {**good, "extra": ["kept", "out"]}):
+            with self.subTest(accepted=obj):
+                manifest.write_text(json.dumps(obj))
+                self.assertEqual(self.invoke(["status", "--json"])[0], 0)
+
+    def test_every_manifest_header_the_status_accepts_is_accepted_by_the_executor(self):
+        self.populate()
+        executor = d.Executor(self.root, self.env, mock.Mock(), mock.Mock())
+        manifest = self.state / "backups" / "20261001T100000000000Z-v1.9.0" / "manifest.json"
+        for revision in ("aaa111", None, "b1c2d3e4f5g6", "not a revision", "r" * 33):
+            with self.subTest(revision=revision):
+                manifest.write_text(json.dumps({"tag": "v1.9.0", "created_at": "2026-10-01T10:00:00+00:00",
+                                                "db_revision_before": revision, "dataset": ""}))
+                status_ok = self.invoke(["status", "--json"])[0] == 0
+                try:
+                    executor.backup_manifest("20261001T100000000000Z-v1.9.0")
+                    executor_ok = True
+                except d.DeployError:
+                    executor_ok = False
+                self.assertEqual(status_ok, executor_ok)
+
+    def test_backup_folder_name_with_an_invalid_label_is_a_state_error(self):
+        self.populate()
+        (self.state / "backups" / "20261003T000000000000Z-v01.0.0").mkdir()
+        error = self.assertStateError(self.invoke(["status"]), "backup id")
+        self.assertIn("20261003T000000000000Z-v01.0.0", error["message"])
+
+    def test_success_history_events_need_a_valid_tag_like_rollback_target_selection(self):
+        self.populate()
+        history = self.state / "history.jsonl"
+        for event in ({"event": "success", "tag": "not-a-tag"}, {"event": "success", "tag": None},
+                      {"event": "success"}, {"event": "success", "tag": 5}):
+            with self.subTest(event=event):
+                history.write_text(json.dumps({"event": "started", "tag": "v1.0.0"}) + "\n" + json.dumps(event) + "\n")
+                before = self.snapshot()
+                for args in (["status"], ["status", "--json"]):
+                    self.assertStateError(self.invoke(args), "history")
+                self.assertEqual(self.snapshot(), before)
+        # The executor never reads the tag of a started or failed event, so status does not either.
+        history.write_text(json.dumps({"event": "started", "tag": "odd tag"}) + "\n")
+        self.assertEqual(self.invoke(["status"])[0], 0)
+
+    def test_status_never_writes_logs_takes_the_lock_or_waits_for_a_running_deploy(self):
+        self.populate()
+        before = self.snapshot()
+        assert before is not None
+        with (self.state / "lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            held = self.snapshot()
+            for args in (["status"], ["status", "--json"]):
+                code, _, err = self.invoke(args)
+                self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.snapshot(), held)
+        self.assertEqual(list((self.state / "logs").iterdir()), [])
+        self.assertEqual(before, {k: v for k, v in (held or {}).items() if k != "lock"})
+
+    def test_status_ignores_an_inherited_lock_descriptor_and_the_dataset_refusal(self):
+        self.populate()
+        self.env |= {"BD_DEPLOY_LOCK_FD": "9", "DATASET": "ikar"}
+        code, out, err = self.invoke(["status", "--json"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["last_successful"]["tag"], "v1.10.0")
+
+    def test_usage_and_help_do_not_create_the_state_dir(self):
+        code, out, err = self.invoke(["status", "--bogus-secret"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(err)["error"], "E_USAGE")
+        self.assertNotIn("bogus-secret", err)
+        code, out, err = self.invoke(["status", "--help"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("--json", out)
+        self.assertFalse(self.state.exists())
+
+    def test_state_path_that_is_a_file_is_a_structured_state_error(self):
+        self.state.write_text("not a directory")
+        self.assertStateError(self.invoke(["status"]), "not a directory")
 
 
 class OperationalRunner(FakeRunner):
