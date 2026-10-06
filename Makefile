@@ -13,7 +13,12 @@ define bez_only
 fi
 endef
 
-.PHONY: help setup test lint upgrade-db upgrade-code webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
+# Freeze Make's raw command-line value once; never export it for recursive expansion.
+override DEPLOY_ARGS_SAFE_INPUT := $(value DEPLOY_ARGS)
+unexport DEPLOY_ARGS
+export DEPLOY_ARGS_SAFE_INPUT
+
+.PHONY: help setup test lint upgrade-db upgrade-code deploy rollback deploy-status deploy-smoke deploy-verify-isolation webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -24,7 +29,7 @@ help:
 	@echo "  make lint           - Run Ruff checks"
 	@echo "  make test           - Run the complete project test suite"
 	@echo "  make upgrade-db     - Apply Alembic migrations"
-	@echo "  make upgrade-code   - Pull updates from main safely"
+	@echo "  make upgrade-code   - Pull updates from main safely (developer-only)"
 	@echo ""
 	@echo "WebReport stack:"
 	@echo "  make webreport-start - Start MySQL + backend + frontend"
@@ -41,6 +46,13 @@ help:
 	@echo "  make fetch-data      - Run XLSM fetch manually"
 	@echo "  make fetch-data-log  - Show logs since last fetch start"
 	@echo "  make logs SERVICE=name - Stream selected service logs"
+	@echo ""
+	@echo "Release management:"
+	@echo "  make deploy VERSION=vX.Y.Z [DEPLOY_ARGS=...] - Deploy a versioned release"
+	@echo "  make rollback [VERSION=vX.Y.Z] [DEPLOY_ARGS=...] - Roll back to a release"
+	@echo "  make deploy-status [DEPLOY_ARGS=--help] - Show deployment status"
+	@echo "  make deploy-smoke [DEPLOY_ARGS=--llm-smoke|--help] - Run deployment smoke checks"
+	@echo "  make deploy-verify-isolation [DEPLOY_ARGS=--container-probe|--help] - Verify database port isolation"
 	@echo ""
 	@echo "Tip: make -C webreport help"
 
@@ -109,6 +121,7 @@ test:
 	run poetry run python deploy/test_release_metadata.py; \
 	run poetry run python deploy/test_deploy.py; \
 	run poetry run python deploy/test_verify_isolation.py; \
+	run poetry run python deploy/test_deploy_sh.py; \
 	run $(MAKE) -C webreport test-ui; \
 	run $(MAKE) -C webreport test-e2e; \
 	if [ $$status -eq 0 ]; then \
@@ -174,6 +187,94 @@ upgrade-code:
 		echo "Выполните обновление вручную или зафиксируйте изменения."; \
 		exit 1; \
 	fi
+
+deploy:
+	@set -e; \
+	if [[ -n "$${DATASET:-}" ]]; then \
+		printf '%s\n' 'DATASET deployments are not supported by the executor; DATASET remains a `make start` development mode' >&2; \
+		exit 2; \
+	fi; \
+	version="$${VERSION:-}"; \
+	if [[ -z "$$version" ]]; then \
+		printf '%s\n' 'Usage: make deploy VERSION=vMAJOR.MINOR.PATCH [DEPLOY_ARGS=...]' >&2; \
+		exit 2; \
+	fi; \
+	if [[ "$${DEPLOY_ARGS_SAFE_INPUT:-}" == *$$'\n'* || "$${DEPLOY_ARGS_SAFE_INPUT:-}" == *$$'\r'* ]]; then \
+		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
+		exit 2; \
+	fi; \
+	args=(); \
+	read -r -a args <<< "$${DEPLOY_ARGS_SAFE_INPUT:-}"; \
+	exec deploy/deploy.sh deploy "$$version" "$${args[@]}"
+
+rollback:
+	@set -e; \
+	if [[ -n "$${DATASET:-}" ]]; then \
+		printf '%s\n' 'DATASET deployments are not supported by the executor; DATASET remains a `make start` development mode' >&2; \
+		exit 2; \
+	fi; \
+	version="$${VERSION:-}"; \
+	if [[ "$${DEPLOY_ARGS_SAFE_INPUT:-}" == *$$'\n'* || "$${DEPLOY_ARGS_SAFE_INPUT:-}" == *$$'\r'* ]]; then \
+		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
+		exit 2; \
+	fi; \
+	args=(); \
+	read -r -a args <<< "$${DEPLOY_ARGS_SAFE_INPUT:-}"; \
+	if [[ -n "$$version" ]]; then \
+		exec deploy/deploy.sh rollback "$$version" "$${args[@]}"; \
+	fi; \
+	exec deploy/deploy.sh rollback "$${args[@]}"
+
+deploy-status:
+	@set -e; \
+	raw_args="$${DEPLOY_ARGS_SAFE_INPUT:-}"; \
+	if [[ "$$raw_args" == *$$'\n'* || "$$raw_args" == *$$'\r'* ]]; then \
+		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
+		exit 2; \
+	fi; \
+	safe_args='$(filter --help,$(value DEPLOY_ARGS_SAFE_INPUT))'; \
+	args=(); \
+	read -r -a args <<< "$$raw_args"; \
+	normalized_args="$${args[*]}"; \
+	if [[ "$$normalized_args" != "$$safe_args" ]]; then \
+		printf '%s\n' 'Usage: deploy-status only accepts --help' >&2; \
+		exit 2; \
+	fi; \
+	exec deploy/deploy.sh status "$${args[@]}"
+
+deploy-smoke:
+	@set -e; \
+	raw_args="$${DEPLOY_ARGS_SAFE_INPUT:-}"; \
+	if [[ "$$raw_args" == *$$'\n'* || "$$raw_args" == *$$'\r'* ]]; then \
+		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
+		exit 2; \
+	fi; \
+	safe_args='$(filter --help --llm-smoke,$(value DEPLOY_ARGS_SAFE_INPUT))'; \
+	args=(); \
+	read -r -a args <<< "$$raw_args"; \
+	normalized_args="$${args[*]}"; \
+	if [[ "$$normalized_args" != "$$safe_args" ]]; then \
+		printf '%s\n' 'Usage: deploy-smoke accepts only --help and --llm-smoke' >&2; \
+		exit 2; \
+	fi; \
+	exec deploy/deploy.sh smoke "$${args[@]}"
+
+deploy-verify-isolation:
+	@set -e; \
+	raw_args="$${DEPLOY_ARGS_SAFE_INPUT:-}"; \
+	if [[ "$$raw_args" == *$$'\n'* || "$$raw_args" == *$$'\r'* ]]; then \
+		printf '%s\n' 'Usage: DEPLOY_ARGS must be a single line of space-separated options' >&2; \
+		exit 2; \
+	fi; \
+	safe_args='$(filter --help --container-probe,$(value DEPLOY_ARGS_SAFE_INPUT))'; \
+	args=(); \
+	read -r -a args <<< "$$raw_args"; \
+	normalized_args="$${args[*]}"; \
+	if [[ "$$normalized_args" != "$$safe_args" ]]; then \
+		printf '%s\n' 'Usage: deploy-verify-isolation accepts only --help and --container-probe' >&2; \
+		exit 2; \
+	fi; \
+	exec deploy/deploy.sh verify-db-isolation "$${args[@]}"
 
 # WebReport Docker management
 webreport-start:
