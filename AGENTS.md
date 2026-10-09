@@ -61,7 +61,7 @@ parser/
 - **Game data**: All game data flows through `BdGame` dataclass. Never access raw XLSM directly after parsing
 - **Imports**: Use `from bd_shared.db import Database` not `from bd_shared import *`
 - **Tests**: No test framework configured. Tests are standalone scripts (`test_alembic_migration.py`, `webreport/test_system.py`)
-- **CI and releases**: GitHub Actions runs the full root `make test` on PRs and main. Passing main pushes publish candidates; stable GitHub Releases promote the same digests. The server pulls through `deploy/deploy.sh`; GitHub never contacts it. See [DEPLOYMENT.md](webreport/DEPLOYMENT.md).
+- **CI and releases**: GitHub Actions runs the full root `make test` on PRs and main. Passing main pushes publish candidates (plus a temporary BOOTSTRAP gate: the issue branch publishes and a `v*` tag push promotes only the commit named by the `BD_ROLLOUT_BOOTSTRAP` repository variable, removed on the branch before it merges to main); stable GitHub Releases promote the same digests. The server pulls through `deploy/deploy.sh`; GitHub never contacts it. See [DEPLOYMENT.md](webreport/DEPLOYMENT.md).
 - **Monorepo-ish**: Root + `webreport/` have separate `pyproject.toml`. No Poetry workspaces — managed via Docker Compose for web components
 - **Knowledge**: The configured folder is read once at backend startup, and its manifest supplies the agent persona and dataset scope
 

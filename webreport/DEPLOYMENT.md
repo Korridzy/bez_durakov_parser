@@ -6,6 +6,8 @@ Delivery is pull-based. GitHub tests and publishes images; the operator runs the
 
 CI runs the complete root `make test` for pull requests and pushes to `main` on disposable runners. Only passing `main` pushes publish the tested backend, data collector and frontend candidates to GHCR, tagged `sha-<commit>`. Release promotion adds a version tag to those same digests without rebuilding.
 
+BOOTSTRAP (temporary, first rollout only): the issue branch `issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access` can also publish candidates, and a `v*` tag push can promote them. Both happen only while the repository variable `BD_ROLLOUT_BOOTSTRAP` holds the exact 40-character commit the owner approved. With the variable unset or naming another commit nothing changes: only `main` publishes and promotes. Every line of this path is marked `BOOTSTRAP`. A last commit on the issue branch removes them all before the owner merges to `main`, so `main` never carries this path. See [First rollout](#first-rollout).
+
 This guide covers the bundled MySQL deployment with one backend replica. The executor doesn't support `DATASET`: deploy and rollback refuse it with exit 2. It remains a development mode.
 
 ## Server setup once
@@ -64,6 +66,8 @@ The LiteLLM digest pin deliberately selects the August 22, 2026 `main-stable` bu
 Choose a `main` commit whose CI and candidate publication passed. Tag that commit `vMAJOR.MINOR.PATCH`, such as `v0.1.0`, and publish a GitHub Release that isn't a draft or prerelease.
 
 The promotion workflow checks the tag's ancestry on `main`, the successful CI run and its candidate-push step, and the candidates' source labels. It refuses an existing version tag or metadata asset that points elsewhere. It can also be dispatched manually for an existing stable release after correcting a promotion failure.
+
+BOOTSTRAP (temporary): when the release commit equals `BD_ROLLOUT_BOOTSTRAP`, promotion skips the `main` ancestry check. It requires the tag commit to be exactly that commit and the successful push CI run to come from the issue branch by its exact name, and its log says `BOOTSTRAP: promoting non-main commit`. A `v*` tag push also starts the workflow; it waits up to 5 minutes for the stable Release to appear. A new commit on the branch can't publish candidates until the variable is updated to it before the push. After a squash merge the approved commit isn't an ancestor of `main`, so once the bootstrap is gone the default gate refuses to promote that version again.
 
 Wait for `release-metadata.json` and its sha256 marker in the release body before deploying. The metadata records the version, source commit, CI run ID and attempt, candidate tag, the three application `repo@sha256` references and a concrete Alembic revision. Read it to confirm you're approving the intended commit and schema. Infrastructure pins come from that tag's Compose file, not the metadata asset.
 
@@ -275,9 +279,18 @@ Use `docker compose ps` to discover names and service-based commands such as `do
 
 This checklist is for the operator. The agent only checks command resolution locally; it never contacts the production server.
 
-1. Merge the work to `main`. Confirm CI passed and all three `sha-<merge-commit>` candidate images exist. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private.
-2. Add the owner-only `v*` tag ruleset for create, update and delete.
-3. On the server, take a manual backup before changing anything. Quiesce backend and collector so SQLite files are stable, stop MySQL, archive `vm/mysql/mysql_data` and `vm/backend/checkpoints`, then restart those services:
+The first rollout ships from the issue branch through the temporary bootstrap gate. No step merges to `main`; merging stays the owner's own decision. `<C>` below is the full 40-character lowercase SHA of the approved commit at the tip of `issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access`.
+
+1. Before pushing anything, create the repository variable `BD_ROLLOUT_BOOTSTRAP` (Settings, Secrets and variables, Actions, Variables) with the value `<C>`. The CI publish condition reads it when the run starts.
+2. Push the issue branch with `<C>` at its tip:
+
+   ```bash
+   git push origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access
+   ```
+
+   Watch the CI run for that push. It must be green, show the warning `BOOTSTRAP: publishing candidates from issue-96-... for approved commit <C>`, and print the three `sha-<C>` digests. Confirm all three `sha-<C>` candidate images exist. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private. If you later push a newer commit, set the variable to that commit before pushing; otherwise its run tests but doesn't publish.
+3. Add the owner-only `v*` tag ruleset for create, update and delete.
+4. On the server, take a manual backup before changing anything. Quiesce backend and collector so SQLite files are stable, stop MySQL, archive `vm/mysql/mysql_data` and `vm/backend/checkpoints`, then restart those services:
 
    ```bash
    cd webreport
@@ -289,8 +302,8 @@ This checklist is for the operator. The agent only checks command resolution loc
    cd ..
    ```
 
-   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding. Move hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Run `git fetch origin` and use the merged `main` checkout for the next step. Confirm Traefik is attached to `webreport_webreport-network` and routes to `http://frontend:8501`; keep that attachment after the infrastructure recreate.
-4. Apply the one-time infrastructure procedure from the merged checkout, not a whole-stack stop:
+   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding. Move hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Run `git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access && git checkout --detach <C>` and use that checkout for the next step. Confirm Traefik is attached to `webreport_webreport-network` and routes to `http://frontend:8501`; keep that attachment after the infrastructure recreate.
+5. Apply the one-time infrastructure procedure from the `<C>` checkout, not a whole-stack stop:
 
    ```bash
    make -C webreport generate-env
@@ -301,22 +314,25 @@ This checklist is for the operator. The agent only checks command resolution loc
    ```
 
    This applies loopback MySQL publication and both digest pins. The executor refuses when running infrastructure images differ from its pins. Before release state exists, the isolation check requires only MySQL, so repeat it after deployment. Every runtime third-party digest bump needs this infrastructure procedure first.
-5. Create tag `v0.1.0` on the merge commit, create and publish the stable GitHub Release, and wait for promotion to attach `release-metadata.json` and its checksum marker.
-6. Deploy from root:
+6. Create the stable GitHub Release `v0.1.0` targeting `<C>`, not a draft and not a prerelease, for example `gh release create v0.1.0 --target <C> --title v0.1.0 --notes '...'` or the UI with a new tag created on publish. A Release on a commit that isn't on `main` is expected here. GitHub creates the tag when you publish, and the tag push starts the `Release promotion` workflow from the tag's own `release.yml`. Its `Wait for the stable release (bootstrap)` step finds the Release at once. Fallback only: if you pushed the tag by hand first and the 5-minute wait timed out, publish the Release and re-run that workflow run. Expect `BOOTSTRAP: promoting non-main commit <C>` and `PROMOTED: v0.1.0 commit=<C>` in the log. Wait for `release-metadata.json` and its sha256 marker in the Release body, then read the asset and confirm `source_commit` is `<C>` and the Alembic revision is the expected one.
+
+   Documented but not verified live: GitHub documents that a tag push runs the workflow file of the pushed tag even when it isn't on the default branch, and the bootstrap relies on that. Whether a `release: published` run also starts from the tag's workflow file while `main` has no workflows wasn't verified. If it does, it takes the same bootstrap gate for `<C>`, and promoting the same digests a second time changes nothing.
+7. Deploy from root:
 
    ```bash
    make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
    ```
 
    Approve the migration prompt if shown. No migration is expected when both live and release revisions are `b1c2d3e4f5g6`; trust the actual computed plan rather than that expectation.
-7. Run isolation verification again:
+8. Run isolation verification again:
 
    ```bash
    make deploy-verify-isolation DEPLOY_ARGS=--container-probe
    ```
 
    Run the off-host `nc` commands in [Verifying isolation](#verifying-isolation) from another machine, for IPv4 and IPv6 if assigned. Require refused private ports and a connecting public control.
-8. Open the UI through Traefik. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route.
-9. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
+9. Open the UI through Traefik. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route.
+10. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
+11. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
 
-If `--llm-smoke` fails, the executor exits 38; Make reports 2. When there is a previous successful record, recovery output suggests `make rollback VERSION=<previous>`. The first rollout has no previous record, so fix forward or explicitly restore the manual backup from step 3. No automatic recovery runs.
+If `--llm-smoke` fails, the executor exits 38; Make reports 2. When there is a previous successful record, recovery output suggests `make rollback VERSION=<previous>`. The first rollout has no previous record, so fix forward or explicitly restore the manual backup from step 4. No automatic recovery runs.

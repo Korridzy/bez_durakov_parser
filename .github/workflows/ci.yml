@@ -3,10 +3,13 @@ name: CI
 # Every pull request and every main commit runs the complete root `make test` on a
 # disposable runner. A passing main commit then publishes the three candidate images the
 # suite ran against, tagged sha-<commit>. Nothing here connects to a server or deploys.
+# BOOTSTRAP: a push to the issue branch named below publishes candidates only while the
+# repository variable BD_ROLLOUT_BOOTSTRAP names that exact commit (one-time first-rollout
+# bootstrap, see webreport/DEPLOYMENT.md); remove after the first rollout.
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access] # BOOTSTRAP: issue branch
 
 permissions:
   contents: read
@@ -215,7 +218,12 @@ jobs:
         run: make test
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # BOOTSTRAP: the issue-branch clause publishes only the commit named by vars.BD_ROLLOUT_BOOTSTRAP.
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' ||
+           (github.ref == 'refs/heads/issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access' &&
+            vars.BD_ROLLOUT_BOOTSTRAP == github.sha))
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -224,9 +232,19 @@ jobs:
 
       # The release promotion workflow looks for this exact step name and its success.
       - name: Push candidate images
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # BOOTSTRAP: the issue-branch clause publishes only the commit named by vars.BD_ROLLOUT_BOOTSTRAP.
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' ||
+           (github.ref == 'refs/heads/issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access' &&
+            vars.BD_ROLLOUT_BOOTSTRAP == github.sha))
         run: |
           set -u
+          # BOOTSTRAP: begin loud notice for the one approved non-main publication.
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::warning::BOOTSTRAP: publishing candidates from $GITHUB_REF_NAME for approved commit $GITHUB_SHA"
+          fi
+          # BOOTSTRAP: end
           # Prints "<remote digest> <linux/amd64 config digest>" for a tag, returns 3 when the
           # tag does not exist and 1 on any other registry error.
           remote_ids() {

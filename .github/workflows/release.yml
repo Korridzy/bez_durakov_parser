@@ -3,6 +3,10 @@ name: Release promotion
 on:
   release:
     types: [published]
+  # BOOTSTRAP: a v* tag push promotes only the commit named by vars.BD_ROLLOUT_BOOTSTRAP;
+  # release: published stays the steady-state path. Remove after the first rollout.
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -16,19 +20,30 @@ permissions:
   packages: write
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }} # BOOTSTRAP: ref_name for tag pushes
   cancel-in-progress: false
 
 jobs:
   promote:
+    # BOOTSTRAP: each event is named first, because a push payload has no release object; the
+    # push clause is the bootstrap and runs only for the commit in vars.BD_ROLLOUT_BOOTSTRAP.
     if: >-
+      (github.event_name == 'release' && github.event.release.prerelease == false &&
+       github.event.release.draft == false) ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event.release.prerelease == false && github.event.release.draft == false)
+      (github.event_name == 'push' && vars.BD_ROLLOUT_BOOTSTRAP == github.sha)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      BD_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      BD_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }} # BOOTSTRAP: ref_name for tag pushes
+      # BOOTSTRAP: begin opt-in for promote.sh. It is set for every event whose commit equals the
+      # variable, so a release: published run for the same commit also takes the bootstrap gate
+      # instead of being refused as not on main; a second promotion of identical digests and
+      # metadata is an idempotent no-op. Unset or another commit keeps the default main gate.
+      BD_PROMOTE_BOOTSTRAP_COMMIT: ${{ vars.BD_ROLLOUT_BOOTSTRAP == github.sha && github.sha || '' }}
+      BD_PROMOTE_BOOTSTRAP_BRANCH: issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access
+      # BOOTSTRAP: end
     steps:
       - name: Validate release tag
         shell: bash
@@ -37,6 +52,20 @@ jobs:
             echo 'E_INVALID_TAG: expected vMAJOR.MINOR.PATCH' >&2
             exit 1
           fi
+      # BOOTSTRAP: begin. A tag push can start before its Release exists; wait a bounded time.
+      - name: Wait for the stable release (bootstrap)
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          for _ in $(seq 1 30); do
+            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$BD_RELEASE_TAG" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::no release named $BD_RELEASE_TAG after 5 minutes; publish it, then re-run this workflow run" >&2
+          exit 1
+      # BOOTSTRAP: end
       - name: Checkout release tag
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -381,6 +381,70 @@ start_time = "12:00"
         assert all(container_ids()[name] == identifier for name, identifier in infra.items())
         deploy(["rollback", "--yes"], "v0.2.0")
         verify(NEW, "v0.2.0", infra, chat)
+        # BOOTSTRAP: begin first-rollout scenario; remove with the bootstrap path. A commit reachable
+        # only through a branch and its tag: the default gate refuses it, the opt-in promotes it
+        # for the exact commit and branch, and the executor deploys it and rolls back.
+        branch, tag = "rehearsal-bootstrap", "v0.4.0"
+        command(["git", "checkout", "-b", branch, "v0.2.0"])
+        prod.write_text(prod.read_text() + "# Rehearsal branch-only bootstrap commit.\n")
+        sha = commit("test: rehearsal branch-only bootstrap commit")
+        command(["git", "tag", tag])
+        command(["git", "push", "origin", branch, "refs/tags/" + tag])
+        command(["git", "fetch", "origin"])
+        command(["git", "merge-base", "--is-ancestor", sha, "origin/main"], expected=1)
+        for component, dockerfile in (("backend", "backend"), ("data-collector", "data_collector"),
+                                      ("frontend", "frontend")):
+            ref = f"{prefix}/{component}:sha-{sha}"
+            owned += [ref, f"{prefix}/{component}:{tag}"]
+            write_json(WORK / "images.json", owned)
+            command(["docker", "build", "-f", f"webreport/Dockerfile.{dockerfile}",
+                     "--build-arg", "SOURCE_COMMIT=" + sha, "-t", ref, "."], seconds=1800)
+            label = command(["docker", "image", "inspect", ref, "--format",
+                             '{{index .Config.Labels "org.opencontainers.image.revision"}}']).strip()
+            assert label == sha
+            command(["docker", "push", ref], seconds=600)
+        fixture = WORK / tag
+        fixture.mkdir()
+        release = {"tag_name": tag, "draft": False, "prerelease": False, "body": "Local rehearsal", "assets": []}
+        write_json(fixture / "release.json", release)
+        write_json(fixture / "event.json", {"release": release})
+        write_json(fixture / "runs.json", {"workflow_runs": [
+            {"id": 78, "run_attempt": 1, "head_sha": sha, "head_branch": branch, "event": "push",
+             "status": "completed", "conclusion": "success", "created_at": "2026-10-06T00:00:00Z"}]})
+        write_json(fixture / "jobs.json", {"jobs": [{"name": "suite", "conclusion": "success",
+                   "steps": [{"name": "Push candidate images", "conclusion": "success"}]}]})
+        promote = ["bash", "deploy/promote.sh", "--event", str(fixture / "event.json"),
+                   "--api-base", f"http://127.0.0.1:{registry_port}", "--gh-bin", str(SOURCE / "deploy/rehearsal/gh")]
+        shim = dict(ENV, SHIM_STATE=str(fixture))
+        for extra, message in (({}, "E_CI_NOT_APPROVED: tag commit is not on main"),
+                               ({"BD_PROMOTE_BOOTSTRAP_COMMIT": commits["v0.2.0"], "BD_PROMOTE_BOOTSTRAP_BRANCH": branch},
+                                "E_CI_NOT_APPROVED: tag commit is not the approved bootstrap commit"),
+                               ({"BD_PROMOTE_BOOTSTRAP_COMMIT": sha, "BD_PROMOTE_BOOTSTRAP_BRANCH": "main"},
+                                "E_CI_NOT_APPROVED: no successful approved push CI run")):
+            output = command(promote, env=dict(shim, **extra), expected=1, seconds=600, show=True)
+            assert message in output and not (fixture / "asset.json").exists()
+            assert read_json(fixture / "release.json") == release
+        print("PASS default gate and wrong bootstrap settings refuse the branch-only tag", flush=True)
+        output = command(promote, env=dict(shim, BD_PROMOTE_BOOTSTRAP_COMMIT=sha, BD_PROMOTE_BOOTSTRAP_BRANCH=branch),
+                         seconds=600, show=True)
+        assert f"BOOTSTRAP: promoting non-main commit {sha} from branch {branch}" in output
+        assert f"PROMOTED: {tag} commit={sha} ci=78 attempt=1" in output
+        meta = read_json(fixture / "asset.json")
+        assert meta["source_commit"] == sha and meta["ci_run_id"] == 78
+        for component, ref in meta["images"].items():
+            image = component.replace("_", "-")
+            digest = json.loads(command(["docker", "buildx", "imagetools", "inspect",
+                                         f"{prefix}/{image}:{tag}", "--format", "{{json .Manifest.Digest}}"]))
+            assert ref == f"{prefix}/{image}@{digest}"
+        print("PASS bootstrap promotion digest continuity " + tag, flush=True)
+        deploy(["deploy", tag, "--yes"], tag)
+        verify(NEW, tag, infra, chat)
+        assert command(["git", "rev-parse", "HEAD"]).strip() == sha
+        deploy(["rollback", "v0.2.0", "--yes"], "v0.2.0")
+        verify(NEW, "v0.2.0", infra, chat)
+        assert command(["git", "rev-parse", "HEAD"]).strip() == commits["v0.2.0"]
+        print("PASS branch-only tag deployed through the executor and rolled back", flush=True)
+        # BOOTSTRAP: end
         output = command(["bash", "deploy/deploy.sh", "verify-db-isolation", "--container-probe"], show=True)
         assert "RESULT: PASS" in output and "FAIL" not in "\n".join(
             line for line in output.splitlines() if line.startswith("FAIL"))

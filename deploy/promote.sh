@@ -34,6 +34,17 @@ if [[ -n $event ]] && jq -e 'has("release")' "$event" >/dev/null; then
 fi
 valid_tag "$tag" || fail E_INVALID_TAG 'expected vMAJOR.MINOR.PATCH'
 [[ $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail E_USAGE 'invalid repository'
+# BOOTSTRAP: begin first-rollout opt-in settings; remove after the first rollout.
+# An empty commit keeps the default main gate; the branch only matters when a commit is set.
+bootstrap_commit=${BD_PROMOTE_BOOTSTRAP_COMMIT:-}
+bootstrap_branch=${BD_PROMOTE_BOOTSTRAP_BRANCH:-}
+if [[ -n $bootstrap_commit ]]; then
+    [[ $bootstrap_commit =~ ^[0-9a-f]{40}$ ]] ||
+        fail E_USAGE 'BD_PROMOTE_BOOTSTRAP_COMMIT must be a 40-hex commit'
+    [[ $bootstrap_branch =~ ^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$ ]] ||
+        fail E_USAGE 'BD_PROMOTE_BOOTSTRAP_BRANCH must name the approved branch'
+fi
+# BOOTSTRAP: end
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 tmp=$(mktemp -d)
@@ -53,6 +64,8 @@ commit=$(git rev-parse --verify "${tag}^{commit}")
 [[ $(git rev-parse HEAD) == "$commit" ]] || fail E_SOURCE_COMMIT 'checkout must match the release tag'
 [[ -z $(git status --porcelain --untracked-files=all) ]] ||
     fail E_SOURCE_DIRTY 'release checkout must be clean'
+# BOOTSTRAP: the default main gate below is unchanged and left unindented for a clean removal.
+if [[ -z $bootstrap_commit ]]; then
 git merge-base --is-ancestor "$commit" origin/main ||
     fail E_CI_NOT_APPROVED 'tag commit is not on main'
 "$gh_bin" api "$api/repos/$repo/actions/workflows/ci.yml/runs?head_sha=$commit&branch=main&event=push&status=success&per_page=10" >"$tmp/runs.json"
@@ -61,6 +74,20 @@ run=$(jq -cer --arg commit "$commit" '[.workflow_runs[] |
         .status == "completed" and .conclusion == "success")] |
     sort_by(.created_at, .id) | last | select(. != null)' "$tmp/runs.json") ||
     fail E_CI_NOT_APPROVED 'no successful main push CI run'
+else # BOOTSTRAP: begin first-rollout opt-in; remove after the first rollout.
+    # Exact equality with the approved commit replaces the ancestry check, and the CI evidence
+    # must be a successful push run of that exact branch.
+    [[ $commit == "$bootstrap_commit" ]] ||
+        fail E_CI_NOT_APPROVED 'tag commit is not the approved bootstrap commit'
+    printf 'BOOTSTRAP: promoting non-main commit %s from branch %s approved by BD_PROMOTE_BOOTSTRAP_COMMIT\n' \
+        "$commit" "$bootstrap_branch"
+    "$gh_bin" api "$api/repos/$repo/actions/workflows/ci.yml/runs?head_sha=$commit&event=push&status=success&per_page=10" >"$tmp/runs.json"
+    run=$(jq -cer --arg commit "$commit" --arg branch "$bootstrap_branch" '[.workflow_runs[] |
+        select(.head_sha == $commit and .head_branch == $branch and .event == "push" and
+            .status == "completed" and .conclusion == "success")] |
+        sort_by(.created_at, .id) | last | select(. != null)' "$tmp/runs.json") ||
+        fail E_CI_NOT_APPROVED 'no successful approved push CI run'
+fi # BOOTSTRAP: end
 run_id=$(jq -er '.id | select(type == "number" and . > 0 and . == floor)' <<<"$run")
 attempt=$(jq -er '.run_attempt | select(type == "number" and . > 0 and . == floor)' <<<"$run")
 "$gh_bin" api --paginate --slurp "$api/repos/$repo/actions/runs/$run_id/attempts/$attempt/jobs?per_page=100" >"$tmp/jobs.json"

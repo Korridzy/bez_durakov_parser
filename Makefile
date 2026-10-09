@@ -129,6 +129,7 @@ test:
 	run poetry run python deploy/test_deploy.py; \
 	run poetry run python deploy/test_verify_isolation.py; \
 	run poetry run python deploy/test_deploy_sh.py; \
+	run poetry run python deploy/test_promote_gate.py; # BOOTSTRAP: remove with the first-rollout bootstrap \
 	run $(MAKE) -C webreport test-ui; \
 	run $(MAKE) -C webreport test-e2e; \
 	if [ $$status -eq 0 ]; then \
