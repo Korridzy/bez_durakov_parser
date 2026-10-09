@@ -10,6 +10,7 @@ import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 import shlex
 import subprocess
 import sqlite3
@@ -38,6 +39,7 @@ REVISION = "b1c2d3e4f5g6"
 API = f"https://api.github.com/repos/{rm.DEFAULT_REPOSITORY}/releases/tags/{TAG}"
 ASSET = f"https://github.com/{rm.DEFAULT_REPOSITORY}/releases/download/{TAG}/{rm.ASSET_NAME}"
 INFRA = {"mysql": "mysql@sha256:" + "4" * 64, "litellm": "ghcr.io/berriai/litellm@sha256:" + "5" * 64}
+REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def metadata_bytes() -> bytes:
@@ -1601,7 +1603,15 @@ class SmokeServer:
                 elif self.path == "/api/chats" and self.command == "POST":
                     status, response = 201, b'{"id":"chat-1"}'
                 elif self.path == "/api/chats/chat-1/messages":
-                    status, response = 202, b'{"request_id":"request","state":"running"}'
+                    assert isinstance(body, dict)
+                    if not REQUEST_ID.fullmatch(body["request_id"]):
+                        owner.has_run = False
+                        status = 422
+                        response = json.dumps({"error": {
+                            "code": "invalid_request", "message": "Неверный request_id"}}).encode()
+                    else:
+                        status = 202
+                        response = json.dumps({"request_id": body["request_id"], "state": "running"}).encode()
                 elif self.path == "/api/chats/chat-1/status":
                     response = json.dumps({"active_run": None, "last_run": {"state": owner.run_state}}).encode()
                 elif self.path == "/api/chats/chat-1/reports":
@@ -1672,6 +1682,13 @@ class SmokeTest(OperationalCase):
         (self.root / "deploy").mkdir()
         (self.root / "deploy" / "smoke_question.txt").write_text("How many games were played?")
         self.before = {name: name + "-id" for name in INFRA}
+
+    def test_request_id_pattern_matches_backend(self):
+        source = (PROJECT_ROOT / "webreport/backend/runs.py").read_text(encoding="utf-8")
+        pattern = re.search(r"^REQUEST_ID = re\.compile\(r(['\"])(.*?)\1\)$", source, re.MULTILINE)
+        self.assertIsNotNone(pattern, "backend REQUEST_ID pattern literal not found")
+        assert pattern is not None
+        self.assertEqual(pattern.group(2), REQUEST_ID.pattern)
 
     def test_unchanged_services_start_backend_collector_without_recreate(self):
         self.executor.recreate_and_smoke(self.meta, self.flags, before=self.before)
@@ -1751,7 +1768,7 @@ class SmokeTest(OperationalCase):
         ])
         submission = next(body for method, path, body in self.server.calls if path.endswith("/messages"))
         self.assertEqual(submission["message"], "How many games were played?")
-        self.assertRegex(submission["request_id"], r"^[0-9a-f-]{36}$")
+        self.assertIsNotNone(REQUEST_ID.fullmatch(submission["request_id"]))
         self.assertFalse(self.server.saved)
 
     def test_llm_failed_run_missing_report_and_poll_timeout_are_S8_and_cleanup(self):
@@ -1762,6 +1779,13 @@ class SmokeTest(OperationalCase):
                 error = self.assertCode(38, lambda: self.executor.smoke(self.meta, before=self.before, llm_smoke=True))
                 self.assertIn("S8", error.message)
                 self.assertIn(("DELETE", "/api/chats/chat-1"), [(m, p) for m, p, b in self.server.calls])
+                submission = next(body for method, path, body in self.server.calls if path.endswith("/messages"))
+                self.assertIsNotNone(REQUEST_ID.fullmatch(submission["request_id"]))
+                cancellations = [body for method, path, body in self.server.calls if path.endswith("/cancel")]
+                if state == "running":
+                    self.assertEqual(cancellations, [{"request_id": submission["request_id"]}])
+                else:
+                    self.assertEqual(cancellations, [])
         self.server.run_state = "succeeded"
         self.server.fail_path, self.server.fail_body = "/api/chats/chat-1/reports", b"[]"
         self.assertIn("S8", self.assertCode(38, lambda: self.executor.smoke(self.meta, before=self.before, llm_smoke=True)).message)
@@ -1973,6 +1997,10 @@ class SmokeTest(OperationalCase):
         self.assertIn(("POST", "/api/chats/chat-1/cancel"), calls)
         self.assertLess(calls.index(("POST", "/api/chats/chat-1/cancel")),
                         calls.index(("DELETE", "/api/chats/chat-1")))
+        submission = next(body for method, path, body in self.server.calls if path.endswith("/messages"))
+        cancellation = next(body for method, path, body in self.server.calls if path.endswith("/cancel"))
+        self.assertIsNotNone(REQUEST_ID.fullmatch(submission["request_id"]))
+        self.assertEqual(cancellation, {"request_id": submission["request_id"]})
         self.assertEqual(self.server.run_state, "cancelled")
 
     def test_rejected_message_cleans_chat_when_cancel_reports_no_run(self):

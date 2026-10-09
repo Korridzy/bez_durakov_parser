@@ -1133,7 +1133,7 @@ class Executor:
         saved = False
         active = False
         failure: DeployError | None = None
-        request_id = str(uuid.uuid4())
+        request_id = uuid.uuid4().hex
         try:
             chat = self.request_json("POST", frontend + "/api/chats", statuses=[201], body={"title": "Deployment smoke"})
             chat_id = self.response_id(chat, "chat")
