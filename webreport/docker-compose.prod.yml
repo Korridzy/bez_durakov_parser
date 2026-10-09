@@ -4,7 +4,7 @@
 #
 # Release images carry their own code, so the source mounts are dropped and nothing is
 # built or pulled implicitly: the executor pulls each pinned digest explicitly first.
-# Published ports bind to loopback; Traefik reaches the frontend over the Compose network.
+# Published ports bind to loopback; host nginx forwards to the frontend's loopback port.
 services:
   mysql:
     ports: !override

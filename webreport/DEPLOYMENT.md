@@ -10,6 +10,8 @@ BOOTSTRAP (temporary, first rollout only): the issue branch `issue-96-deploy-web
 
 This guide covers the bundled MySQL deployment with one backend replica. The executor doesn't support `DATASET`: deploy and rollback refuse it with exit 2. It remains a development mode.
 
+The server's existing host nginx is the public entry on ports 80 and 443. It terminates TLS and forwards to the frontend's loopback port. The frontend container serves the UI and proxies `/api/` to the backend on the Compose network.
+
 ## Server setup once
 
 Use a deploy-only clone, separate from a development checkout. Keep tracked files clean and leave the clone detached at the release tag:
@@ -40,7 +42,52 @@ Production Compose also forces backend reload and debug off. Generated `.env*` a
 
 `BD_VM_DIR` defaults to the repository's `vm/` directory, which Compose sees as `../vm` from `webreport/`. If you override it, use the same absolute path for setup, deployment and administration. MySQL lives in `vm/mysql/mysql_data`; the three SQLite stores live in `vm/backend/checkpoints`. Don't point a new checkout at an empty directory when updating an existing installation.
 
-Traefik joins `webreport_webreport-network` for the default project and routes to `http://frontend:8501`. For another Compose project, the network is `<project>_webreport-network`. Keep this attachment across infrastructure changes.
+### Host nginx site
+
+Host nginx can't resolve Compose service names. Its upstream is `http://127.0.0.1:<frontend-port>`, where `<frontend-port>` is `WEBREPORT_FRONTEND_PORT` in generated `webreport/.env`, from `[webreport].frontend_port` (default `28501`). Don't send public traffic directly to the backend.
+
+Use [the example site](deploy-examples/nginx-webreport.conf.example). It is a documentation artifact, not loaded by Compose or the executor. If nginx already serves other sites, add this as one more site beside them; keep their configuration.
+
+1. For `v0.1.0`, the example isn't in the approved release checkout. Obtain it separately from the updated issue branch, without moving the deploy checkout. Run from the repository root:
+
+   ```bash
+   git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access
+   git show FETCH_HEAD:webreport/deploy-examples/nginx-webreport.conf.example > /tmp/webreport-site.conf
+   sudo cp /tmp/webreport-site.conf /etc/nginx/sites-available/webreport
+   rm /tmp/webreport-site.conf
+   ```
+
+   Fetching changes `FETCH_HEAD`, not detached `HEAD`. Don't check out `FETCH_HEAD`: the release stays at the approved commit, and its existing candidates and `BD_ROLLOUT_BOOTSTRAP` value stay unchanged.
+
+   From the next release, the file is in the checkout when its tag includes this documentation update. Use the in-checkout path then:
+
+   ```bash
+   sudo cp webreport/deploy-examples/nginx-webreport.conf.example /etc/nginx/sites-available/webreport
+   ```
+
+   Fill `<public-host>`, `<frontend-port>` and the certificate paths in the installed site on the server.
+
+2. Use the server's existing certificate method if available. Otherwise obtain a certificate with certbot. For a new certificate, first keep only the example's port 80 block in the installed file and temporarily replace its redirect with `return 404;`. Leave the ACME challenge location intact. Don't enable the port 443 block until its certificate files exist. Enable the site, check it and reload:
+
+   ```bash
+   sudo mkdir -p /var/www/letsencrypt
+   sudo ln -s /etc/nginx/sites-available/webreport /etc/nginx/sites-enabled/webreport
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+   Point the public host's DNS at the server and allow inbound port 80 before issuance. Choose either `sudo certbot --nginx -d <public-host>` (nginx plugin) or `sudo certbot certonly --webroot -w /var/www/letsencrypt -d <public-host>` (the example's challenge path). Keep certificate renewal enabled with the same method; webroot renewal also needs nginx reloaded after renewed files are installed.
+
+3. Once the certificate exists, install the full example with the filled values, including the HTTPS block and HTTP redirect. Check and reload again:
+
+   ```bash
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+The example passes Host, X-Forwarded-For, X-Forwarded-Proto and X-Request-ID to the frontend. Its `proxy_buffering off` and `proxy_read_timeout 900s` match the container's API proxy; the timeout must exceed `[webreport].agent_timeout_seconds` at both hops. It explicitly matches the container's default `client_max_body_size 1m`. The UI currently polls for run completion and has no WebSocket or SSE route; no Upgrade header mapping is needed.
+
+Only 80 and 443 should be public in the firewall. Production frontend, backend and MySQL publications stay on `127.0.0.1`; opening those ports isn't needed for host nginx. Set `[webreport].allowed_origins` to include `https://<public-host>` in the private overlay.
 
 Set all three GHCR packages to Public and confirm their repository link. The server uses anonymous image pulls and the anonymous GitHub API; it needs no registry token.
 
@@ -55,7 +102,7 @@ make generate-env
 docker compose pull mysql litellm && docker compose up -d mysql litellm
 ```
 
-This can interrupt those two services. Existing MySQL data stays in its bind mount. Keep the same Compose project and persistent paths, and retain Traefik's network attachment. Don't use the whole-stack stop or rebuild commands.
+This can interrupt those two services. Existing MySQL data stays in its bind mount. Keep the same Compose project and persistent paths. Host nginx continues using the frontend's loopback port and needs no Compose network attachment. Don't use the whole-stack stop or rebuild commands.
 
 The executor refuses deployment if either infrastructure container is absent or its image differs from the release pin. It won't recreate MySQL or LiteLLM for you. Every runtime third-party digest bump needs this procedure before the next deploy; Dockerfile base-image bumps instead take effect in CI-built application images.
 
@@ -227,6 +274,8 @@ make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 
 The check inspects effective Compose bindings, running container bindings and listening sockets. With successful release state it requires MySQL, backend and frontend to bind only to `127.0.0.1`; in development mode only MySQL is required, and app-port rows are informational. The optional container probe requires connection refusal through a host gateway. Timeout isn't proof.
 
+Host nginx listening publicly on 80 and 443 is expected. It isn't part of the Compose stack or a private application-port binding.
+
 Require `RESULT: PASS`, inspect any SKIP rows, and perform the printed off-host recipe from another machine. With default ports:
 
 ```bash
@@ -279,16 +328,10 @@ Use `docker compose ps` to discover names and service-based commands such as `do
 
 This checklist is for the operator. The agent only checks command resolution locally; it never contacts the production server.
 
-The first rollout ships from the issue branch through the temporary bootstrap gate. No step merges to `main`; merging stays the owner's own decision. `<C>` below is the full 40-character lowercase SHA of the approved commit at the tip of `issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access`.
+The first rollout ships the already approved issue-branch commit through the temporary bootstrap gate. No step merges to `main`; merging stays the owner's own decision. `<C>` below is `025bcefc0ab1559e4a9ff9275d0fdf199420489f`, the approved release commit, not the newer branch tip carrying the nginx example. Keep the release target, existing `sha-<C>` candidates and `BD_ROLLOUT_BOOTSTRAP` value unchanged.
 
-1. Before pushing anything, create the repository variable `BD_ROLLOUT_BOOTSTRAP` (Settings, Secrets and variables, Actions, Variables) with the value `<C>`. The CI publish condition reads it when the run starts.
-2. Push the issue branch with `<C>` at its tip:
-
-   ```bash
-   git push origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access
-   ```
-
-   Watch the CI run for that push. It must be green, show the warning `BOOTSTRAP: publishing candidates from issue-96-... for approved commit <C>`, and print the three `sha-<C>` digests. Confirm all three `sha-<C>` candidate images exist. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private. If you later push a newer commit, set the variable to that commit before pushing; otherwise its run tests but doesn't publish.
+1. Confirm the repository variable `BD_ROLLOUT_BOOTSTRAP` (Settings, Secrets and variables, Actions, Variables) still has the value `<C>`. Don't change it to the documentation commit.
+2. Confirm the CI run for `<C>` is green and all three existing `sha-<C>` candidate images are present. Use those candidates; no new candidate images are needed for this documentation update. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private. A newer documentation commit can run CI, but it can't publish candidates while the variable stays at `<C>`.
 3. Add the owner-only `v*` tag ruleset for create, update and delete.
 4. On the server, take a manual backup before changing anything. Quiesce backend and collector so SQLite files are stable, stop MySQL, archive `vm/mysql/mysql_data` and `vm/backend/checkpoints`, then restart those services:
 
@@ -302,7 +345,7 @@ The first rollout ships from the issue branch through the temporary bootstrap ga
    cd ..
    ```
 
-   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding. Move hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Run `git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access && git checkout --detach <C>` and use that checkout for the next step. Confirm Traefik is attached to `webreport_webreport-network` and routes to `http://frontend:8501`; keep that attachment after the infrastructure recreate.
+   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding. Move hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Run `git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access && git checkout --detach <C>` and keep that approved checkout for infrastructure and deployment. The fetched branch also supplies the nginx example in step 7, without checking out its newer tip.
 5. Apply the one-time infrastructure procedure from the `<C>` checkout, not a whole-stack stop:
 
    ```bash
@@ -317,22 +360,23 @@ The first rollout ships from the issue branch through the temporary bootstrap ga
 6. Create the stable GitHub Release `v0.1.0` targeting `<C>`, not a draft and not a prerelease, for example `gh release create v0.1.0 --target <C> --title v0.1.0 --notes '...'` or the UI with a new tag created on publish. A Release on a commit that isn't on `main` is expected here. GitHub creates the tag when you publish, and the tag push starts the `Release promotion` workflow from the tag's own `release.yml`. Its `Wait for the stable release (bootstrap)` step finds the Release at once. Fallback only: if you pushed the tag by hand first and the 5-minute wait timed out, publish the Release and re-run that workflow run. Expect `BOOTSTRAP: promoting non-main commit <C>` and `PROMOTED: v0.1.0 commit=<C>` in the log. Wait for `release-metadata.json` and its sha256 marker in the Release body, then read the asset and confirm `source_commit` is `<C>` and the Alembic revision is the expected one.
 
    Documented but not verified live: GitHub documents that a tag push runs the workflow file of the pushed tag even when it isn't on the default branch, and the bootstrap relies on that. Whether a `release: published` run also starts from the tag's workflow file while `main` has no workflows wasn't verified. If it does, it takes the same bootstrap gate for `<C>`, and promoting the same digests a second time changes nothing.
-7. Deploy from root:
+7. Set up the [host nginx site](#host-nginx-site) before deploying. For `v0.1.0`, follow that section's separate fetch and `git show FETCH_HEAD:...` instructions, copying the temporary example rather than a file from the approved checkout. Keep detached `HEAD` at `<C>`; don't retarget the release or change the candidates or `BD_ROLLOUT_BOOTSTRAP`. Fill the placeholders, enable the site beside existing sites and obtain the certificate using the server's existing method or certbot. Enable the full TLS site only after the certificate exists, then run `sudo nginx -t` and `sudo systemctl reload nginx`. Confirm its upstream uses `127.0.0.1:<frontend-port>` with the generated frontend port, and allow only 80/443 publicly. An upstream failure before the application deploys is expected.
+8. Deploy from root:
 
    ```bash
    make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
    ```
 
    Approve the migration prompt if shown. No migration is expected when both live and release revisions are `b1c2d3e4f5g6`; trust the actual computed plan rather than that expectation.
-8. Run isolation verification again:
+9. Run isolation verification again:
 
    ```bash
    make deploy-verify-isolation DEPLOY_ARGS=--container-probe
    ```
 
    Run the off-host `nc` commands in [Verifying isolation](#verifying-isolation) from another machine, for IPv4 and IPv6 if assigned. Require refused private ports and a connecting public control.
-9. Open the UI through Traefik. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route.
-10. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
-11. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
+10. Open `https://<public-host>` in the browser. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route through host nginx.
+11. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
+12. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
 
 If `--llm-smoke` fails, the executor exits 38; Make reports 2. When there is a previous successful record, recovery output suggests `make rollback VERSION=<previous>`. The first rollout has no previous record, so fix forward or explicitly restore the manual backup from step 4. No automatic recovery runs.

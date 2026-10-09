@@ -91,6 +91,7 @@ webreport/
 
 - Never run `make test` or `make rebuild` on the server; use the release executor.
 - Never add server identifiers or credentials to tracked files, shared logs, workflows, releases, artifacts or image labels.
+- Production uses the server's host nginx on 80/443, forwarding to `127.0.0.1:${WEBREPORT_FRONTEND_PORT}` (default 28501). The docs-only site example is `deploy-examples/nginx-webreport.conf.example`; keep app and MySQL publications on loopback.
 - **DO NOT** put dataset queries in `backend/agent/` or `backend/agents/` — they belong in the operator tool module
 - **DO NOT** add HTTP routes that read or delete archive rows.
 - **DO NOT** put archive tables in `checkpoints.db`.

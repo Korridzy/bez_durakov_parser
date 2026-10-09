@@ -69,6 +69,7 @@ parser/
 
 - Never run `make test` or `make rebuild` on the server. Tests and builds belong to development and disposable CI runners.
 - Never add server identifiers or credentials to tracked files, shared logs, workflows, releases, artifacts or image labels.
+- Production's public entry is the existing host nginx on 80/443, forwarding to the frontend's loopback port. The placeholder site is `webreport/deploy-examples/nginx-webreport.conf.example`; setup is in `webreport/DEPLOYMENT.md`. No proxy container is added.
 - **DO NOT** add SQLite support for game data, which remains MySQL-only (see issue-61). Backend-owned SQLite stores: checkpoints, the conversation archive and the chat/report store at `../vm/backend/checkpoints`; none is a game-data store. An operator may configure a webreport dataset with SQLite.
 - **DO NOT** access the game database directly from this repository's own web components — go through `bd_shared/db.py` and `bd_shared/db_helpers.py`. An operator's own tool module reaches its database directly by design.
 - **DO NOT** bypass `normalize_team_name()` when storing/comparing team names

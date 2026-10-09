@@ -1,0 +1,45 @@
+# Host nginx site, not a Compose service or an automatically loaded file.
+# Replace <public-host> and <frontend-port> (WEBREPORT_FRONTEND_PORT, default 28501).
+# Obtain the certificate before enabling the HTTPS block; see DEPLOYMENT.md.
+server {
+    listen 80;
+    server_name <public-host>;
+    server_tokens off;
+
+    # For certbot --webroot -w /var/www/letsencrypt.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+
+    location / {
+        return 301 https://<public-host>$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name <public-host>;
+    server_tokens off;
+
+    # Certbot layout; replace paths if the server uses another certificate method.
+    ssl_certificate /etc/letsencrypt/live/<public-host>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<public-host>/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Match the frontend container's default nginx body limit.
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:<frontend-port>;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $http_x_request_id;
+        proxy_set_header Connection "";
+
+        # Match the container's /api/ settings, including long agent requests.
+        proxy_buffering off;
+        proxy_read_timeout 900s;
+    }
+}
