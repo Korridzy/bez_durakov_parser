@@ -1573,10 +1573,19 @@ class SmokeServer:
         self.chat_list = {"items": [], "next_cursor": None}
         self.run_state: str | None = "succeeded"
         self.has_run = True
+        self.request_id: str | None = None
+        self.original_message: str | None = None
+        self.has_chat = True
+        self.has_report = True
+        self.report_chat_id: str | None = "chat-1"
+        self.run_states: list[str] = []
+        self.cancel_states = ["cancelled"]
+        self.last_run: dict[str, str] | None = None
         self.fail_path = ""
         self.fail_status = 200
         self.fail_body = b"misleading success"
         self.saved = False
+        self.report_version = 1
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1590,6 +1599,10 @@ class SmokeServer:
                 status, response = 200, b""
                 if self.path == owner.fail_path:
                     status, response = owner.fail_status, owner.fail_body
+                elif self.path.startswith("/api/chats/chat-1") and not owner.has_chat:
+                    status, response = 404, b'{"error":{"code":"not_found"}}'
+                elif self.path.startswith("/api/reports/report-1") and not owner.has_report:
+                    status, response = 404, b'{"error":{"code":"not_found"}}'
                 elif self.path == "/health":
                     status = owner.health_status
                     assert isinstance(self.server, ThreadingHTTPServer)
@@ -1601,6 +1614,9 @@ class SmokeServer:
                 elif self.path == "/api/chats?limit=1":
                     response = json.dumps(owner.chat_list).encode()
                 elif self.path == "/api/chats" and self.command == "POST":
+                    owner.has_chat = True
+                    owner.has_report = True
+                    owner.report_chat_id = "chat-1"
                     status, response = 201, b'{"id":"chat-1"}'
                 elif self.path == "/api/chats/chat-1/messages":
                     assert isinstance(body, dict)
@@ -1610,28 +1626,72 @@ class SmokeServer:
                         response = json.dumps({"error": {
                             "code": "invalid_request", "message": "Неверный request_id"}}).encode()
                     else:
-                        status = 202
-                        response = json.dumps({"request_id": body["request_id"], "state": "running"}).encode()
+                        duplicate = owner.request_id == body["request_id"]
+                        if duplicate and owner.original_message != body["message"]:
+                            status, response = 409, b'{"error":{"code":"request_conflict"}}'
+                        else:
+                            if not duplicate:
+                                owner.request_id = body["request_id"]
+                                owner.original_message = body["message"]
+                                owner.has_run = True
+                                if owner.run_state is None:
+                                    owner.run_state = "succeeded"
+                            status = 200 if duplicate else 202
+                            response = json.dumps(owner.run_response(
+                                owner.run_state if duplicate else "running")).encode()
                 elif self.path == "/api/chats/chat-1/status":
-                    response = json.dumps({"active_run": None, "last_run": {"state": owner.run_state}}).encode()
+                    owner.advance_run()
+                    run = owner.run_response(owner.run_state) if owner.has_run else None
+                    active = owner.run_state in ("running", "cancelling")
+                    response = json.dumps({
+                        "active_run": run if active else None,
+                        "last_run": owner.last_run if active else run,
+                    }).encode()
+                elif self.path.startswith("/api/runs/"):
+                    if not owner.has_run or self.path != "/api/runs/" + str(owner.request_id):
+                        status, response = 404, b'{"error":{"code":"not_found"}}'
+                    else:
+                        owner.advance_run()
+                        response = json.dumps(owner.run_response(owner.run_state)).encode()
                 elif self.path == "/api/chats/chat-1/reports":
-                    response = b'[{"id":"report-1","chat_id":"chat-1","data":[{"games":7}]}]'
+                    response = json.dumps([owner.report_card()]).encode()
                 elif self.path == "/api/reports/report-1/saved":
                     owner.saved = self.command == "PUT"
                     status = 200 if owner.saved else 204
-                    response = b'{"id":"report-1","saved_at":"2026-01-01T00:00:00Z"}' if owner.saved else b""
+                    response = json.dumps(owner.report_card()).encode() if owner.saved else b""
                 elif self.path == "/api/reports/report-1":
-                    response = b'{"id":"report-1","data":[{"games":7}],"version":1}'
+                    response = json.dumps({**owner.report_card(), "data": [{"games": 6 + owner.report_version}]}).encode()
                 elif self.path == "/api/reports/report-1/update":
-                    response = b'{"id":"report-1","data":[{"games":8}],"version":2}'
+                    owner.report_version += 1
+                    response = json.dumps({**owner.report_card(), "data": [{"games": 6 + owner.report_version}]}).encode()
                 elif self.path == "/api/saved-reports":
-                    response = b'[{"id":"report-1"}]' if owner.saved else b"[]"
+                    response = json.dumps([owner.report_card()] if owner.saved else []).encode()
                 elif self.path == "/api/chats/chat-1" and self.command == "DELETE":
                     status = 409 if owner.run_state in ("running", "cancelling") else 204
+                    if status == 204:
+                        owner.has_chat = False
+                        owner.has_run = False
+                        owner.request_id = None
+                        owner.original_message = None
+                        owner.run_state = None
+                        owner.run_states.clear()
+                        owner.last_run = None
+                        owner.has_report = owner.saved
+                        owner.report_chat_id = None
                 elif self.path == "/api/chats/chat-1/cancel":
                     if owner.has_run:
-                        status, response = 202, b'{"state":"cancelled"}'
-                        owner.run_state = "cancelled"
+                        assert isinstance(body, dict)
+                        # A malformed submission response may have hidden an accepted run.
+                        if owner.request_id is None:
+                            owner.request_id = body["request_id"]
+                        if owner.request_id != body["request_id"]:
+                            status, response = 404, b'{"error":{"code":"not_found"}}'
+                        else:
+                            if owner.run_state in ("running", "cancelling"):
+                                owner.run_state = "cancelling"
+                                owner.run_states = list(owner.cancel_states)
+                                status = 202
+                            response = json.dumps(owner.run_response(owner.run_state)).encode()
                     else:
                         status, response = 404, b'{"error":{"code":"not_found"}}'
                 else:
@@ -1656,6 +1716,23 @@ class SmokeServer:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             self.threads.append(thread)
+
+    def run_response(self, state):
+        return {"request_id": self.request_id, "chat_id": "chat-1", "state": state,
+                "created_at": "2026-01-01T00:00:00Z",
+                "finished_at": None if state in ("running", "cancelling") else "2026-01-01T00:00:01Z",
+                "error": None, "response": None}
+
+    def advance_run(self):
+        if self.run_states:
+            self.run_state = self.run_states.pop(0)
+
+    def report_card(self):
+        return {"id": "report-1", "chat_id": self.report_chat_id, "title": "Games",
+                "question": "How many games were played?", "tool": "games", "args": {},
+                "generated_at": "2026-01-01T00:00:00Z", "version": self.report_version,
+                "saved_at": "2026-01-01T00:00:00Z" if self.saved else None,
+                "row_count": 1, "created_at": "2026-01-01T00:00:00Z"}
 
     def close(self):
         for server in (self.backend, self.frontend):
@@ -1689,6 +1766,39 @@ class SmokeTest(OperationalCase):
         self.assertIsNotNone(pattern, "backend REQUEST_ID pattern literal not found")
         assert pattern is not None
         self.assertEqual(pattern.group(2), REQUEST_ID.pattern)
+
+    def test_fake_status_separates_active_and_terminal_runs(self):
+        self.server.request_id = "c" * 32
+        base = f"http://127.0.0.1:{self.server.frontend_port}"
+        for state in ("running", "cancelling", "succeeded", "failed", "cancelled", "interrupted"):
+            with self.subTest(state=state):
+                self.server.run_state = state
+                status = self.executor.request_json("GET", base + "/api/chats/chat-1/status")
+                run = self.executor.request_json("GET", base + "/api/runs/" + self.server.request_id)
+                assert isinstance(status, dict)
+                assert isinstance(run, dict)
+                active = state in ("running", "cancelling")
+                self.assertEqual(status["active_run" if active else "last_run"], run)
+                self.assertIsNone(status["last_run" if active else "active_run"])
+                self.assertEqual(run["request_id"], self.server.request_id)
+                self.assertEqual(run["state"], state)
+        self.assertIn("HTTP status 404", self.assertCode(38, lambda: self.executor.request_json(
+            "GET", base + "/api/runs/" + "d" * 32)).message)
+
+    def test_fake_cancel_matches_active_terminal_and_missing_statuses(self):
+        identifier = "c" * 32
+        self.server.request_id = identifier
+        url = f"http://127.0.0.1:{self.server.frontend_port}/api/chats/chat-1/cancel"
+        for state in ("running", "cancelling", "succeeded", "failed", "cancelled", "interrupted"):
+            with self.subTest(state=state):
+                self.server.run_state = state
+                status, _, data = self.executor.http.request("POST", url, body={"request_id": identifier})
+                active = state in ("running", "cancelling")
+                self.assertEqual(status, 202 if active else 200)
+                self.assertEqual(json.loads(data)["state"], "cancelling" if active else state)
+                self.assertEqual(json.loads(data)["request_id"], identifier)
+        status, _, _ = self.executor.http.request("POST", url, body={"request_id": "d" * 32})
+        self.assertEqual(status, 404)
 
     def test_unchanged_services_start_backend_collector_without_recreate(self):
         self.executor.recreate_and_smoke(self.meta, self.flags, before=self.before)
@@ -1758,18 +1868,187 @@ class SmokeTest(OperationalCase):
     def test_llm_fake_http_server_exact_roundtrip_and_cleanup(self):
         steps = self.executor.smoke(self.meta, before=self.before, llm_smoke=True)
         self.assertEqual(steps, ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"])
+        submission = next(body for method, path, body in self.server.calls if path.endswith("/messages"))
         requests = [(method, path) for method, path, body in self.server.calls if path.startswith("/api/")]
         self.assertEqual(requests, [
             ("GET", "/api/chats?limit=1"), ("POST", "/api/chats"), ("POST", "/api/chats/chat-1/messages"),
-            ("GET", "/api/chats/chat-1/status"), ("GET", "/api/chats/chat-1/reports"),
+            ("GET", "/api/runs/" + submission["request_id"]), ("GET", "/api/chats/chat-1/reports"),
             ("PUT", "/api/reports/report-1/saved"), ("GET", "/api/reports/report-1"),
             ("POST", "/api/reports/report-1/update"), ("GET", "/api/saved-reports"),
             ("DELETE", "/api/reports/report-1/saved"), ("DELETE", "/api/chats/chat-1"),
         ])
-        submission = next(body for method, path, body in self.server.calls if path.endswith("/messages"))
         self.assertEqual(submission["message"], "How many games were played?")
         self.assertIsNotNone(REQUEST_ID.fullmatch(submission["request_id"]))
         self.assertFalse(self.server.saved)
+        self.assertEqual(self.server.report_version, 2)
+
+    def test_llm_running_and_cancelling_run_reaches_own_success(self):
+        self.server.run_states = ["running", "cancelling", "succeeded"]
+        steps = self.executor.smoke(self.meta, before=self.before, llm_smoke=True)
+        self.assertEqual(steps[-1], "S8")
+        self.assertEqual(self.clock.elapsed, 4)
+        self.assertFalse(any(path.endswith("/cancel") for _, path, _ in self.server.calls))
+        self.assertFalse(self.server.has_run)
+
+    def test_llm_stale_terminal_run_cannot_end_own_poll(self):
+        self.server.last_run = {"request_id": "a" * 32, "state": "succeeded"}
+        self.server.run_states = ["running", "cancelling", "succeeded"]
+        self.executor.llm_smoke(f"http://127.0.0.1:{self.server.frontend_port}")
+        self.assertEqual(self.clock.elapsed, 4)
+        self.assertFalse(self.server.has_run)
+
+    def test_cleanup_waits_for_own_run_not_stale_terminal(self):
+        self.server.run_state = "running"
+        self.server.last_run = {"request_id": "a" * 32, "state": "succeeded"}
+        self.server.cancel_states = ["cancelling", "cancelled"]
+        self.server.fail_path = "/api/chats/chat-1/messages"
+        self.server.fail_status, self.server.fail_body = 202, b"broken accepted response"
+        error = self.assertCode(38, lambda: self.executor.llm_smoke(
+            f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertIn("invalid JSON", error.message)
+        self.assertNotIn("secondary error", error.message)
+        self.assertFalse(self.server.has_run)
+        self.assertEqual(self.clock.elapsed, 2)
+        self.assertEqual(self.server.calls[-1][:2], ("DELETE", "/api/chats/chat-1"))
+
+    def test_llm_accepts_duplicate_submission_run_response(self):
+        original = self.executor.http.request
+        def seed_identical_submission(method, url, **kwargs):
+            if url.endswith("/messages"):
+                status, _, _ = original(method, url, **kwargs)
+                self.assertEqual(status, 202)
+            return original(method, url, **kwargs)
+        with mock.patch.object(self.executor.http, "request", side_effect=seed_identical_submission):
+            self.executor.llm_smoke(f"http://127.0.0.1:{self.server.frontend_port}")
+        self.assertFalse(any(path.endswith("/cancel") for _, path, _ in self.server.calls))
+        self.assertFalse(self.server.saved)
+
+    def test_fake_message_retry_requires_original_message(self):
+        base = f"http://127.0.0.1:{self.server.frontend_port}"
+        self.executor.request_json("POST", base + "/api/chats", statuses=[201], body={})
+        url = base + "/api/chats/chat-1/messages"
+        body: dict[str, d.JSON] = {"request_id": "c" * 32, "message": "first"}
+        status, _, _ = self.executor.http.request("POST", url, body=body)
+        self.assertEqual(status, 202)
+        status, _, _ = self.executor.http.request("POST", url, body=body)
+        self.assertEqual(status, 200)
+        status, _, data = self.executor.http.request("POST", url, body={**body, "message": "different"})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(data)["error"]["code"], "request_conflict")
+        status, _, _ = self.executor.http.request("POST", url, body=body)
+        self.assertEqual(status, 200)
+
+    def test_executor_rejects_conflicting_message_retry(self):
+        original = self.executor.http.request
+        def seed_conflict(method, url, **kwargs):
+            if url.endswith("/messages"):
+                body: dict[str, d.JSON] = {**kwargs["body"], "message": "different prior message"}
+                status, _, _ = original(method, url, body=body, timeout=kwargs.get("timeout", 10))
+                self.assertEqual(status, 202)
+            return original(method, url, **kwargs)
+        with mock.patch.object(self.executor.http, "request", side_effect=seed_conflict):
+            error = self.assertCode(38, lambda: self.executor.llm_smoke(
+                f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertTrue(error.message.startswith("S8: unexpected HTTP status 409"))
+        self.assertNotIn(("GET", "/api/chats/chat-1/reports"),
+                         [(m, p) for m, p, b in self.server.calls])
+        self.assertEqual(self.server.calls[-1][:2], ("DELETE", "/api/chats/chat-1"))
+
+    def test_fake_chat_delete_cascades_runs_and_preserves_saved_reports(self):
+        base = f"http://127.0.0.1:{self.server.frontend_port}"
+        for saved in (False, True):
+            with self.subTest(saved=saved):
+                identifier = ("d" if saved else "c") * 32
+                self.executor.request_json("POST", base + "/api/chats", statuses=[201], body={})
+                self.executor.request_json("POST", base + "/api/chats/chat-1/messages", statuses=[202],
+                                           body={"request_id": identifier, "message": "first"})
+                run = self.executor.request_json("GET", base + "/api/runs/" + identifier)
+                assert isinstance(run, dict)
+                self.assertEqual(run["state"], "succeeded")
+                if saved:
+                    self.executor.request_json("PUT", base + "/api/reports/report-1/saved")
+                self.executor.request("DELETE", base + "/api/chats/chat-1", statuses=[204])
+                requests: list[tuple[str, str, dict[str, d.JSON] | None]] = [
+                    ("GET", "/api/runs/" + identifier, None),
+                    ("DELETE", "/api/chats/chat-1", None),
+                    ("POST", "/api/chats/chat-1/cancel", {"request_id": identifier}),
+                ]
+                for method, path, body in requests:
+                    with self.subTest(method=method, path=path):
+                        status, _, _ = self.executor.http.request(method, base + path, body=body)
+                        self.assertEqual(status, 404, (method, path))
+                status, _, data = self.executor.http.request("GET", base + "/api/reports/report-1")
+                self.assertEqual(status, 200 if saved else 404)
+                saved_reports = self.executor.request_json("GET", base + "/api/saved-reports")
+                if saved:
+                    self.assertIsNone(json.loads(data)["chat_id"])
+                    assert isinstance(saved_reports, list)
+                    self.assertEqual(len(saved_reports), 1)
+                    card = saved_reports[0]
+                    assert isinstance(card, dict)
+                    self.assertEqual(card["id"], "report-1")
+                    self.assertIsNone(card["chat_id"])
+                else:
+                    self.assertEqual(saved_reports, [])
+
+    def test_cleanup_preserves_primary_error_when_deleted_run_returns_404(self):
+        self.server.run_state = "running"
+        self.server.fail_path, self.server.fail_status = "/api/chats/chat-1/messages", 202
+        self.server.fail_body = b"broken accepted response"
+        original = self.executor.http.request
+        def delete_before_poll(method, url, **kwargs):
+            if "/api/runs/" in url:
+                self.server.run_state = "cancelled"
+                chat_url = f"http://127.0.0.1:{self.server.frontend_port}/api/chats/chat-1"
+                status, _, _ = original("DELETE", chat_url)
+                self.assertEqual(status, 204)
+            return original(method, url, **kwargs)
+        with mock.patch.object(self.executor.http, "request", side_effect=delete_before_poll):
+            error = self.assertCode(38, lambda: self.executor.llm_smoke(
+                f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertTrue(error.message.startswith("S8: invalid JSON"))
+        self.assertIn("secondary error: S8 cleanup: cancel failed; chat delete failed", error.message)
+        self.assertEqual(self.clock.elapsed, 0)
+        self.assertEqual(sum("/api/runs/" in p for _, p, _ in self.server.calls), 1)
+        self.assertEqual(sum(m == "DELETE" and p == "/api/chats/chat-1" for m, p, _ in self.server.calls), 2)
+
+    def test_llm_rejects_terminal_response_for_another_request(self):
+        run_response = self.server.run_response
+        def wrong_request(state):
+            return {**run_response(state), "request_id": "a" * 32}
+        with mock.patch.object(self.server, "run_response", side_effect=wrong_request):
+            error = self.assertCode(38, lambda: self.executor.llm_smoke(
+                f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertIn("run status response is invalid", error.message)
+        self.assertNotIn(("GET", "/api/chats/chat-1/reports"),
+                         [(m, p) for m, p, b in self.server.calls])
+
+    def test_cleanup_cancelling_run_keeps_bounded_deadline(self):
+        self.server.run_state = "running"
+        self.server.cancel_states = ["cancelling"]
+        self.server.fail_path, self.server.fail_status = "/api/chats/chat-1/messages", 202
+        self.server.fail_body = b"broken accepted response"
+        error = self.assertCode(38, lambda: self.executor.llm_smoke(
+            f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertTrue(error.message.startswith("S8: invalid JSON"))
+        self.assertIn("cancel failed", error.message)
+        self.assertEqual(self.clock.elapsed, 30)
+        self.assertEqual(self.server.calls[-1][:2], ("DELETE", "/api/chats/chat-1"))
+
+    def test_cleanup_rejects_terminal_response_for_another_request(self):
+        self.server.run_state = "running"
+        self.server.fail_path, self.server.fail_status = "/api/chats/chat-1/messages", 202
+        self.server.fail_body = b"broken accepted response"
+        run_response = self.server.run_response
+        def wrong_request(state):
+            return {**run_response(state), "request_id": "a" * 32}
+        with mock.patch.object(self.server, "run_response", side_effect=wrong_request):
+            error = self.assertCode(38, lambda: self.executor.llm_smoke(
+                f"http://127.0.0.1:{self.server.frontend_port}"))
+        self.assertTrue(error.message.startswith("S8: invalid JSON"))
+        self.assertIn("secondary error: S8 cleanup: cancel failed", error.message)
+        self.assertEqual(self.clock.elapsed, 30)
+        self.assertEqual(self.server.calls[-1][:2], ("DELETE", "/api/chats/chat-1"))
 
     def test_llm_failed_run_missing_report_and_poll_timeout_are_S8_and_cleanup(self):
         for state in ("failed", "interrupted", "running"):
@@ -1844,7 +2123,7 @@ class SmokeTest(OperationalCase):
         original = self.executor.http.request
         polls = []
         def late_terminal(method, url, **kwargs):
-            if url.endswith("/status"):
+            if "/api/runs/" in url:
                 self.clock.elapsed += 10
                 polls.append((self.clock.elapsed, kwargs.get("timeout", 10)))
                 self.server.run_state = "succeeded" if len(polls) >= 3 else "running"
@@ -2001,7 +2280,7 @@ class SmokeTest(OperationalCase):
         cancellation = next(body for method, path, body in self.server.calls if path.endswith("/cancel"))
         self.assertIsNotNone(REQUEST_ID.fullmatch(submission["request_id"]))
         self.assertEqual(cancellation, {"request_id": submission["request_id"]})
-        self.assertEqual(self.server.run_state, "cancelled")
+        self.assertFalse(self.server.has_run)
 
     def test_rejected_message_cleans_chat_when_cancel_reports_no_run(self):
         self.server.run_state = None
@@ -2012,6 +2291,7 @@ class SmokeTest(OperationalCase):
         self.assertIn(("POST", "/api/chats/chat-1/cancel"), calls)
         self.assertEqual(calls[-1], ("DELETE", "/api/chats/chat-1"))
         self.assertNotIn(("GET", "/api/chats/chat-1/status"), calls)
+        self.assertFalse(any(path.startswith("/api/runs/") for _, path in calls))
 
     def test_llm_missing_question_and_invalid_config_name_S8(self):
         (self.root / "deploy/smoke_question.txt").unlink()

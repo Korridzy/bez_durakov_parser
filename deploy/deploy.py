@@ -1134,6 +1134,7 @@ class Executor:
         active = False
         failure: DeployError | None = None
         request_id = uuid.uuid4().hex
+        run_url = frontend + "/api/runs/" + request_id
         try:
             chat = self.request_json("POST", frontend + "/api/chats", statuses=[201], body={"title": "Deployment smoke"})
             chat_id = self.response_id(chat, "chat")
@@ -1141,16 +1142,15 @@ class Executor:
             # A lost/malformed response does not prove the server rejected the
             # request. The generated request id lets cleanup cancel either case.
             active = True
-            self.request_json("POST", chat_url + "/messages", statuses=[202],
+            self.request_json("POST", chat_url + "/messages", statuses=[200, 202],
                               body={"request_id": request_id, "message": question})
             deadline = self.clock.monotonic() + timeout + 30
             while True:
                 remaining = deadline - self.clock.monotonic()
                 if remaining <= 0:
                     raise DeployError(38, "S8: canned chat deadline expired")
-                obj = self.request_json("GET", chat_url + "/status", timeout=min(10, remaining))
-                run = obj.get("last_run") if isinstance(obj, dict) else None
-                state = run.get("state") if isinstance(run, dict) else None
+                run = self.request_json("GET", run_url, timeout=min(10, remaining))
+                state = run.get("state") if isinstance(run, dict) and run.get("request_id") == request_id else None
                 if state in ("succeeded", "failed", "cancelled", "interrupted"):
                     active = False
                 if self.clock.monotonic() > deadline:
@@ -1208,11 +1208,10 @@ class Executor:
                             remaining = deadline - self.clock.monotonic()
                             if remaining <= 0:
                                 raise DeployError(38, "cancelled run did not terminate")
-                            obj = self.request_json("GET", chat_url + "/status", timeout=min(10, remaining))
+                            run = self.request_json("GET", run_url, timeout=min(10, remaining))
                             if self.clock.monotonic() > deadline:
                                 raise DeployError(38, "cancelled run did not terminate")
-                            run = obj.get("last_run") if isinstance(obj, dict) else None
-                            state = run.get("state") if isinstance(run, dict) else None
+                            state = run.get("state") if isinstance(run, dict) and run.get("request_id") == request_id else None
                             if state in ("succeeded", "failed", "cancelled", "interrupted"):
                                 break
                             self.clock.sleep(min(2, max(0, deadline - self.clock.monotonic())))
