@@ -847,6 +847,131 @@ class OperationalCase(unittest.TestCase):
         return [" ".join(call[0]) for call in self.runner.calls]
 
 
+class FetchDataRunner(OperationalRunner):
+    def __init__(self):
+        super().__init__()
+        self.fetch_exit = 0
+        self.count = "148\n"
+
+    def run(self, argv, *, cwd, env, input=None, timeout=120):
+        if argv[-2:] == ["python", "fetch_pipeline.py"] or "from bd_shared.db import Database" in argv[-1]:
+            self.calls.append((list(argv), cwd, dict(env), input, timeout))
+            if argv[-1] == "fetch_pipeline.py":
+                return subprocess.CompletedProcess(argv, self.fetch_exit, "fetch_completed\n", "private-output")
+            return subprocess.CompletedProcess(argv, 0, self.count, "")
+        return super().run(argv, cwd=cwd, env=env, input=input, timeout=timeout)
+
+
+class FetchDataTest(OperationalCase):
+    def setUp(self):
+        self.runner = FetchDataRunner()
+        self.env["COMPOSE_PROJECT_NAME"] = "bdvrd-t27-fetch-test"
+        cache = self.executor.state.path / "releases" / TAG
+        (cache / "metadata.json").write_bytes(metadata_bytes())
+        self.executor.state.write_current({"last_successful": {"tag": TAG}, "attempt": {"tag": TAG}})
+
+    def invoke(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = d.main(["fetch-data"], root=self.root, env=self.env, runner=self.runner)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_fetch_uses_running_release_and_reports_count_without_publishing(self):
+        before = (self.executor.state.path / "current.json").read_bytes()
+        history_before = (self.executor.state.path / "history.jsonl").read_bytes()
+        code, out, err = self.invoke()
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("games=148", out)
+        commands = [c for c in self.runner.calls if c[0][-2:] == ["python", "fetch_pipeline.py"]]
+        self.assertEqual(len(commands), 1)
+        argv, cwd, env, _, timeout = commands[0]
+        self.assertEqual(argv, ["docker", "compose", "--project-directory", str(self.root / "webreport"),
+                               "-f", str(self.root / "webreport/docker-compose.yml"),
+                               "-f", str(self.root / "webreport/docker-compose.prod.yml"),
+                               "-f", str(self.executor.state.path / f"releases/{TAG}/compose.release.yml"),
+                               "exec", "-T", "data_collector", "timeout", "--kill-after=10", "1200",
+                               "python", "fetch_pipeline.py"])
+        self.assertEqual(env["COMPOSE_PROJECT_NAME"], "bdvrd-t27-fetch-test")
+        self.assertEqual(cwd, self.root)
+        self.assertEqual(timeout, 1230)
+        self.assertEqual((self.executor.state.path / "current.json").read_bytes(), before)
+        self.assertEqual((self.executor.state.path / "history.jsonl").read_bytes(), history_before)
+        self.assertNotIn("private-output", out + err)
+
+    def test_refuses_without_successful_release(self):
+        cases: list[dict[str, d.JSON]] = [{}, {"attempt": {"tag": TAG}}]
+        for current in cases:
+            with self.subTest(current=current):
+                self.executor.state.write_current(current)
+                self.runner.calls.clear()
+                code, _, err = self.invoke()
+                self.assertEqual(code, 4, err)
+                self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+                self.assertEqual(self.runner.calls, [])
+
+    def test_refuses_dirty_migration(self):
+        self.executor.state.write_current({"last_successful": {"tag": TAG}, "stage": "migration_started"})
+        code, _, err = self.invoke()
+        self.assertEqual(code, 41, err)
+        self.assertEqual(json.loads(err)["error"], "E_DEPLOYMENT_DIRTY")
+        self.assertEqual(self.runner.calls, [])
+
+    def test_refuses_different_attempt(self):
+        # Given valid caches with the same collector image, only the attempt guard can refuse.
+        attempt_tag = "v2.0.0"
+        cache = self.executor.state.path / "releases"
+        attempt_cache = cache / attempt_tag
+        attempt_cache.mkdir()
+        (attempt_cache / "metadata.json").write_bytes(rm.dumps(replace(self.meta, version=attempt_tag)))
+        (attempt_cache / "compose.release.yml").write_bytes((cache / TAG / "compose.release.yml").read_bytes())
+        self.executor.state.write_current({"last_successful": {"tag": TAG}, "attempt": {"tag": attempt_tag}})
+        code, _, err = self.invoke()
+        self.assertEqual(code, 4, err)
+        self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+        self.assertEqual(self.runner.calls, [])
+
+    def test_refuses_missing_collector(self):
+        del self.runner.containers["data_collector"]
+        code, _, err = self.invoke()
+        self.assertEqual(code, 4, err)
+        self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+        self.assertFalse(any(c[0][-1] == "fetch_pipeline.py" or "from bd_shared.db import Database" in c[0][-1]
+                             for c in self.runner.calls))
+
+    def test_refuses_wrong_running_image(self):
+        self.runner.running_ids["data_collector"] = "wrong-image"
+        code, _, err = self.invoke()
+        self.assertEqual(code, 4, err)
+        self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+        self.assertFalse(any(c[0][-1] == "fetch_pipeline.py" or "from bd_shared.db import Database" in c[0][-1]
+                             for c in self.runner.calls))
+
+    def test_fetch_failure_preserves_exit_code_and_never_counts(self):
+        self.runner.fetch_exit = 7
+        code, out, err = self.invoke()
+        self.assertEqual(code, 7)
+        self.assertNotIn("games=", out)
+        self.assertNotIn("private-output", out + err)
+        self.assertFalse(any("from bd_shared.db import Database" in c[0][-1] for c in self.runner.calls))
+
+    def test_refuses_malformed_count(self):
+        for count in ("garbage", "-1", "fetch_completed\n148"):
+            with self.subTest(count=count):
+                self.runner.count = count
+                code, out, err = self.invoke()
+                self.assertEqual(code, 4, err)
+                self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+                self.assertNotIn("private-output", out + err)
+
+    def test_refuses_empty_count(self):
+        self.runner.count = "0\n"
+        code, out, err = self.invoke()
+        self.assertEqual(code, 4, err)
+        self.assertEqual(json.loads(err)["error"], "E_PREFLIGHT")
+        self.assertIn("games=0", out)
+        self.assertNotIn("private-output", out + err)
+
+
 class OperationsTest(OperationalCase):
     def test_shared_rollback_finish_publication_failure_is_terminal_failed(self):
         previous: dict[str, d.JSON] = {"tag": "v0.1.0"}

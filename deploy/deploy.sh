@@ -143,6 +143,10 @@ case "$SUBCOMMAND" in
         checkout_tag "$target"
         exec poetry run python deploy/deploy.py rollback "$target" "$@"
         ;;
+    fetch-data)
+        refuse_dataset
+        exec poetry run python deploy/deploy.py fetch-data "$@"
+        ;;
     status|smoke|verify-db-isolation)
         exec poetry run python deploy/deploy.py "$SUBCOMMAND" "$@"
         ;;

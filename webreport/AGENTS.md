@@ -130,6 +130,7 @@ Production commands run from the repository root:
 make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
 make rollback DEPLOY_ARGS="--llm-smoke"
 make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+make deploy-fetch-data
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 

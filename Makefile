@@ -18,7 +18,7 @@ override DEPLOY_ARGS_SAFE_INPUT := $(value DEPLOY_ARGS)
 unexport DEPLOY_ARGS
 export DEPLOY_ARGS_SAFE_INPUT
 
-.PHONY: help setup test lint upgrade-db upgrade-code deploy rollback deploy-status deploy-smoke deploy-verify-isolation deploy-rehearsal webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
+.PHONY: help setup test lint upgrade-db upgrade-code deploy rollback deploy-status deploy-smoke deploy-fetch-data deploy-verify-isolation deploy-rehearsal webreport-start webreport-stop validate-knowledge validate-tools restart mysql-start mysql-stop fetch-data fetch-data-log logs
 
 help:
 	@echo "🎲 Без дураков parser - available commands"
@@ -52,6 +52,7 @@ help:
 	@echo "  make rollback [VERSION=vX.Y.Z] [DEPLOY_ARGS=...] - Roll back to a release"
 	@echo "  make deploy-status [DEPLOY_ARGS=--json] - Read-only deployment state report"
 	@echo "  make deploy-smoke [DEPLOY_ARGS=--llm-smoke|--help] - Run deployment smoke checks"
+	@echo "  make deploy-fetch-data - Load games inside the running release collector and print the game count"
 	@echo "  make deploy-verify-isolation [DEPLOY_ARGS=--container-probe|--help] - Verify database port isolation"
 	@echo "  make deploy-rehearsal - Run the disposable local release rehearsal (never on a server)"
 	@echo ""
@@ -266,6 +267,10 @@ deploy-smoke:
 		exit 2; \
 	fi; \
 	exec deploy/deploy.sh smoke "$${args[@]}"
+
+deploy-fetch-data:
+	$(bez_only)
+	@exec deploy/deploy.sh fetch-data
 
 deploy-verify-isolation:
 	@set -e; \

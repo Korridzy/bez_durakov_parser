@@ -108,10 +108,13 @@ Release commands run from root; the executor doesn't support DATASET:
 make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
 make rollback DEPLOY_ARGS="--llm-smoke"
 make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+make deploy-fetch-data
 make deploy-verify-isolation DEPLOY_ARGS=--container-probe
 ```
 
 `make deploy-status` prints a read-only report of the executor state (`DEPLOY_ARGS=--json` for JSON) and takes no lock. Make collapses recipe failures to exit 2; deployment JSON stderr carries the executor code. Default local state, logs and backups are under `vm/deploy/`.
+
+On a first empty install, deploy without `--llm-smoke`, run `make deploy-fetch-data` and require a positive `games=<count>`, then run the full model smoke. Later deploys keep `--llm-smoke`. The production fetch runs inside the recorded release collector, not the development `fetch-data` one-off; it preserves the collector exit status and takes the deployment lock. Run outside the scheduled fetch window.
 
 ## NOTES
 

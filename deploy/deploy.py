@@ -495,6 +495,15 @@ class Executor:
         self.pin_file, self.metadata = pin_file, metadata
         return metadata
 
+    def compose_prefix(self) -> list[str]:
+        """Use the same project environment and ordered files as release_make."""
+        prefix = ["docker", "compose", "--project-directory", str(self.root / "webreport"),
+                  "-f", str(self.root / "webreport" / "docker-compose.yml")]
+        if self.pin_file is not None:
+            prefix += ["-f", str(self.root / "webreport" / "docker-compose.prod.yml"),
+                       "-f", str(self.pin_file)]
+        return prefix
+
     def mysql_command(self, client: str, arguments: Sequence[str], *, input: str | None = None,
                       timeout: int = COMMAND_TIMEOUT, code: int = 31) -> subprocess.CompletedProcess[str]:
         """Run mysql/mysqldump with env-only credentials, database and optional restore input."""
@@ -505,8 +514,7 @@ class Executor:
         database, password = values.get("MYSQL_DATABASE"), values.get("MYSQL_ROOT_PASSWORD")
         if not database or password is None:
             raise DeployError(code, "generated MySQL database name or root password is missing")
-        argv = ["docker", "compose", "--project-directory", str(self.root / "webreport"),
-                "-f", str(self.root / "webreport" / "docker-compose.yml"), "exec", "-T",
+        argv = [*self.compose_prefix(), "exec", "-T",
                 "-e", "MYSQL_PWD", "mysql", client, "-uroot", *arguments, database]
         try:
             return self.runner.run(argv, cwd=self.root, env={**self.env, "MYSQL_PWD": password},
@@ -1454,6 +1462,58 @@ class Executor:
         self.metadata, self.pin_file = meta, folder / "compose.release.yml"
         return meta
 
+    def fetch_data(self) -> int:
+        """Load games inside the recorded release collector and verify nonempty data."""
+        current = self.state.read_current()
+        last = current.get("last_successful")
+        if not isinstance(last, dict):
+            raise DeployError(4, "fetch-data requires a successfully recorded release")
+        if current.get("stage") == "migration_started":
+            raise DeployError(41, "fetch-data refuses a dirty migration state")
+        attempt = current.get("attempt")
+        if isinstance(attempt, dict) and attempt.get("tag") != last.get("tag"):
+            raise DeployError(4, "fetch-data requires the current attempt to match the successful release")
+        meta = self.smoke_metadata()
+        assert meta is not None
+        assert self.pin_file is not None
+        if not self.pin_file.is_file():
+            raise DeployError(23, "cached release pin file is missing")
+        self.step = "fetch-data"
+        collectors = [item for item in self.containers()
+                      if item.get("Service") == "data_collector" and item.get("State") == "running"]
+        if len(collectors) != 1 or not isinstance(collectors[0].get("ID"), str):
+            raise DeployError(4, "fetch-data requires one running release collector")
+        running = self.command(["docker", "container", "inspect", str(collectors[0]["ID"]),
+                                "--format", "{{.Image}}"], 4, "collector image inspection failed").strip()
+        pinned = self.command(["docker", "image", "inspect", meta.images["data_collector"],
+                               "--format", "{{.Id}}"], 4, "release collector image inspection failed").strip()
+        if not running or running != pinned:
+            raise DeployError(4, "running collector image differs from the recorded release")
+        self.emit("fetch-data: running the recorded release collector (timeout 1200 seconds)")
+        try:
+            result = self.runner.run(
+                [*self.compose_prefix(), "exec", "-T", "data_collector",
+                 "timeout", "--kill-after=10", "1200", "python", "fetch_pipeline.py"],
+                cwd=self.root, env=self.env, timeout=1230,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise DeployError(4, "collector fetch failed or timed out") from None
+        # Raw collector logs can contain private URLs. Preserve its status, not its output.
+        if result.returncode:
+            self.emit(f"fetch-data: collector exited {result.returncode}")
+            return result.returncode
+        count = self.command(
+            [*self.compose_prefix(), "exec", "-T", "data_collector", "python", "-c",
+             "from bd_shared.db import Database; print(len(Database().get_all_games()))"],
+            4, "game count query failed",
+        ).strip()
+        if not re.fullmatch(r"[0-9]+", count):
+            raise DeployError(4, "game count query returned an invalid count")
+        self.emit(f"fetch-data: games={count}")
+        if int(count) == 0:
+            raise DeployError(4, "no games loaded; inspect collector configuration and fetch results")
+        return 0
+
     def resolve_rollback_target(self, tag: str | None = None) -> str:
         if tag is not None:
             return valid_tag(tag)
@@ -1775,6 +1835,7 @@ def parser() -> Parser:
     isolation.add_argument("--container-probe", action="store_true")
     smoke = commands.add_parser("smoke")
     smoke.add_argument("--llm-smoke", action="store_true")
+    commands.add_parser("fetch-data", help="Load games in the running recorded release collector")
     commands.add_parser("select").add_argument("tag", type=valid_tag)
     return cli
 
@@ -1812,7 +1873,7 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
         os.chmod(log_path, 0o600)
         with contextlib.redirect_stdout(help_output):
             options = parser().parse_args(args)
-        if options.command in ("deploy", "rollback") and environment.get("DATASET"):
+        if options.command in ("deploy", "rollback", "fetch-data") and environment.get("DATASET"):
             raise DeployError(2, "DATASET deployments are not supported by the executor")
         with state.lock():
             executor = Executor(root, environment, runner or SubprocessRunner(),
@@ -1831,6 +1892,8 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT, env: Mapping[s
                     executor.rollback(options.tag, options)
                 case "smoke":
                     executor.smoke(executor.smoke_metadata(), llm_smoke=options.llm_smoke)
+                case "fetch-data":
+                    return executor.fetch_data()
                 case "select":
                     metadata = executor.select(options.tag)
                     if environment.get("BD_DEPLOY_RELEASE_FILE"):

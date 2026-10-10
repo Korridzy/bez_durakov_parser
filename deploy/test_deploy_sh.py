@@ -50,6 +50,7 @@ class RollbackLockTest(unittest.TestCase):
         origin, bin_dir = base / "origin.git", base / "bin"
         (self.repo / "deploy").mkdir(parents=True)
         (self.repo / "deploy" / "deploy.sh").write_bytes(WRAPPER.read_bytes())
+        (self.repo / "deploy" / "deploy.sh").chmod(0o755)
         bin_dir.mkdir()
         (bin_dir / "poetry").write_text(FAKE_POETRY)
         (bin_dir / "poetry").chmod(0o755)
@@ -136,6 +137,23 @@ class RollbackLockTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(self.calls(), [])
                 self.assertFalse(self.state.exists())
+
+    def test_make_fetch_dispatches_without_checkout_and_refuses_dataset(self):
+        # Given the real root target in the isolated checkout.
+        root_makefile = WRAPPER.parent.parent / "Makefile"
+        (self.repo / "Makefile").write_bytes(root_makefile.read_bytes())
+        # When invoked through Make, the wrapper must reach the fetch subcommand.
+        result = subprocess.run(["make", "deploy-fetch-data"], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True, timeout=TIMEOUT)
+        # Then no checkout happened and only the production subcommand was dispatched.
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([call[4] for call in self.calls()], ["run python deploy/deploy.py fetch-data"])
+        self.assertEqual(self.head_tag(), "v3.0.0")
+        self.log.unlink()
+        result = subprocess.run(["make", "deploy-fetch-data", "DATASET=foreign"], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True, timeout=TIMEOUT)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.calls(), [])
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ Run from the repository root on the server:
 make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
 ```
 
-`--llm-smoke` is mandatory for production rollouts, even though the CLI makes it optional. It makes a real model request and checks saved-report replay.
+Use `--llm-smoke` for every later production deploy. It makes a real model request and checks saved-report replay. The only exception is a first install with an empty game database and no earlier release: deploy once without it so S1-S7 can record the release, load games with `make deploy-fetch-data`, then run `make deploy-smoke DEPLOY_ARGS="--llm-smoke"`. Keep S8 strict; an empty database cannot produce the report it checks.
 
 The stages are:
 
@@ -263,6 +263,26 @@ S8 unsaves the report and removes its smoke chat; failure to clean up also fails
 
 Without release state, manual smoke uses the development Compose path and compares the live revision with the backend image head. Running smoke doesn't publish a successful deployment.
 
+With release state, manual smoke uses the current attempt's cached release metadata and pins, falling back to the last successful record only when there is no attempt. After the first successful deploy both records name the running release. A failed later attempt can name a different release, so inspect `make deploy-status` before rerunning smoke. Results go to a server-local CLI log, not a new successful deployment record.
+
+### Loading game data in production
+
+Run from root after a successful release deploy:
+
+```bash
+make deploy-fetch-data
+```
+
+The collector starts its interval scheduler, not an immediate data load. This command holds the deployment lock, requires a successful recorded release and no different current attempt or dirty migration, and checks that the running collector image matches that release. It runs `python fetch_pipeline.py` with `docker compose exec -T` inside that container, using the release Compose files, project environment and existing config. It doesn't build, pull, start or recreate services, or regenerate environment files.
+
+Run it outside the collector's scheduled fetch window and don't start another manual fetch while a scheduled job is running. The deployment lock excludes other executor commands but doesn't pause the collector's scheduler. Keep the same `COMPOSE_PROJECT_NAME`, `BD_VM_DIR` and other path overrides used for deployment.
+
+The command waits up to 1200 seconds for the fetch. The timeout runs inside the collector, with a 10-second kill grace, so stopping the host Docker client isn't the only timeout protection. On fetch failure the wrapper preserves the collector's exit status; Make returns 2 for a failed recipe. Raw collector output is withheld because it may contain private URLs. After a successful fetch, a read-only query through `bd_shared.db.Database.get_all_games()` prints `fetch-data: games=<count>`. Require exit 0 and a positive count. `games=0`, an invalid count or a failed count query fails the command. This is the total number of stored games, not the number newly fetched; a positive count doesn't certify every downloaded file parsed successfully. S8 remains the report acceptance check.
+
+Use this production command rather than `make fetch-data`, which keeps its development build and source-mount behavior. `make fetch-data-log` reads the scheduler container's service logs, not the attached output of a development one-off fetch. Neither command discovers recorded release pins.
+
+The deployed tag must contain the new target and executor subcommand. Deploy checks out that tag, so an older tag cannot use a command present only in a newer branch checkout.
+
 ## Verifying isolation
 
 On the server:
@@ -309,7 +329,7 @@ Deployment logs, backups, state and smoke evidence stay server-local under `vm/d
 
 | Area | Development | Production |
 | --- | --- | --- |
-| Start/update | `make start` from `webreport/` | `make deploy VERSION=vX.Y.Z DEPLOY_ARGS="--llm-smoke"` from root |
+| Start/update | `make start` from `webreport/` | Later deploys: `make deploy VERSION=vX.Y.Z DEPLOY_ARGS="--llm-smoke"` from root; first empty install: [deploy, load games, then model smoke](#first-rollout) |
 | Images | Local builds, source mounts for backend and collector | CI-tested application digests, no application source mounts |
 | Configuration | Tracked defaults plus optional local overlay | Required `bd_shared/config.local.toml` bind mount |
 | Reload/debug | Config-driven backend settings | Both forced off |
@@ -327,6 +347,8 @@ Use `docker compose ps` to discover names and service-based commands such as `do
 ## First rollout
 
 This checklist is for the operator. The agent only checks command resolution locally; it never contacts the production server.
+
+For a fresh empty installation, the approved release must include `deploy-fetch-data`. The historical bootstrap commit named below predates that command; don't apply its fresh-install data-load steps to that tag. A release containing the command needs separate approval before this sequence can be used on a fresh database.
 
 The first rollout ships the already approved issue-branch commit through the temporary bootstrap gate. No step merges to `main`; merging stays the owner's own decision. `<C>` below is `025bcefc0ab1559e4a9ff9275d0fdf199420489f`, the approved release commit, not the newer branch tip carrying the nginx example. Keep the release target, existing `sha-<C>` candidates and `BD_ROLLOUT_BOOTSTRAP` value unchanged.
 
@@ -361,22 +383,36 @@ The first rollout ships the already approved issue-branch commit through the tem
 
    Documented but not verified live: GitHub documents that a tag push runs the workflow file of the pushed tag even when it isn't on the default branch, and the bootstrap relies on that. Whether a `release: published` run also starts from the tag's workflow file while `main` has no workflows wasn't verified. If it does, it takes the same bootstrap gate for `<C>`, and promoting the same digests a second time changes nothing.
 7. Set up the [host nginx site](#host-nginx-site) before deploying. For `v0.1.0`, follow that section's separate fetch and `git show FETCH_HEAD:...` instructions, copying the temporary example rather than a file from the approved checkout. Keep detached `HEAD` at `<C>`; don't retarget the release or change the candidates or `BD_ROLLOUT_BOOTSTRAP`. Fill the placeholders, enable the site beside existing sites and obtain the certificate using the server's existing method or certbot. Enable the full TLS site only after the certificate exists, then run `sudo nginx -t` and `sudo systemctl reload nginx`. Confirm its upstream uses `127.0.0.1:<frontend-port>` with the generated frontend port, and allow only 80/443 publicly. An upstream failure before the application deploys is expected.
-8. Deploy from root:
+8. Deploy from root. For a first install with an empty game database and no earlier successful release:
 
    ```bash
-   make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+   make deploy VERSION=v0.1.0
    ```
 
-   Approve the migration prompt if shown. No migration is expected when both live and release revisions are `b1c2d3e4f5g6`; trust the actual computed plan rather than that expectation.
-9. Run isolation verification again:
+   This runs S1-S7 and records the release. If game data is already present, keep `DEPLOY_ARGS="--llm-smoke"` on this deploy; every later deploy also keeps it. Approve the migration prompt if shown, or add `DEPLOY_ARGS="--approve-migration"` for an explicitly approved noninteractive first empty install. No migration is expected when both live and release revisions are `b1c2d3e4f5g6`; trust the actual computed plan rather than that expectation.
+9. On the first empty install, load game data using the recorded release:
+
+   ```bash
+   make deploy-fetch-data
+   ```
+
+   Wait for the command to finish, require exit 0 and `fetch-data: games=<count>` with a positive count. Don't use `make fetch-data-log` to watch this command; it isn't its completion signal. See [Loading game data in production](#loading-game-data-in-production) for the timeout, scheduler timing and failure behavior.
+10. Run the full model smoke against the recorded running release:
+
+    ```bash
+    make deploy-smoke DEPLOY_ARGS="--llm-smoke"
+    ```
+
+    Require S1-S8 PASS and exit 0. This logs the verification without creating another deployment record.
+11. Run isolation verification again:
 
    ```bash
    make deploy-verify-isolation DEPLOY_ARGS=--container-probe
    ```
 
    Run the off-host `nc` commands in [Verifying isolation](#verifying-isolation) from another machine, for IPv4 and IPv6 if assigned. Require refused private ports and a connecting public control.
-10. Open `https://<public-host>` in the browser. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route through host nginx.
-11. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
-12. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
+12. Open `https://<public-host>` in the browser. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route through host nginx.
+13. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
+14. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
 
-If `--llm-smoke` fails, the executor exits 38; Make reports 2. When there is a previous successful record, recovery output suggests `make rollback VERSION=<previous>`. The first rollout has no previous record, so fix forward or explicitly restore the manual backup from step 4. No automatic recovery runs.
+If `--llm-smoke` fails, the executor exits 38; Make reports 2. `S8: canned chat produced no report` on an empty game database means the agent had no game data and deliberately didn't mark a report. This is a data precondition, not a code bug: load games, verify the positive count, then rerun `make deploy-smoke DEPLOY_ARGS="--llm-smoke"`. Don't weaken S8. For other failures, inspect the error. When there is a previous successful record, deploy recovery output suggests `make rollback VERSION=<previous>`. Without one, fix forward or explicitly restore the manual backup from step 4. No automatic recovery runs.
