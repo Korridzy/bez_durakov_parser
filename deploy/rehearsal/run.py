@@ -280,8 +280,8 @@ start_time = "12:00"
         infra = {name: compose("ps", "-q", name).strip() for name in ("mysql", "litellm")}
         command(["docker", "run", "-d", "--name", REGISTRY, "--label", "bd.rehearsal.owner=" + str(WORK),
                  "-p", f"127.0.0.1:{registry_port}:5000", "registry:2"])
-        command(["curl", "--fail", "--silent", "--retry", "10", "--retry-connrefused",
-                 "--retry-max-time", "20", f"http://127.0.0.1:{registry_port}/v2/"])
+        command(["curl", "--fail", "--silent", "--retry", "10", "--retry-all-errors",
+                 "--retry-delay", "3", "--retry-max-time", "20", f"http://127.0.0.1:{registry_port}/v2/"])
         owned = []
         for tag, sha in commits.items():
             command(["git", "checkout", "--detach", tag])
