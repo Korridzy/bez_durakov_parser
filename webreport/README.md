@@ -4,7 +4,7 @@
 
 ## Production releases
 
-Use [DEPLOYMENT.md](DEPLOYMENT.md) for server setup, release approval, deployment, rollback and isolation. Its [first-rollout checklist](DEPLOYMENT.md#first-rollout) is operator-only.
+Use [DEPLOYMENT.md](DEPLOYMENT.md) for server setup, release approval, deployment, rollback and isolation. Its [first-install checklist](DEPLOYMENT.md#first-install-on-a-new-server) is operator-only.
 
 Run these from the repository root on the server:
 

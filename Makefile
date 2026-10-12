@@ -57,7 +57,7 @@ help:
 	@echo "  make deploy-rehearsal - Run the disposable local release rehearsal (never on a server)"
 	@echo ""
 	@echo "docs: webreport/DEPLOYMENT.md - Releases, deployment, rollback, restore and isolation"
-	@echo "docs: webreport/DEPLOYMENT.md#first-rollout - Operator checklist for the first release"
+	@echo "docs: webreport/DEPLOYMENT.md#first-install-on-a-new-server - Operator checklist for a first install"
 	@echo ""
 	@echo "Tip: make -C webreport help"
 

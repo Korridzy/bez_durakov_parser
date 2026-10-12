@@ -4,7 +4,7 @@
 
 ### Production releases
 
-[DEPLOYMENT.md](DEPLOYMENT.md) covers server setup, cutting a release, migration approval, rollback, restore, smoke, isolation and privacy. The [first-rollout checklist](DEPLOYMENT.md#first-rollout) is for the operator; the agent never contacts the server.
+[DEPLOYMENT.md](DEPLOYMENT.md) covers server setup, cutting a release, migration approval, rollback, restore, smoke, isolation and privacy. The [first-install checklist](DEPLOYMENT.md#first-install-on-a-new-server) is for the operator; the agent never contacts the server.
 
 From the repository root:
 

@@ -2,7 +2,7 @@
 
 ## Production
 
-Start with [DEPLOYMENT.md](DEPLOYMENT.md), including the operator's [first-rollout checklist](DEPLOYMENT.md#first-rollout). The quick-start steps below are for development. Production uses tested release images, not local rebuilds.
+Start with [DEPLOYMENT.md](DEPLOYMENT.md), including the operator's [first-install checklist](DEPLOYMENT.md#first-install-on-a-new-server). The quick-start steps below are for development. Production uses tested release images, not local rebuilds.
 
 From the repository root on the server:
 

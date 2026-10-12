@@ -46,18 +46,7 @@ Host nginx can't resolve Compose service names. Its upstream is `http://127.0.0.
 
 Use [the example site](deploy-examples/nginx-webreport.conf.example). It is a documentation artifact, not loaded by Compose or the executor. If nginx already serves other sites, add this as one more site beside them; keep their configuration.
 
-1. For `v0.1.0`, the example isn't in the approved release checkout. Obtain it separately from the updated issue branch, without moving the deploy checkout. Run from the repository root:
-
-   ```bash
-   git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access
-   git show FETCH_HEAD:webreport/deploy-examples/nginx-webreport.conf.example > /tmp/webreport-site.conf
-   sudo cp /tmp/webreport-site.conf /etc/nginx/sites-available/webreport
-   rm /tmp/webreport-site.conf
-   ```
-
-   Fetching changes `FETCH_HEAD`, not detached `HEAD`. Don't check out `FETCH_HEAD`: the release stays at the approved commit, and its existing candidates stay unchanged.
-
-   From the next release, the file is in the checkout when its tag includes this documentation update. Use the in-checkout path then:
+1. Copy the example from the release checkout. Run from the repository root:
 
    ```bash
    sudo cp webreport/deploy-examples/nginx-webreport.conf.example /etc/nginx/sites-available/webreport
@@ -255,7 +244,7 @@ make deploy-smoke DEPLOY_ARGS="--llm-smoke"
 | S7 | Collector is running |
 | S8 | Canned chat succeeds, produces a report, saves and reloads it, Update advances its version, and the saved listing includes it |
 
-S8 unsaves the report and removes its smoke chat; failure to clean up also fails smoke. It doesn't prove the public route or the survival of your older records. Do those manual checks in the first-rollout checklist.
+S8 unsaves the report and removes its smoke chat; failure to clean up also fails smoke. It doesn't prove the public route or the survival of your older records. Do those manual checks in the [first-install checklist](#first-install-on-a-new-server).
 
 Without release state, manual smoke uses the development Compose path and compares the live revision with the backend image head. Running smoke doesn't publish a successful deployment.
 
@@ -325,7 +314,7 @@ Deployment logs, backups, state and smoke evidence stay server-local under `vm/d
 
 | Area | Development | Production |
 | --- | --- | --- |
-| Start/update | `make start` from `webreport/` | Later deploys: `make deploy VERSION=vX.Y.Z DEPLOY_ARGS="--llm-smoke"` from root; first empty install: [deploy, load games, then model smoke](#first-rollout) |
+| Start/update | `make start` from `webreport/` | Later deploys: `make deploy VERSION=vX.Y.Z DEPLOY_ARGS="--llm-smoke"` from root; first empty install: [deploy, load games, then model smoke](#first-install-on-a-new-server) |
 | Images | Local builds, source mounts for backend and collector | CI-tested application digests, no application source mounts |
 | Configuration | Tracked defaults plus optional local overlay | Required `bd_shared/config.local.toml` bind mount |
 | Reload/debug | Config-driven backend settings | Both forced off |
@@ -340,18 +329,17 @@ Fixed container names have been removed. Compose names containers `<project>-<se
 
 Use `docker compose ps` to discover names and service-based commands such as `docker compose logs backend`. Service DNS is unchanged.
 
-## First rollout
+## First install on a new server
 
 This checklist is for the operator. The agent only checks command resolution locally; it never contacts the production server.
 
-For a fresh empty installation, the approved release must include `deploy-fetch-data`. The historical bootstrap commit named below predates that command; don't apply its fresh-install data-load steps to that tag. A release containing the command needs separate approval before this sequence can be used on a fresh database.
+Precondition: the release you deploy is a published stable release `vX.Y.Z` on a `main` commit, not a draft or prerelease. Changes reach `main`, passing CI publishes the three `sha-<commit>` candidates, and publishing the stable GitHub Release promotes those same digests. Follow [Cutting a release](#cutting-a-release). The release must include `deploy-fetch-data` and the host nginx example.
 
-The first rollout ships the already approved issue-branch commit through the temporary bootstrap gate. No step merges to `main`; merging stays the owner's own decision. `<C>` below is `025bcefc0ab1559e4a9ff9275d0fdf199420489f`, the approved release commit, not the newer branch tip carrying the nginx example. Keep the release target, existing `sha-<C>` candidates and `BD_ROLLOUT_BOOTSTRAP` value unchanged.
+Use the chosen release tag wherever `<tag>` appears below. Run server commands from the repository root unless a step changes directory.
 
-1. Confirm the repository variable `BD_ROLLOUT_BOOTSTRAP` (Settings, Secrets and variables, Actions, Variables) still has the value `<C>`. Don't change it to the documentation commit.
-2. Confirm the CI run for `<C>` is green and all three existing `sha-<C>` candidate images are present. Use those candidates; no new candidate images are needed for this documentation update. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private. A newer documentation commit can run CI, but it can't publish candidates while the variable stays at `<C>`.
-3. Add the owner-only `v*` tag ruleset for create, update and delete.
-4. On the server, take a manual backup before changing anything. Quiesce backend and collector so SQLite files are stable, stop MySQL, archive `vm/mysql/mysql_data` and `vm/backend/checkpoints`, then restart those services:
+1. Confirm the release's CI run and candidate publication passed. Wait for `release-metadata.json` and its sha256 marker in the release body. Read the asset and confirm the source commit and Alembic revision are the intended ones. Open each GHCR package, set visibility to Public, and confirm its repository link. First pushes with the workflow token can default to private.
+2. Add the owner-only `v*` tag ruleset for create, update and delete.
+3. On a server with existing data, take a manual backup before changing anything. Skip this backup on an empty new server. Quiesce backend and collector so SQLite files are stable, stop MySQL, archive `vm/mysql/mysql_data` and `vm/backend/checkpoints`, then restart those services:
 
    ```bash
    cd webreport
@@ -363,8 +351,15 @@ The first rollout ships the already approved issue-branch commit through the tem
    cd ..
    ```
 
-   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding. Move hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Run `git fetch origin issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access && git checkout --detach <C>` and keep that approved checkout for infrastructure and deployment. The fetched branch also supplies the nginx example in step 7, without checking out its newer tip.
-5. Apply the one-time infrastructure procedure from the `<C>` checkout, not a whole-stack stop:
+   Replace the backup placeholder with a private location outside `vm/`; use your actual `BD_VM_DIR` if overridden. Verify the archive before proceeding.
+4. Complete [Server setup once](#server-setup-once) in a deploy-only clone at the chosen release tag. Move any hand-edited tracked config values into `bd_shared/config.local.toml`, set `[webreport] reload=false`, and restore tracked defaults only after preserving those edits. Select the release checkout:
+
+   ```bash
+   git fetch --tags origin
+   git checkout --detach <tag>
+   ```
+
+5. Apply the one-time infrastructure procedure from that release checkout, not a whole-stack stop:
 
    ```bash
    make -C webreport generate-env
@@ -375,40 +370,36 @@ The first rollout ships the already approved issue-branch commit through the tem
    ```
 
    This applies loopback MySQL publication and both digest pins. The executor refuses when running infrastructure images differ from its pins. Before release state exists, the isolation check requires only MySQL, so repeat it after deployment. Every runtime third-party digest bump needs this infrastructure procedure first.
-6. Create the stable GitHub Release `v0.1.0` targeting `<C>`, not a draft and not a prerelease, for example `gh release create v0.1.0 --target <C> --title v0.1.0 --notes '...'` or the UI with a new tag created on publish. A Release on a commit that isn't on `main` is expected here. GitHub creates the tag when you publish, and the tag push starts the `Release promotion` workflow from the tag's own `release.yml`. Its `Wait for the stable release (bootstrap)` step finds the Release at once. Fallback only: if you pushed the tag by hand first and the 5-minute wait timed out, publish the Release and re-run that workflow run. Expect `BOOTSTRAP: promoting non-main commit <C>` and `PROMOTED: v0.1.0 commit=<C>` in the log. Wait for `release-metadata.json` and its sha256 marker in the Release body, then read the asset and confirm `source_commit` is `<C>` and the Alembic revision is the expected one.
-
-   Documented but not verified live: GitHub documents that a tag push runs the workflow file of the pushed tag even when it isn't on the default branch, and the bootstrap relies on that. Whether a `release: published` run also starts from the tag's workflow file while `main` has no workflows wasn't verified. If it does, it takes the same bootstrap gate for `<C>`, and promoting the same digests a second time changes nothing.
-7. Set up the [host nginx site](#host-nginx-site) before deploying. For `v0.1.0`, follow that section's separate fetch and `git show FETCH_HEAD:...` instructions, copying the temporary example rather than a file from the approved checkout. Keep detached `HEAD` at `<C>`; don't retarget the release or change the candidates or `BD_ROLLOUT_BOOTSTRAP`. Fill the placeholders, enable the site beside existing sites and obtain the certificate using the server's existing method or certbot. Enable the full TLS site only after the certificate exists, then run `sudo nginx -t` and `sudo systemctl reload nginx`. Confirm its upstream uses `127.0.0.1:<frontend-port>` with the generated frontend port, and allow only 80/443 publicly. An upstream failure before the application deploys is expected.
-8. Deploy from root. For a first install with an empty game database and no earlier successful release:
+6. Set up the [host nginx site](#host-nginx-site) before deploying, using the example in the release checkout. Fill the placeholders, enable the site beside existing sites and obtain the certificate using the server's existing method or certbot. Enable the full TLS site only after the certificate exists, then run `sudo nginx -t` and `sudo systemctl reload nginx`. Confirm its upstream uses `127.0.0.1:<frontend-port>` with the generated frontend port, and allow only 80/443 publicly. An upstream failure before the application deploys is expected.
+7. Deploy from root. For a first install with an empty game database and no earlier successful release, omit `--llm-smoke`:
 
    ```bash
-   make deploy VERSION=v0.1.0
+   make deploy VERSION=<tag>
    ```
 
    This runs S1-S7 and records the release. If game data is already present, keep `DEPLOY_ARGS="--llm-smoke"` on this deploy; every later deploy also keeps it. Approve the migration prompt if shown, or add `DEPLOY_ARGS="--approve-migration"` for an explicitly approved noninteractive first empty install. No migration is expected when both live and release revisions are `b1c2d3e4f5g6`; trust the actual computed plan rather than that expectation.
-9. On the first empty install, load game data using the recorded release:
+8. On the first empty install, load game data using the recorded release:
 
    ```bash
    make deploy-fetch-data
    ```
 
    Wait for the command to finish, require exit 0 and `fetch-data: games=<count>` with a positive count. Don't use `make fetch-data-log` to watch this command; it isn't its completion signal. See [Loading game data in production](#loading-game-data-in-production) for the timeout, scheduler timing and failure behavior.
-10. Run the full model smoke against the recorded running release:
+9. Run the full model smoke against the recorded running release:
 
     ```bash
     make deploy-smoke DEPLOY_ARGS="--llm-smoke"
     ```
 
     Require S1-S8 PASS and exit 0. This logs the verification without creating another deployment record.
-11. Run isolation verification again:
+10. Run isolation verification again:
 
    ```bash
    make deploy-verify-isolation DEPLOY_ARGS=--container-probe
    ```
 
    Run the off-host `nc` commands in [Verifying isolation](#verifying-isolation) from another machine, for IPv4 and IPv6 if assigned. Require refused private ports and a connecting public control.
-12. Open `https://<public-host>` in the browser. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route through host nginx.
-13. Confirm chats and saved reports recorded before rollout are still listed and readable. Keep local evidence under `vm/deploy/`, then report only `rollout done` in the planning session.
-14. Close the bootstrap the same day: delete the repository variable `BD_ROLLOUT_BOOTSTRAP`. Deleting the issue branch on GitHub is optional; the tag keeps `<C>` reachable and the executor needs only the tag. From then on only `main` can publish or promote, even while the `BOOTSTRAP` lines are still in the code. Then a last commit on the issue branch removes every line marked `BOOTSTRAP`, before the owner merges to `main`.
+11. Open `https://<public-host>` in the browser. Ask one real question that produces a report, save it, reload the page and reopen the saved report. This manual check covers the public route through host nginx.
+12. If this server had existing chats and saved reports, confirm they're still listed and readable. Keep local evidence under `vm/deploy/`.
 
-If `--llm-smoke` fails, the executor exits 38; Make reports 2. `S8: canned chat produced no report` on an empty game database means the agent had no game data and deliberately didn't mark a report. This is a data precondition, not a code bug: load games, verify the positive count, then rerun `make deploy-smoke DEPLOY_ARGS="--llm-smoke"`. Don't weaken S8. For other failures, inspect the error. When there is a previous successful record, deploy recovery output suggests `make rollback VERSION=<previous>`. Without one, fix forward or explicitly restore the manual backup from step 4. No automatic recovery runs.
+If `--llm-smoke` fails, the executor exits 38; Make reports 2. `S8: canned chat produced no report` on an empty game database means the agent had no game data and deliberately didn't mark a report. This is a data precondition, not a code bug: load games, verify the positive count, then rerun `make deploy-smoke DEPLOY_ARGS="--llm-smoke"`. Don't weaken S8. For other failures, inspect the error. When there is a previous successful record, deploy recovery output suggests `make rollback VERSION=<previous>`. Without one, fix forward or explicitly restore the manual backup from step 3 if one was taken. No automatic recovery runs.

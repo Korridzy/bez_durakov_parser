@@ -2,7 +2,7 @@
 
 ## Production commands
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) and its [first-rollout checklist](DEPLOYMENT.md#first-rollout). From the repository root:
+See [DEPLOYMENT.md](DEPLOYMENT.md) and its [first-install checklist](DEPLOYMENT.md#first-install-on-a-new-server). From the repository root:
 
 ```bash
 make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
