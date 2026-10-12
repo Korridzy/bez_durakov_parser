@@ -13,6 +13,29 @@ from unittest.mock import patch
 
 
 class GenerateEnvTests(unittest.TestCase):
+    def test_routes_luna_models_to_opencode_responses(self) -> None:
+        # Given: both Luna aliases supported through OpenCode Zen.
+        model_ids = ("gpt-5.6-luna", "gpt-6-luna")
+        configuration_path = Path(__file__).with_name("litellm_config.yaml")
+
+        # When: the shipped proxy routes are inspected.
+        configuration = configuration_path.read_text(encoding="utf-8")
+
+        # Then: each alias uses Responses, the existing key, and a bounded probe.
+        for model_id in model_ids:
+            with self.subTest(model_id=model_id):
+                self.assertIn(
+                    f"""  - model_name: opencode/{model_id}
+    litellm_params:
+      model: openai/responses/{model_id}
+      api_base: https://opencode.ai/zen/v1
+      api_key: os.environ/OPENCODE_API_KEY
+    model_info:
+      health_check_timeout: 8
+""",
+                    configuration,
+                )
+
     def test_routes_all_opencode_free_models(self) -> None:
         # Given: the current free OpenCode Zen model catalog.
         model_ids = (
