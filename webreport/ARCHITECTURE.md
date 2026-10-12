@@ -95,7 +95,7 @@ Anthropic-style thinking models пока не поддерживаются: back
 
 `LLM_MAX_RETRIES` передаётся LiteLLM как `model_kwargs={"num_retries": ...}`, поскольку `ChatLiteLLM.max_retries` не пересылает это значение в SDK.
 
-LiteLLM proxy использует moving tag `main-stable`, поэтому его поведение может меняться при обновлении образа. `langchain-litellm` также является молодым community-пакетом. Риск снижен minor-range pin и тестом AC-1, который фиксирует обязательный echo reasoning в tool loop.
+Сторонние образы, включая LiteLLM и MySQL в `webreport/docker-compose.yml` и Playwright в `webreport/Makefile`, закреплены по digest. Тег LiteLLM `main-stable` оставлен только в комментарии. Поведение может меняться при обновлении digest. `langchain-litellm` также является молодым community-пакетом. Риск снижен minor-range pin и тестом AC-1, который фиксирует обязательный echo reasoning в tool loop.
 
 ### 4. Checkpoint store и архив разговоров
 Backend хранит состояние LangGraph по thread ID в локальном SQLite хранилище `../vm/backend/checkpoints`. Это состояние агентов, а не замена MySQL для игровых данных.

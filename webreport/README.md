@@ -2,6 +2,20 @@
 
 Веб-система для генерации отчётов по игровым данным с использованием AI-агентов.
 
+## Production releases
+
+Use [DEPLOYMENT.md](DEPLOYMENT.md) for server setup, release approval, deployment, rollback and isolation. Its [first-install checklist](DEPLOYMENT.md#first-install-on-a-new-server) is operator-only.
+
+Run these from the repository root on the server:
+
+```bash
+make deploy VERSION=v0.1.0 DEPLOY_ARGS="--llm-smoke"
+make rollback DEPLOY_ARGS="--llm-smoke"
+make deploy-verify-isolation DEPLOY_ARGS=--container-probe
+```
+
+`make deploy-status` prints a read-only report of the deployment state. Make reports any recipe failure as exit 2; see the guide for the real executor codes. The commands below describe development, not production updates. Don't run tests or rebuilds on the server. CI tests each pull request and `main` push; publishing a stable release promotes tested image digests, and the server pulls them.
+
 ## 🏗️ Архитектура
 
 Система построена на сервис-ориентированной архитектуре (SOA) и включает:
@@ -88,7 +102,7 @@ Backend использует `ChatLiteLLM` из `langchain-litellm` с диап�
 
 В манифесте backend зависимость дополнена маркером Python `<3.15`: буквальная строка без маркера не разрешалась при текущей верхней границе Python проекта. Диапазон версий пакета сохранён, а образ backend использует Python 3.11.
 
-LiteLLM proxy использует moving tag `main-stable`, а `langchain-litellm` является молодым community-пакетом. Поэтому обновляйте образы осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop.
+LiteLLM proxy закреплён digest, разрешённым из `main-stable`; `langchain-litellm` остаётся молодым community-пакетом. Обновляйте digest осознанно. Minor-range pin пакета и тест AC-1 снижают риск изменения поведения reasoning tool loop. Для production смена runtime digest требует [инфраструктурной процедуры](DEPLOYMENT.md#infrastructure-procedure) перед deploy.
 
 ### Настройка конфигурации
 
@@ -134,6 +148,7 @@ cd webreport
 
 ### Документация
 
+- [DEPLOYMENT.md](DEPLOYMENT.md) covers releases, server-local deployment, restore and isolation.
 - [LOGGING.md](LOGGING.md) описывает общий конвейер логов.
 - [ARCHIVE.md](ARCHIVE.md) описывает постоянный архив разговоров, CLI, срок хранения и Langfuse.
 
@@ -216,6 +231,24 @@ agent_model = "deepseek-v4-flash-latest" # или "deepseek-v4-pro"
 ```
 
 `deepseek-v4-flash-latest` маршрутизируется к `~deepseek/deepseek-v4-flash-latest`, который всегда указывает на актуальную модель семейства DeepSeek V4 Flash. `deepseek-v4-pro` маршрутизируется к `deepseek/deepseek-v4-pro` через OpenRouter. Эти aliases доступны только в local overlay; отслеживаемый `agent_model = "gpt-4o"` не изменяется. После выбора модели выполните `make restart`.
+
+### OpenCode Zen GPT 6 Luna
+
+Для GPT 6 Luna добавьте ключ OpenCode Zen и выберите alias в `bd_shared/config.local.toml`:
+
+```toml
+[webreport]
+opencode_api_key = "your-opencode-key"
+agent_model = "opencode/gpt-6-luna"
+```
+
+LiteLLM отправляет запросы к `gpt-6-luna` через `https://opencode.ai/zen/v1/responses`, как указано в [документации OpenCode Zen](https://opencode.ai/docs/zen/#endpoints). Используется существующий ключ `opencode_api_key`. Alias `opencode/gpt-5.6-luna` также доступен; отслеживаемое значение `agent_model = "gpt-4o"` сохраняется. При пустом `agent_scope_gate_model` scope gate использует выбранную модель агента.
+
+После изменения ключа или модели выполните из корня репозитория:
+
+```bash
+make -C webreport restart
+```
 
 ### OpenCode Zen: бесплатные модели
 
@@ -362,7 +395,7 @@ Backend в Docker подключается к БД по имени хоста `m
 объявлена в отдельном файле `docker-compose.test.yml`, который рабочий стек никогда не
 загружает, и после прогона удаляется только сервис `postgres_test`.
 
-Нужен Docker Compose не ниже 2.24: полоса использует тег `!override` в `depends_on`, чтобы
+Нужен Docker Compose не ниже 2.24.4: полоса использует тег `!override` в `depends_on`, чтобы
 заменить карту зависимостей, а не дополнить её. На более старых версиях теги сливаются
 аддитивно, и полоса потянет за собой `mysql` и `litellm` из основного compose-файла. Проверить
 версию можно командой `docker compose version`.

@@ -44,21 +44,28 @@ else:
 
 
 def resolve_app_version() -> str:
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=Path(__file__).resolve().parent.parent,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return "unknown"
+    commands = (
+        ["git", "describe", "--tags", "--exact-match"],
+        ["git", "rev-parse", "--short", "HEAD"],
+    )
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=Path(__file__).resolve().parent.parent,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return "unknown"
 
-    if completed.returncode != 0:
-        return "unknown"
-    version = completed.stdout.strip()
-    return version or "unknown"
+        if completed.returncode == 0:
+            version = completed.stdout.strip()
+            if version:
+                return version
+
+    return "unknown"
 
 
 def dotenv_quote(value: str) -> str:

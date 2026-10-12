@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The promotion process calls this instead of the real GitHub CLI.
+set -euo pipefail
+exec poetry run python "$(dirname -- "${BASH_SOURCE[0]}")/gh_shim.py" "$@"

@@ -1,0 +1,301 @@
+name: CI
+
+# Every pull request and every main commit runs the complete root `make test` on a
+# disposable runner. A passing main commit then publishes the three candidate images the
+# suite ran against, tagged sha-<commit>. Nothing here connects to a server or deploys.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # The token is read-only for pull requests from forks; only the main push writes packages.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      COMPOSE_PROJECT_NAME: bdci-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_RUN_ID: ${{ github.run_id }}
+      E2E_NODE_MODULES_VOLUME: bdci-node-modules-${{ github.run_id }}
+      BD_REQUIRE_MYSQL: "1"
+      BD_MYSQL_HOST_PORT: "33306"
+      BD_TEST_CONFIG_FILE: test_config.ci.toml
+      IMAGE_PREFIX: ghcr.io/korridzy/bez_durakov_parser
+      CANDIDATE_TAG: sha-${{ github.sha }}
+      PINS_FILE: /tmp/ci-pins.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry==2.1.3
+
+      - name: Install host test dependencies
+        run: |
+          poetry install --no-root
+          # The collector tests run on the host from that project's own environment.
+          cd webreport/data_collector
+          poetry install --no-root
+
+      - name: Prepare scratch paths
+        run: |
+          {
+            echo "BD_VM_DIR=$RUNNER_TEMP/vm"
+            echo "BD_XLSM_ARCHIVE_DIR=$RUNNER_TEMP/xlsm"
+            echo "CANDIDATE_IDS_FILE=$RUNNER_TEMP/candidate-ids.txt"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/vm" "$RUNNER_TEMP/xlsm"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Candidate image labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+
+      # Build once: the suite, the canary scan and the push all use these loaded images.
+      - name: Build backend candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: webreport/Dockerfile.backend
+          tags: ${{ env.IMAGE_PREFIX }}/backend:${{ env.CANDIDATE_TAG }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: SOURCE_COMMIT=${{ github.sha }}
+          platforms: linux/amd64
+          provenance: false
+          load: true
+          push: false
+
+      - name: Build data collector candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: webreport/Dockerfile.data_collector
+          tags: ${{ env.IMAGE_PREFIX }}/data-collector:${{ env.CANDIDATE_TAG }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: SOURCE_COMMIT=${{ github.sha }}
+          platforms: linux/amd64
+          provenance: false
+          load: true
+          push: false
+
+      - name: Build frontend candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: webreport/Dockerfile.frontend
+          tags: ${{ env.IMAGE_PREFIX }}/frontend:${{ env.CANDIDATE_TAG }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: SOURCE_COMMIT=${{ github.sha }}
+          platforms: linux/amd64
+          provenance: false
+          load: true
+          push: false
+
+      - name: Record candidate image ids
+        run: |
+          : > "$CANDIDATE_IDS_FILE"
+          for name in backend data-collector frontend; do
+            id=$(docker image inspect --format '{{.Id}}' "$IMAGE_PREFIX/$name:$CANDIDATE_TAG")
+            echo "$name $id" | tee -a "$CANDIDATE_IDS_FILE"
+          done
+
+      - name: Scan candidate images for private-file canaries
+        run: |
+          poetry run python deploy/check_build_context.py --scan-existing \
+            "$IMAGE_PREFIX/backend:$CANDIDATE_TAG" \
+            "$IMAGE_PREFIX/data-collector:$CANDIDATE_TAG" \
+            "$IMAGE_PREFIX/frontend:$CANDIDATE_TAG"
+
+      # The suite's collector lane runs on the host, so the packaged image is executed here.
+      - name: Execute the data collector candidate
+        run: |
+          docker run --rm "$IMAGE_PREFIX/data-collector:$CANDIDATE_TAG" sh -c \
+            'python -c "import entrypoint, fetch_pipeline, bd_shared.config" && python test_entrypoint.py && python test_logging_jobs.py'
+
+      - name: Point the test lanes at the candidate images
+        run: |
+          cat > "$PINS_FILE" <<EOF
+          services:
+            backend:
+              build: !reset null
+              image: $IMAGE_PREFIX/backend:$CANDIDATE_TAG
+              pull_policy: never
+            data_collector:
+              build: !reset null
+              image: $IMAGE_PREFIX/data-collector:$CANDIDATE_TAG
+              pull_policy: never
+            frontend:
+              build: !reset null
+              image: $IMAGE_PREFIX/frontend:$CANDIDATE_TAG
+              pull_policy: never
+          EOF
+          echo "TEST_IMAGE_COMPOSE=$PINS_FILE" >> "$GITHUB_ENV"
+
+      - name: Write the per-run test config
+        run: sed "s/localhost:3306/localhost:${BD_MYSQL_HOST_PORT}/" bd_shared/test_config.toml > "bd_shared/$BD_TEST_CONFIG_FILE"
+
+      # Hosted Ubuntu images ship a MySQL package that may hold port 3306.
+      - name: Stop the runner's own MySQL
+        run: sudo systemctl stop mysql || true
+
+      - name: Generate env files
+        run: make -C webreport generate-env
+
+      - name: Verify the test lanes use the candidate images
+        run: |
+          config=$(make -s --no-print-directory -C webreport compose ARGS="config --format json")
+          for pair in backend:backend data_collector:data-collector frontend:frontend; do
+            service=${pair%%:*}
+            image="$IMAGE_PREFIX/${pair#*:}:$CANDIDATE_TAG"
+            if ! jq -e --arg service "$service" --arg image "$image" \
+                '.services[$service] | (has("build") | not) and .image == $image' <<<"$config" >/dev/null; then
+              echo "::error::$service does not run on $image without a build"
+              exit 1
+            fi
+            echo "$service -> $image"
+          done
+
+      - name: Start MySQL
+        run: make -C webreport compose ARGS="up -d mysql"
+
+      # TCP, because the image's init phase runs a temporary socket-only server that would
+      # answer a socket ping too early. The public fixture password reaches the client only
+      # through MYSQL_PWD, forwarded by name, never in argv.
+      - name: Wait for MySQL
+        env:
+          MYSQL_PWD: devpass
+        run: |
+          for _ in $(seq 1 60); do
+            if make -s --no-print-directory -C webreport compose ARGS="exec -T -e MYSQL_PWD mysql mysqladmin ping -h127.0.0.1 --protocol=tcp -uroot --silent"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MySQL did not answer within 60 tries"
+          exit 1
+
+      - name: Apply the schema
+        run: make -C webreport compose ARGS="run --rm --no-deps backend alembic -c /alembic/alembic.ini upgrade head"
+
+      - name: Seed the MySQL test fixture
+        env:
+          MYSQL_PWD: devpass
+        run: |
+          make -s --no-print-directory -C webreport compose \
+            ARGS="exec -T -e MYSQL_PWD mysql mysql --default-character-set=utf8mb4 -uroot bez_durakov" \
+            < .github/ci/test_mysql_fixture.sql
+
+      - name: Prepare the Playwright lane
+        run: make -C webreport test-e2e-setup
+
+      - name: Run the full test suite
+        run: make test
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The release promotion workflow looks for this exact step name and its success.
+      - name: Push candidate images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -u
+          # Prints "<remote digest> <linux/amd64 config digest>" for a tag, returns 3 when the
+          # tag does not exist and 1 on any other registry error.
+          remote_ids() {
+            local ref=$1 raw top manifest digest
+            if ! raw=$(docker buildx imagetools inspect --raw "$ref" 2>"$RUNNER_TEMP/inspect.err"); then
+              if grep -qiE 'not found|manifest unknown|name unknown' "$RUNNER_TEMP/inspect.err"; then
+                return 3
+              fi
+              cat "$RUNNER_TEMP/inspect.err" >&2
+              return 1
+            fi
+            top=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$ref" | jq -r '.digest') || return 1
+            manifest=$raw
+            if jq -e 'has("manifests")' <<<"$raw" >/dev/null; then
+              digest=$(jq -r '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest' <<<"$raw") || return 1
+              manifest=$(docker buildx imagetools inspect --raw "${ref%:*}@$digest") || return 1
+            fi
+            printf '%s %s\n' "$top" "$(jq -r '.config.digest' <<<"$manifest")"
+          }
+          # The local image id is the config digest with the classic image store and the
+          # manifest digest with the containerd image store.
+          matches() { [ "$1" = "$2" ] || [ "$1" = "$3" ]; }
+
+          to_push=()
+          while read -r name id; do
+            ref="$IMAGE_PREFIX/$name:$CANDIDATE_TAG"
+            current=$(docker image inspect --format '{{.Id}}' "$ref")
+            if [ "$current" != "$id" ]; then
+              echo "::error::$ref is $current locally, not the tested image $id"
+              exit 1
+            fi
+            status=0
+            remote=$(remote_ids "$ref") || status=$?
+            case $status in
+              0)
+                # shellcheck disable=SC2086
+                if matches "$id" $remote; then
+                  echo "$ref already holds the tested image $id; nothing to push"
+                else
+                  echo "::error::$ref already exists with a different image ($remote); refusing to overwrite it with $id"
+                  exit 1
+                fi
+                ;;
+              3) to_push+=("$name $id") ;;
+              *) echo "::error::could not inspect $ref"; exit 1 ;;
+            esac
+          done < "$CANDIDATE_IDS_FILE"
+
+          for entry in "${to_push[@]}"; do
+            read -r name id <<<"$entry"
+            ref="$IMAGE_PREFIX/$name:$CANDIDATE_TAG"
+            docker push "$ref"
+            remote=$(remote_ids "$ref") || { echo "::error::$ref is not readable after the push"; exit 1; }
+            # shellcheck disable=SC2086
+            if ! matches "$id" $remote; then
+              echo "::error::$ref was pushed as $remote, which is not the tested image $id"
+              exit 1
+            fi
+          done
+
+          while read -r name id; do
+            ref="$IMAGE_PREFIX/$name:$CANDIDATE_TAG"
+            remote=$(remote_ids "$ref") || { echo "::error::could not inspect $ref"; exit 1; }
+            echo "$ref digest ${remote%% *} (image $id)"
+          done < "$CANDIDATE_IDS_FILE"
+
+      - name: Clean up
+        if: always()
+        run: |
+          make -C webreport compose ARGS="down -v --remove-orphans" || echo "::warning::compose down failed"
+          docker volume rm -f "$E2E_NODE_MODULES_VOLUME" || echo "::warning::could not remove $E2E_NODE_MODULES_VOLUME"
+          rm -f "bd_shared/$BD_TEST_CONFIG_FILE" "$PINS_FILE"

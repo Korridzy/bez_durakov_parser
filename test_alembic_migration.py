@@ -30,7 +30,8 @@ def test_alembic_migration():
     """Test Alembic migration on test MySQL database."""
 
     # Read test config
-    test_config_path = Path(__file__).parent / 'bd_shared' / 'test_config.toml'
+    test_config_name = os.environ.get('BD_TEST_CONFIG_FILE', 'test_config.toml')
+    test_config_path = Path(__file__).parent / 'bd_shared' / test_config_name
     
     print(f"Reading test configuration from {test_config_path}...")
     with open(test_config_path, 'rb') as f:
@@ -76,7 +77,7 @@ def test_alembic_migration():
         # Run alembic upgrade head with test config
         print("Running alembic upgrade head...")
         env = os.environ.copy()
-        env['BD_CONFIG_FILE'] = 'test_config.toml'
+        env['BD_CONFIG_FILE'] = test_config_name
         
         result = subprocess.run(
             ['alembic', 'upgrade', 'head'],

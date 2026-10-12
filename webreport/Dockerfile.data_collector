@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce
 
 ARG POETRY_VERSION=2.1.3
 
@@ -28,5 +28,13 @@ RUN poetry config virtualenvs.create false
 COPY webreport/data_collector/pyproject.toml webreport/data_collector/poetry.lock /tmp/
 
 RUN cd /tmp && poetry install --only main --no-root --no-interaction --no-ansi
+
+COPY bd_shared /bd_shared
+COPY webreport/data_collector /app
+COPY webreport/__init__.py /webreport/__init__.py
+RUN ln -s /app /webreport/data_collector
+
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.source="https://github.com/Korridzy/bez_durakov_parser" org.opencontainers.image.revision="${SOURCE_COMMIT}"
 
 CMD ["python", "entrypoint.py"]
