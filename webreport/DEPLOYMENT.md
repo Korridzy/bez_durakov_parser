@@ -6,8 +6,6 @@ Delivery is pull-based. GitHub tests and publishes images; the operator runs the
 
 CI runs the complete root `make test` for pull requests and pushes to `main` on disposable runners. Only passing `main` pushes publish the tested backend, data collector and frontend candidates to GHCR, tagged `sha-<commit>`. Release promotion adds a version tag to those same digests without rebuilding.
 
-BOOTSTRAP (temporary, first rollout only): the issue branch `issue-96-deploy-webreport-via-versioned-ci-cd-and-close-public-db-access` can also publish candidates, and a `v*` tag push can promote them. Both happen only while the repository variable `BD_ROLLOUT_BOOTSTRAP` holds the exact 40-character commit the owner approved. With the variable unset or naming another commit nothing changes: only `main` publishes and promotes. Every line of this path is marked `BOOTSTRAP`. A last commit on the issue branch removes them all before the owner merges to `main`, so `main` never carries this path. See [First rollout](#first-rollout).
-
 This guide covers the bundled MySQL deployment with one backend replica. The executor doesn't support `DATASET`: deploy and rollback refuse it with exit 2. It remains a development mode.
 
 The server's existing host nginx is the public entry on ports 80 and 443. It terminates TLS and forwards to the frontend's loopback port. The frontend container serves the UI and proxies `/api/` to the backend on the Compose network.
@@ -57,7 +55,7 @@ Use [the example site](deploy-examples/nginx-webreport.conf.example). It is a do
    rm /tmp/webreport-site.conf
    ```
 
-   Fetching changes `FETCH_HEAD`, not detached `HEAD`. Don't check out `FETCH_HEAD`: the release stays at the approved commit, and its existing candidates and `BD_ROLLOUT_BOOTSTRAP` value stay unchanged.
+   Fetching changes `FETCH_HEAD`, not detached `HEAD`. Don't check out `FETCH_HEAD`: the release stays at the approved commit, and its existing candidates stay unchanged.
 
    From the next release, the file is in the checkout when its tag includes this documentation update. Use the in-checkout path then:
 
@@ -113,8 +111,6 @@ The LiteLLM digest pin deliberately selects the August 22, 2026 `main-stable` bu
 Choose a `main` commit whose CI and candidate publication passed. Tag that commit `vMAJOR.MINOR.PATCH`, such as `v0.1.0`, and publish a GitHub Release that isn't a draft or prerelease.
 
 The promotion workflow checks the tag's ancestry on `main`, the successful CI run and its candidate-push step, and the candidates' source labels. It refuses an existing version tag or metadata asset that points elsewhere. It can also be dispatched manually for an existing stable release after correcting a promotion failure.
-
-BOOTSTRAP (temporary): when the release commit equals `BD_ROLLOUT_BOOTSTRAP`, promotion skips the `main` ancestry check. It requires the tag commit to be exactly that commit and the successful push CI run to come from the issue branch by its exact name, and its log says `BOOTSTRAP: promoting non-main commit`. A `v*` tag push also starts the workflow; it waits up to 5 minutes for the stable Release to appear. A new commit on the branch can't publish candidates until the variable is updated to it before the push. After a squash merge the approved commit isn't an ancestor of `main`, so once the bootstrap is gone the default gate refuses to promote that version again.
 
 Wait for `release-metadata.json` and its sha256 marker in the release body before deploying. The metadata records the version, source commit, CI run ID and attempt, candidate tag, the three application `repo@sha256` references and a concrete Alembic revision. Read it to confirm you're approving the intended commit and schema. Infrastructure pins come from that tag's Compose file, not the metadata asset.
 
