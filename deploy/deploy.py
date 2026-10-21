@@ -349,8 +349,9 @@ class State:
 def read_generated_env(path: Path) -> dict[str, str]:
     """Read a webreport/generate_env.py file back into the values it was generated from.
 
-    The generator writes KEY='value' with each ' escaped as \\' and nothing else changed, or
-    a plain KEY=value. Lines end only at \\n, since a value may hold other line separators.
+    Values with backslashes use double quotes, escaping backslashes and double quotes
+    and doubling dollars. Other quoted values escape only apostrophes in single quotes.
+    Plain KEY=value is unchanged. Lines end only at \\n, since values may hold other separators.
     """
     values: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").split("\n"):
@@ -360,6 +361,8 @@ def read_generated_env(path: Path) -> dict[str, str]:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] == "'":
             value = value[1:-1].replace("\\'", "'")
+        elif len(value) >= 2 and value[0] == value[-1] == '"':
+            value = re.sub(r'\\([\\"])|\$\$', lambda match: match.group(1) or "$", value[1:-1])
         values[key.strip()] = value
     return values
 
