@@ -598,6 +598,117 @@ class ChatRoutes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.archive.rows, [])
         self.main.pinned.clear()
 
+    async def legacy_turn(self, session_id):
+        """Finish one legacy turn, then leave the chat outside the live session index."""
+        done = await self.client.post("/api/chat", json={"message": "earlier", "session_id": session_id})
+        self.assertEqual(done.status_code, 200, done.text)
+        await self.main.sessions.drop(session_id)
+
+    async def chat_snapshot(self, chat_id):
+        store = self.main.chat_store
+        return (await store.get_chat(chat_id), await store.list_messages(chat_id),
+                await store.last_run(chat_id), await store.active_run(chat_id))
+
+    async def reject_after_ensure(self, kind):
+        """Make the real registry reject the next submit, which only follows the chat being ensured.
+
+        Readiness changes at the registry boundary, so main.chat's early checks still pass and the
+        rejection comes from the registry's own checks. Returns the callable that restores it.
+        """
+        saved = {name: getattr(self.main, name) for name in (
+            "tool_service", "agent_system", "checkpoint_saver", "sessions", "pinned")}
+        original = self.main.registry.submit
+
+        async def submit(*args, **kwargs):
+            if kind == "tool_service":
+                self.main.tool_service = None
+            elif kind == "model":
+                self.main.agent_system = None
+                self.main.checkpoint_saver = None
+            return await original(*args, **kwargs)
+
+        if kind == "overload":
+            self.main.sessions = importlib.import_module("session_store").SessionIndex(max_size=1)
+            await self.main.sessions.touch("occupied")
+            self.main.pinned = {"occupied": 1}
+        self.main.registry.submit = submit
+
+        def restore():
+            self.main.registry.submit = original
+            for name, value in saved.items():
+                setattr(self.main, name, value)
+
+        return restore
+
+    async def test_rejection_after_ensure_deletes_only_a_chat_this_request_created(self):
+        for kind in ("tool_service", "model", "overload"):
+            for preexisting in (False, True):
+                with self.subTest(rejection=kind, preexisting=preexisting):
+                    session_id = f"rejected-{kind}-{'old' if preexisting else 'new'}"
+                    if preexisting:
+                        await self.legacy_turn(session_id)
+                    before = await self.chat_snapshot(session_id)
+                    archived = len(self.archive.rows)
+                    restore = await self.reject_after_ensure(kind)
+                    try:
+                        denied = await self.client.post(
+                            "/api/chat", json={"message": "again", "session_id": session_id})
+                        pins = dict(self.main.pinned)
+                    finally:
+                        restore()
+                    # A 503 here comes from registry.submit, which rejects an unknown chat as 404/500.
+                    self.assertEqual(denied.status_code, 503, denied.text)
+                    if kind == "model":
+                        self.assertEqual(denied.json()["error"], "llm_proxy_unavailable")
+                    self.assertEqual(pins, {"occupied": 1} if kind == "overload" else {})
+                    self.assertEqual(await self.chat_snapshot(session_id), before)
+                    self.assertEqual(len(self.archive.rows), archived)
+
+    async def test_rejection_keeps_a_chat_created_by_a_concurrent_request(self):
+        session_id = "raced-legacy"
+        store = self.main.chat_store
+        original = store.ensure_chat
+        created_by_other = []
+
+        async def lose_the_race(chat_id):
+            # Another request creates the chat first, so this request does not own it.
+            created_by_other.append(await original(chat_id))
+            return await original(chat_id)
+
+        restore = await self.reject_after_ensure("overload")
+        store.ensure_chat = lose_the_race
+        try:
+            denied = await self.client.post(
+                "/api/chat", json={"message": "again", "session_id": session_id})
+        finally:
+            store.ensure_chat = original
+            restore()
+        self.assertEqual(denied.status_code, 503, denied.text)
+        self.assertEqual(created_by_other, [True])
+        self.assertIsNotNone(await store.get_chat(session_id))
+
+    async def test_legacy_generated_and_explicit_ids_reopen_one_durable_chat(self):
+        ids = []
+        for given in (None, "Legacy_Session-7"):
+            payload = {"message": "first question", **({} if given is None else {"session_id": given})}
+            first = await self.client.post("/api/chat", json=payload)
+            session_id = first.json()["session_id"]
+            if given is None:
+                self.assertRegex(session_id, r"^[0-9a-f]{32}$")
+            else:
+                self.assertEqual(session_id, given)
+            again = await self.client.post(
+                "/api/chat", json={"message": "second question", "session_id": session_id})
+            self.assertEqual((first.status_code, again.status_code), (200, 200))
+            detail = (await self.client.get(f"/api/chats/{session_id}")).json()
+            self.assertEqual((detail["chat"]["title"], detail["chat"]["auto_title"]), ("first question", True))
+            self.assertEqual([(m["role"], m["content"]) for m in detail["messages"] if m["role"] == "user"],
+                             [("user", "first question"), ("user", "second question")])
+            self.assertEqual(len(detail["messages"]), 4)
+            ids.append(session_id)
+        listed = (await self.client.get("/api/chats")).json()["items"]
+        self.assertEqual(sorted(chat["id"] for chat in listed), sorted(ids))
+
     async def test_legacy_envelopes_and_cancellation(self):
         normal = await self.client.post("/api/chat", json={"message": "games", "session_id": "legacy-id"})
         self.assertEqual(normal.status_code, 200)

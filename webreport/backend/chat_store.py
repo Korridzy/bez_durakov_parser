@@ -112,6 +112,9 @@ class ChatNotFound(LookupError):
     """The requested chat does not exist."""
 
 
+_DEFAULT_TITLE = "Новый чат"
+
+
 def _searchable(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold()
 
@@ -271,7 +274,7 @@ class ChatStore:
 
     async def create_chat(self, title: str | None = None) -> Chat:
         auto = title is None
-        clean = "Новый чат" if title is None else _title(title)
+        clean = _DEFAULT_TITLE if title is None else _title(title)
         chat_id, now = uuid4().hex, _now()
         async with self._transaction() as connection:
             await connection.execute(
@@ -282,6 +285,23 @@ class ChatStore:
             chat = await self._get_chat(connection, chat_id)
         assert chat is not None
         return chat
+
+    async def ensure_chat(self, chat_id: str) -> bool:
+        """Create the chat with create_chat(None)'s defaults unless it already exists.
+
+        The id is stored as given, so legacy non-UUID session ids survive. Only the call that
+        inserted the row returns True; an existing chat is left exactly as it was.
+        """
+        now = _now()
+        async with self._transaction() as connection:
+            cursor = await connection.execute(
+                """INSERT OR IGNORE INTO chats (id, title, auto_title, search_text, created_at, updated_at)
+                   VALUES (?, ?, 1, ?, ?, ?)""",
+                (chat_id, _DEFAULT_TITLE, _searchable(_DEFAULT_TITLE), now, now),
+            )
+            inserted = cursor.rowcount == 1
+            await cursor.close()
+        return inserted
 
     async def get_chat(self, chat_id: str) -> Chat | None:
         async with self._write_lock:

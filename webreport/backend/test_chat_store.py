@@ -7,13 +7,13 @@ import sqlite3
 import tempfile
 from typing import Any
 import unittest
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from enum import Enum
 from dataclasses import dataclass
 from itertools import product
 from pydantic import BaseModel
-from uuid import UUID
+from uuid import UUID, uuid4
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse
 
@@ -451,6 +451,76 @@ class ChatStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await self.store.list_messages(chat["id"])), 2)
         for term in ("alpha", "beta"):
             self.assertEqual([row["id"] for row in (await self.store.list_chats(term, 50, None))[0]], [chat["id"]])
+
+    async def test_ensure_chat_creates_default_chat_for_any_supplied_id(self) -> None:
+        reference = await self.store.create_chat(None)
+        reference_row = (await self.rows("SELECT * FROM chats WHERE id = ?", (reference["id"],)))[0]
+        volatile = {"id", "created_at", "updated_at"}
+        for chat_id in (uuid4().hex, "legacy-session", "Сессия 7 ÅB:c"):
+            with self.subTest(chat_id=chat_id):
+                before = datetime.now(timezone.utc)
+                self.assertIs(await self.store.ensure_chat(chat_id), True)
+                after = datetime.now(timezone.utc)
+                chat = await self.existing_chat(chat_id)
+                self.assertEqual({k: v for k, v in chat.items() if k not in volatile},
+                                 {k: v for k, v in reference.items() if k not in volatile})
+                self.assertEqual(chat["created_at"], chat["updated_at"])
+                self.assertRegex(chat["created_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+                self.assertTrue(before <= datetime.fromisoformat(chat["created_at"]) <= after)
+                row = (await self.rows("SELECT * FROM chats WHERE id = ?", (chat_id,)))[0]
+                # title, auto_title and search_text are stored exactly as create_chat(None) stores them
+                self.assertEqual(row[1:4], reference_row[1:4])
+                self.assertIsNone(row[6])
+
+    async def test_ensure_chat_repeats_report_false_and_keep_one_row(self) -> None:
+        self.assertIs(await self.store.ensure_chat("legacy-repeat"), True)
+        first = await self.existing_chat("legacy-repeat")
+        self.assertIs(await self.store.ensure_chat("legacy-repeat"), False)
+        self.assertIs(await self.store.ensure_chat("legacy-repeat"), False)
+        self.assertEqual(await self.existing_chat("legacy-repeat"), first)
+        self.assertEqual(await self.rows("SELECT id FROM chats"), [("legacy-repeat",)])
+
+    async def test_ensure_chat_leaves_existing_chats_and_related_rows_untouched(self) -> None:
+        titled = await self.store.create_chat("Custom title")
+        auto = await self.store.create_chat(None)
+        await self.insert_run(auto["id"], "auto-run")
+        await self.store.append_message(auto["id"], "auto-run", "user", "First question", None, None, None)
+        await self.store.append_message(auto["id"], "auto-run", "assistant", "Answer text", "why", "succeeded", None)
+        await self.report(auto["id"], "saved-report", True)
+        assert self.store.connection is not None
+        # A legacy row: non-UUID id, stamps that normalisation would rewrite, explicit non-default values.
+        await self.store.connection.execute(
+            "INSERT INTO chats (id,title,auto_title,search_text,created_at,updated_at,last_message_at) "
+            "VALUES ('legacy id','Legacy',0,'legacy needle','2026-01-01T00:00:00',"
+            "'2026-01-01T00:00:01','2026-01-01T00:00:02')")
+        await self.store.connection.commit()
+        tables = ("chats", "runs", "messages", "reports")
+        before = {table: await self.rows(f"SELECT * FROM {table} ORDER BY 1") for table in tables}
+        for chat_id in (titled["id"], auto["id"], "legacy id"):
+            with self.subTest(chat_id=chat_id):
+                self.assertIs(await self.store.ensure_chat(chat_id), False)
+        for table in tables:
+            self.assertEqual(await self.rows(f"SELECT * FROM {table} ORDER BY 1"), before[table], table)
+        # The first message renamed the auto-titled chat; ensuring it must not reset the title.
+        self.assertEqual((await self.existing_chat(auto["id"]))["title"], "First question")
+
+    async def test_concurrent_ensure_chat_across_connections_inserts_exactly_one_row(self) -> None:
+        other = ChatStore(self.path)
+        await other.setup()
+        try:
+            start = asyncio.Event()
+
+            async def ensure(store: ChatStore) -> bool:
+                await start.wait()
+                return await store.ensure_chat("raced-legacy-id")
+
+            tasks = [asyncio.create_task(ensure(store)) for store in (self.store, other) * 4]
+            start.set()
+            results = await asyncio.wait_for(asyncio.gather(*tasks), 10)
+        finally:
+            await other.close()
+        self.assertEqual(sorted(results), [False] * 7 + [True])
+        self.assertEqual(await self.rows("SELECT id FROM chats"), [("raced-legacy-id",)])
 
     async def new_run(self, message: str = "What happened?") -> tuple[str, str]:
         chat = await self.store.create_chat()

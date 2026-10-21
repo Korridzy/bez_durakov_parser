@@ -700,16 +700,7 @@ async def chat(message: ChatMessage, response: Response):
     # retains explicit ids and lets repeated legacy calls reopen the same chat.
     created = False
     try:
-        if await chat_store.get_chat(session_id) is None:
-            async with chat_store._transaction() as connection:
-                now = utc_now()
-                cursor = await connection.execute(
-                    "INSERT OR IGNORE INTO chats (id, title, search_text, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (session_id, "Новый чат", "новый чат", now, now),
-                )
-                created = bool(cursor.rowcount)
-                await cursor.close()
+        created = await chat_store.ensure_chat(session_id)
         submitted = await registry.submit(session_id, uuid.uuid4().hex, message.message)
         run = submitted.run
     except ToolServiceUnavailable as error:
