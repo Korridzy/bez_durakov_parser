@@ -69,6 +69,10 @@ def resolve_app_version() -> str:
 
 
 def dotenv_quote(value: str) -> str:
+    if "\\" in value:
+        # Single quotes cannot safely terminate after an odd backslash count.
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+        return '"' + escaped + '"'
     return "'" + value.replace("'", "\\'") + "'"
 
 

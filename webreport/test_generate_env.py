@@ -1,3 +1,4 @@
+import json
 import os
 import runpy
 import shutil
@@ -8,8 +9,9 @@ import unittest
 from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest.mock import patch
+from urllib.parse import quote
 
 
 class GenerateEnvTests(unittest.TestCase):
@@ -351,7 +353,9 @@ class GenerateEnvTests(unittest.TestCase):
         # Then: application environments use the documented fallback version.
         self.assertEqual(generated[".env.backend"]["BD_APP_VERSION"], "unknown")
 
-    def _generate_with_database_url(self, url: str) -> tuple[Path, dict[str, str]]:
+    def _generate_with_database_url(
+        self, url: str, proxy_value: str | None = None
+    ) -> tuple[Path, dict[str, str]]:
         """Run the generator against a config whose database URL is `url`.
 
         The generator runs in a subprocess over a copied config tree, so the URL under test
@@ -374,13 +378,23 @@ class GenerateEnvTests(unittest.TestCase):
         for line in original.splitlines(keepends=True):
             if line.startswith("url = ") or line.startswith("docker_url = "):
                 key = line.split(" = ", 1)[0]
-                rewritten.append(f'{key} = "{url}"\n')
+                rewritten.append(f"{key} = {json.dumps(url)}\n")
             else:
                 rewritten.append(line)
         _ = (config_directory / "config.toml").write_text("".join(rewritten), encoding="utf-8")
+        if proxy_value is not None:
+            _ = (config_directory / "config.local.toml").write_text(
+                "[webreport]\n"
+                + "".join(
+                    f"{key.lower()} = {json.dumps(proxy_value)}\n"
+                    for key in self.PROXY_ENV_KEYS
+                ),
+                encoding="utf-8",
+            )
 
         environment = os.environ.copy()
         _ = environment.pop("BD_CONFIG_FILE", None)
+        _ = environment.pop("BD_CONFIG_LOCAL_FILE", None)
         environment["PYTHONPATH"] = temp_directory
 
         completed = subprocess.run(
@@ -395,6 +409,94 @@ class GenerateEnvTests(unittest.TestCase):
 
         generated = {path.name: path.read_text(encoding="utf-8") for path in Path(temp_directory).glob(".env*")}
         return Path(temp_directory), generated
+
+    PROXY_ENV_KEYS: ClassVar[tuple[str, ...]] = (
+        "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENCODE_API_KEY",
+        "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
+    )
+
+    def _compose_environments(self, directory: Path) -> dict[str, dict[str, str]]:
+        """Resolve the generated service env files with the real Compose parser."""
+        compose_path = directory / "compose.json"
+        _ = compose_path.write_text(
+            json.dumps({
+                "services": {
+                    name: {"image": "unused", "env_file": [f".env.{name}"]}
+                    for name in ("mysql", "litellm")
+                },
+            }),
+            encoding="utf-8",
+        )
+        environment = os.environ.copy()
+        environment["NAME"] = "conflicting-interpolation-value"
+        completed = subprocess.run(
+            ["docker", "compose", "--project-name", "generate-env-test",
+             "--env-file", str(directory / ".env"), "-f", str(compose_path),
+             "config", "--format", "json"],
+            cwd=directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        # Compose config doubles every dollar when rendering its resolved model.
+        # Undo only that output escaping; dotenv parsing/interpolation ran normally.
+        model = cast(
+            dict[str, dict[str, dict[str, dict[str, str]]]],
+            json.loads(completed.stdout.replace("$$", "$")),
+        )
+        return {
+            name: service["environment"]
+            for name, service in model["services"].items()
+        }
+
+    def test_compose_preserves_generated_credentials(self) -> None:
+        # Given: synthetic URL-encoded passwords and matching proxy settings.
+        values = (
+            "ordinary", "single'quote", 'double"quote', r"embedded\backslash",
+            "abc\\", "abc\\\\", "abc\\\\\\",
+            "abc\\'def", "abc\\\\'def", "abc\\\\\\'def",
+            " leading", "trailing ", " both ",
+            "$NAME", "${NAME}", r"\${NAME}", "$$",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                directory, _ = self._generate_with_database_url(
+                    f"mysql+pymysql://synthetic:{quote(value, safe='')}@mysql/synthetic",
+                    proxy_value=value,
+                )
+
+                # When: Compose resolves the actual generated env files.
+                environments = self._compose_environments(directory)
+
+                # Then: credentials survive parsing, without shell substitution.
+                self.assertEqual(environments["mysql"], {
+                    "MYSQL_DATABASE": "synthetic", "MYSQL_USER": "synthetic",
+                    "MYSQL_PASSWORD": value, "MYSQL_ROOT_PASSWORD": value,
+                })
+                for key in self.PROXY_ENV_KEYS:
+                    expected = value.strip() if key.startswith("LANGFUSE_") else value
+                    self.assertEqual(environments["litellm"][key], expected, key)
+                if hasattr(os, "fchmod"):
+                    for path in directory.glob(".env*"):
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o600, path.name)
+
+    def test_compose_preserves_empty_optional_keys_and_non_mysql_placeholders(self) -> None:
+        # Given: datasets that do not use bundled MySQL and empty optional keys.
+        for url in ("sqlite:////data/library.db", "postgresql://user:secret@pg/library"):
+            with self.subTest(url=url):
+                directory, _ = self._generate_with_database_url(url, proxy_value="")
+
+                # When: Compose resolves both generated service env files.
+                environments = self._compose_environments(directory)
+
+                # Then: optional keys stay empty and MySQL gets only placeholders.
+                self.assertEqual(environments["litellm"], dict.fromkeys(self.PROXY_ENV_KEYS, ""))
+                self.assertEqual(environments["mysql"], dict.fromkeys((
+                    "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
+                ), "unused"))
 
     EXPECTED_ENV_FILES: ClassVar[set[str]] = {
         ".env",
